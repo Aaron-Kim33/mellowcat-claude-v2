@@ -18,6 +18,7 @@ import { MCPRuntimeService } from "../services/mcp/mcp-runtime-service";
 import { MCPUpdateService } from "../services/mcp/mcp-update-service";
 import { MCPConfigService } from "../services/mcp/mcp-config-service";
 import { MellowCatApiClient } from "../api/mellowcat-api-client";
+import { AppUpdateService } from "../services/update/app-update-service";
 
 export async function bootstrap(): Promise<void> {
   const pathService = new PathService();
@@ -28,6 +29,7 @@ export async function bootstrap(): Promise<void> {
   claudeInstallationService.detectAndPersist();
   const apiClient = new MellowCatApiClient(settingsRepository.get().apiBaseUrl);
   const claudeEngine = new ClaudeEngine(settingsRepository, pathService);
+  const appUpdateService = new AppUpdateService();
   const catalogService = new CatalogService(pathService, fileService, apiClient);
   const authService = new AuthService(apiClient);
   const installService = new MCPInstallService(
@@ -49,6 +51,7 @@ export async function bootstrap(): Promise<void> {
 
   app.whenReady().then(() => {
     manifestRepository.ensureManifest();
+    appUpdateService.initialize();
 
     registerClaudeIpc(claudeEngine, claudeInstallationService);
     registerMcpIpc({
