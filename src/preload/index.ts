@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { AppMeta } from "../common/types/app";
 import type { ClaudeInstallationStatus, ClaudeOutputEvent } from "../common/types/claude";
 import type { MellowCatAPI } from "../common/types/ipc";
 import type { MCPOutputEvent } from "../common/types/mcp";
@@ -59,6 +60,9 @@ const authBridge: MellowCatAPI["auth"] = {
 };
 
 const api: MellowCatAPI = {
+  app: {
+    getMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta")
+  },
   claude: claudeBridge,
   mcp: mcpBridge,
   settings: settingsBridge,

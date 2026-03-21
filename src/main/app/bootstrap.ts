@@ -5,6 +5,7 @@ import { registerMcpIpc } from "../ipc/mcp-ipc";
 import { registerSettingsIpc } from "../ipc/settings-ipc";
 import { registerAuthIpc } from "../ipc/store-ipc";
 import { registerSystemIpc } from "../ipc/system-ipc";
+import { registerAppIpc } from "../ipc/app-ipc";
 import { PathService } from "../services/system/path-service";
 import { FileService } from "../services/system/file-service";
 import { ManifestRepository } from "../services/storage/manifest-repository";
@@ -64,6 +65,7 @@ export async function bootstrap(): Promise<void> {
       configService,
       manifestRepository
     });
+    registerAppIpc();
     registerSettingsIpc(settingsRepository);
     registerAuthIpc(authService);
     registerSystemIpc(appUpdateService);

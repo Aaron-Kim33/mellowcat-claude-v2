@@ -4,15 +4,17 @@ import { StorePage } from "../../pages/StorePage/StorePage";
 import { InstalledPage } from "../../pages/InstalledPage/InstalledPage";
 import { SettingsPage } from "../../pages/SettingsPage/SettingsPage";
 import { LoginPage } from "../../pages/LoginPage/LoginPage";
+import { AboutPage } from "../../pages/AboutPage/AboutPage";
 
-type Tab = "launcher" | "store" | "installed" | "settings" | "login";
+type Tab = "launcher" | "store" | "installed" | "settings" | "login" | "about";
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: "launcher", label: "Launcher" },
   { id: "store", label: "Store" },
   { id: "installed", label: "Installed" },
   { id: "settings", label: "Settings" },
-  { id: "login", label: "Account" }
+  { id: "login", label: "Account" },
+  { id: "about", label: "About" }
 ];
 
 export function Shell() {
@@ -40,11 +42,12 @@ export function Shell() {
         </nav>
       </aside>
       <main className="content">
-        {tab === "launcher" && <LauncherPage />}
+        {tab === "launcher" && <LauncherPage onNavigate={setTab} />}
         {tab === "store" && <StorePage />}
         {tab === "installed" && <InstalledPage />}
         {tab === "settings" && <SettingsPage />}
         {tab === "login" && <LoginPage />}
+        {tab === "about" && <AboutPage />}
       </main>
     </div>
   );

@@ -2,7 +2,7 @@ appId: com.mellowcat.launcher
 productName: MellowCat Claude
 directories:
   output: release
-artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+artifactName: MellowCat-Claude-${os}-${arch}.${ext}
 files:
   - dist/**
   - package.json

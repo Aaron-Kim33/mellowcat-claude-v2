@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { AppMeta } from "@common/types/app";
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
@@ -7,6 +8,7 @@ import type { AppSettings, AppUpdateStatus } from "@common/types/settings";
 interface AppState {
   catalog: MCPCatalogItem[];
   installed: InstalledMCPRecord[];
+  appMeta?: AppMeta;
   settings?: AppSettings;
   appUpdateStatus?: AppUpdateStatus;
   authSession?: AuthSession;
@@ -48,10 +50,11 @@ export const useAppStore = create<AppState>((set) => ({
   claudeOutput: "",
   mcpOutputById: {},
   hydrate: async () => {
-    const [catalog, installed, settings, authSession, claudeInstallation, appUpdateStatus] =
+    const [catalog, installed, appMeta, settings, authSession, claudeInstallation, appUpdateStatus] =
       await Promise.all([
       window.mellowcat.mcp.listCatalog(),
       window.mellowcat.mcp.listInstalled(),
+      window.mellowcat.app.getMeta(),
       window.mellowcat.settings.get(),
       window.mellowcat.auth.getSession(),
       window.mellowcat.claude.getInstallationStatus(),
@@ -90,6 +93,7 @@ export const useAppStore = create<AppState>((set) => ({
     set({
       catalog,
       installed,
+      appMeta,
       settings,
       appUpdateStatus,
       authSession,

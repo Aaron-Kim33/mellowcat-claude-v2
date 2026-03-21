@@ -1,3 +1,4 @@
+import type { AppMeta } from "./app";
 import type { AuthSession } from "./auth";
 import type {
   ClaudeInstallationStatus,
@@ -8,6 +9,9 @@ import type { AppSettings, AppUpdateStatus } from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 
 export interface MellowCatAPI {
+  app: {
+    getMeta: () => Promise<AppMeta>;
+  };
   claude: {
     startSession: (profileId?: string) => Promise<ClaudeSession>;
     stopSession: (sessionId: string) => Promise<void>;

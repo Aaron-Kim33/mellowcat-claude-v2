@@ -244,6 +244,23 @@ input {
   word-break: break-all;
 }
 
+.onboarding-card {
+  display: grid;
+  gap: 18px;
+}
+
+.onboarding-list {
+  display: grid;
+  gap: 16px;
+}
+
+.onboarding-item {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .text-input {
   width: min(100%, 360px);
   border: 1px solid rgba(255, 255, 255, 0.12);

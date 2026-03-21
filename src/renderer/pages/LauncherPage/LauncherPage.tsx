@@ -1,7 +1,11 @@
 import { ClaudeTerminal } from "../../components/Terminal/ClaudeTerminal";
 import { useAppStore } from "../../store/app-store";
 
-export function LauncherPage() {
+type LauncherPageProps = {
+  onNavigate: (tab: "launcher" | "store" | "installed" | "settings" | "login") => void;
+};
+
+export function LauncherPage({ onNavigate }: LauncherPageProps) {
   const {
     claudeSession,
     claudeInstallation,
@@ -19,6 +23,8 @@ export function LauncherPage() {
   const claudeArgsText = settings?.claudeArgs?.length ? settings.claudeArgs.join(" ") : "(none)";
   const enabledMcps = installed.filter((item) => item.enabled);
   const runningMcps = enabledMcps.filter((item) => item.runtime.status === "running");
+  const hasAnyInstalledMcp = installed.length > 0;
+  const isReady = hasClaudePath && hasAnyInstalledMcp;
 
   return (
     <section className="page">
@@ -71,6 +77,66 @@ export function LauncherPage() {
           )}
         </div>
       </div>
+
+      {!isReady && (
+        <div className="card onboarding-card">
+          <div className="card-row">
+            <div>
+              <p className="eyebrow">Getting Started</p>
+              <h3>Finish setup in a couple of steps</h3>
+            </div>
+            <span className="pill">{isReady ? "Ready" : "Setup Needed"}</span>
+          </div>
+          <div className="onboarding-list">
+            <div className="onboarding-item">
+              <strong>{hasClaudePath ? "1. Claude is ready" : "1. Configure Claude Code"}</strong>
+              <p className="subtle">
+                {hasClaudePath
+                  ? "Claude was detected and can launch from this app."
+                  : "Install or detect Claude Code, then confirm its path in Settings."}
+              </p>
+              {!hasClaudePath && (
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void detectClaudeInstallation()}
+                  >
+                    Detect Claude
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => onNavigate("settings")}
+                  >
+                    Open Settings
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="onboarding-item">
+              <strong>{hasAnyInstalledMcp ? "2. MCPs are installed" : "2. Install your first MCP"}</strong>
+              <p className="subtle">
+                {hasAnyInstalledMcp
+                  ? "You already have MCP packages available for Claude workflows."
+                  : "Visit the Store and install at least one MCP package to unlock the main workflow."}
+              </p>
+              {!hasAnyInstalledMcp && (
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => onNavigate("store")}
+                  >
+                    Open Store
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-row">
