@@ -1,6 +1,6 @@
 {
   "name": "mellowcat-claude-v2",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "MellowCat launcher for Claude Code and MCP packages.",
   "author": "Yuncheol Kim <gakphe@gmail.com>",
