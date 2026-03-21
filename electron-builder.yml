@@ -1,0 +1,19 @@
+appId: com.mellowcat.launcher
+productName: MellowCat Claude
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: mellowcat-vault
+    to: mellowcat-vault
+  - from: resources/bundled
+    to: bundled
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

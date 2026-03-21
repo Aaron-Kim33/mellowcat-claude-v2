@@ -1,0 +1,11 @@
+{
+  "id": "filesystem-tools",
+  "name": "Filesystem Tools",
+  "version": "0.1.0",
+  "runtime": "node",
+  "entrypoint": "dist/server.js",
+  "permissions": ["fs.read", "fs.write"],
+  "compatibility": {
+    "launcherMinVersion": "0.1.0"
+  }
+}

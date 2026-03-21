@@ -1,0 +1,31 @@
+[
+  {
+    "id": "filesystem-tools",
+    "slug": "filesystem-tools",
+    "name": "Filesystem Tools",
+    "summary": "Local file read and write helpers for Claude workflows.",
+    "description": "Starter MCP package for local document and code operations.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Free"
+    },
+    "latestVersion": "0.1.0",
+    "compatibility": {
+      "launcherMinVersion": "0.1.0",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["files", "starter", "official"],
+    "publishedAt": "2026-03-21T00:00:00.000Z",
+    "updatedAt": "2026-03-21T00:00:00.000Z",
+    "package": {
+      "source": "bundled",
+      "manifestPath": "filesystem-tools/mcp.json"
+    }
+  }
+]
