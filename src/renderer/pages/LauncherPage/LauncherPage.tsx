@@ -5,6 +5,7 @@ export function LauncherPage() {
   const {
     claudeSession,
     claudeInstallation,
+    claudeDetectionMessage,
     settings,
     installed,
     startClaude,
@@ -98,7 +99,7 @@ export function LauncherPage() {
         ) : (
           <p className="subtle">Start a session, then type directly inside the terminal panel below.</p>
         )}
-        {claudeInstallation?.message && <p className="subtle">{claudeInstallation.message}</p>}
+        {claudeDetectionMessage && <p className="subtle">{claudeDetectionMessage}</p>}
         {!claudeInstallation?.canAutoInstall && !claudeInstallation?.installed && (
           <div className="manual-install-box">
             <strong>Manual install</strong>

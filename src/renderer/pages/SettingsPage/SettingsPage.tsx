@@ -5,6 +5,7 @@ export function SettingsPage() {
   const {
     settings,
     claudeInstallation,
+    claudeDetectionMessage,
     saveSettings,
     detectClaudeInstallation,
     installClaudeCode
@@ -128,7 +129,8 @@ export function SettingsPage() {
         </div>
         <div className="button-row">
           <span className="subtle">
-            {claudeInstallation?.message ??
+            {claudeDetectionMessage ??
+              claudeInstallation?.message ??
               "Changes apply to new Claude sessions and future API reads."}
           </span>
           <span className="subtle">{savedMessage}</span>

@@ -11,6 +11,7 @@ interface AppState {
   authSession?: AuthSession;
   claudeSession?: ClaudeSession;
   claudeInstallation?: ClaudeInstallationStatus;
+  claudeDetectionMessage?: string;
   claudeOutput: string;
   mcpOutputById: Record<string, string>;
   selectedMcpLogId?: string;
@@ -82,6 +83,9 @@ export const useAppStore = create<AppState>((set) => ({
       settings,
       authSession,
       claudeInstallation,
+      claudeDetectionMessage: claudeInstallation.installed
+        ? `Claude detected at ${claudeInstallation.executablePath ?? "saved path"}`
+        : claudeInstallation.message,
       selectedMcpLogId: installed[0]?.id
     });
   },
@@ -111,7 +115,13 @@ export const useAppStore = create<AppState>((set) => ({
       window.mellowcat.claude.getInstallationStatus(),
       window.mellowcat.settings.get()
     ]);
-    set({ claudeInstallation, settings });
+    set({
+      claudeInstallation,
+      settings,
+      claudeDetectionMessage: claudeInstallation.installed
+        ? `Claude detected at ${claudeInstallation.executablePath ?? "saved path"}`
+        : claudeInstallation.message
+    });
     if (claudeInstallation.installInProgress) {
       if (claudeInstallPollTimer) {
         clearTimeout(claudeInstallPollTimer);
@@ -124,7 +134,13 @@ export const useAppStore = create<AppState>((set) => ({
   detectClaudeInstallation: async () => {
     const claudeInstallation = await window.mellowcat.claude.detectInstallation();
     const settings = await window.mellowcat.settings.get();
-    set({ claudeInstallation, settings });
+    set({
+      claudeInstallation,
+      settings,
+      claudeDetectionMessage: claudeInstallation.installed
+        ? `Claude detected at ${claudeInstallation.executablePath ?? "saved path"}`
+        : claudeInstallation.message ?? "Claude was not detected."
+    });
     if (claudeInstallation.installInProgress || !claudeInstallation.installed) {
       if (claudeInstallPollTimer) {
         clearTimeout(claudeInstallPollTimer);
@@ -138,7 +154,11 @@ export const useAppStore = create<AppState>((set) => ({
   },
   installClaudeCode: async () => {
     const claudeInstallation = await window.mellowcat.claude.installClaudeCode();
-    set({ claudeInstallation });
+    set({
+      claudeInstallation,
+      claudeDetectionMessage:
+        claudeInstallation.message ?? "Claude installation task started."
+    });
     if (claudeInstallPollTimer) {
       clearTimeout(claudeInstallPollTimer);
     }
@@ -206,7 +226,13 @@ export const useAppStore = create<AppState>((set) => ({
   saveSettings: async (patch: Partial<AppSettings>) => {
     const settings = await window.mellowcat.settings.set(patch);
     const claudeInstallation = await window.mellowcat.claude.getInstallationStatus();
-    set({ settings, claudeInstallation });
+    set({
+      settings,
+      claudeInstallation,
+      claudeDetectionMessage: claudeInstallation.installed
+        ? `Claude detected at ${claudeInstallation.executablePath ?? "saved path"}`
+        : claudeInstallation.message
+    });
   },
   login: async () => {
     const authSession = await window.mellowcat.auth.loginWithBrowser();
