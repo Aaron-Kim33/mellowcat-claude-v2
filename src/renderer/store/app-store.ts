@@ -2,12 +2,13 @@ import { create } from "zustand";
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
-import type { AppSettings } from "@common/types/settings";
+import type { AppSettings, AppUpdateStatus } from "@common/types/settings";
 
 interface AppState {
   catalog: MCPCatalogItem[];
   installed: InstalledMCPRecord[];
   settings?: AppSettings;
+  appUpdateStatus?: AppUpdateStatus;
   authSession?: AuthSession;
   claudeSession?: ClaudeSession;
   claudeInstallation?: ClaudeInstallationStatus;
@@ -38,6 +39,7 @@ interface AppState {
 
 let unsubscribeOutput: (() => void) | undefined;
 let unsubscribeMcpOutput: (() => void) | undefined;
+let unsubscribeUpdateStatus: (() => void) | undefined;
 let claudeInstallPollTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const useAppStore = create<AppState>((set) => ({
@@ -46,12 +48,14 @@ export const useAppStore = create<AppState>((set) => ({
   claudeOutput: "",
   mcpOutputById: {},
   hydrate: async () => {
-    const [catalog, installed, settings, authSession, claudeInstallation] = await Promise.all([
+    const [catalog, installed, settings, authSession, claudeInstallation, appUpdateStatus] =
+      await Promise.all([
       window.mellowcat.mcp.listCatalog(),
       window.mellowcat.mcp.listInstalled(),
       window.mellowcat.settings.get(),
       window.mellowcat.auth.getSession(),
-      window.mellowcat.claude.getInstallationStatus()
+      window.mellowcat.claude.getInstallationStatus(),
+      window.mellowcat.settings.getUpdateStatus()
     ]);
 
     if (!unsubscribeOutput) {
@@ -77,10 +81,17 @@ export const useAppStore = create<AppState>((set) => ({
       });
     }
 
+    if (!unsubscribeUpdateStatus) {
+      unsubscribeUpdateStatus = window.mellowcat.settings.onUpdateStatus((status) => {
+        set({ appUpdateStatus: status });
+      });
+    }
+
     set({
       catalog,
       installed,
       settings,
+      appUpdateStatus,
       authSession,
       claudeInstallation,
       claudeDetectionMessage: claudeInstallation.installed

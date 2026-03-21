@@ -4,6 +4,7 @@ import { registerClaudeIpc } from "../ipc/claude-ipc";
 import { registerMcpIpc } from "../ipc/mcp-ipc";
 import { registerSettingsIpc } from "../ipc/settings-ipc";
 import { registerAuthIpc } from "../ipc/store-ipc";
+import { registerSystemIpc } from "../ipc/system-ipc";
 import { PathService } from "../services/system/path-service";
 import { FileService } from "../services/system/file-service";
 import { ManifestRepository } from "../services/storage/manifest-repository";
@@ -65,6 +66,7 @@ export async function bootstrap(): Promise<void> {
     });
     registerSettingsIpc(settingsRepository);
     registerAuthIpc(authService);
+    registerSystemIpc(appUpdateService);
 
     new WindowManager().createMainWindow();
   });

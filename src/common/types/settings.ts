@@ -7,3 +7,16 @@ export interface AppSettings {
   apiBaseUrl?: string;
   launchOnStartup: boolean;
 }
+
+export interface AppUpdateStatus {
+  state:
+    | "idle"
+    | "checking"
+    | "available"
+    | "not-available"
+    | "downloading"
+    | "downloaded"
+    | "error";
+  version?: string;
+  message?: string;
+}

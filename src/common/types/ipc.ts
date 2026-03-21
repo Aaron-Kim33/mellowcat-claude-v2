@@ -4,7 +4,7 @@ import type {
   ClaudeOutputEvent,
   ClaudeSession
 } from "./claude";
-import type { AppSettings } from "./settings";
+import type { AppSettings, AppUpdateStatus } from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 
 export interface MellowCatAPI {
@@ -33,6 +33,8 @@ export interface MellowCatAPI {
   settings: {
     get: () => Promise<AppSettings>;
     set: (patch: Partial<AppSettings>) => Promise<AppSettings>;
+    getUpdateStatus: () => Promise<AppUpdateStatus>;
+    onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => () => void;
   };
   auth: {
     getSession: () => Promise<AuthSession>;

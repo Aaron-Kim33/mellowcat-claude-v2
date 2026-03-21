@@ -6,6 +6,7 @@ export function LauncherPage() {
     claudeSession,
     claudeInstallation,
     claudeDetectionMessage,
+    appUpdateStatus,
     settings,
     installed,
     startClaude,
@@ -117,6 +118,16 @@ export function LauncherPage() {
         {claudeSession?.status === "stopped" && (
           <p className="subtle">Session stopped. Start a new session or reset the view before retrying.</p>
         )}
+      </div>
+
+      <div className="card">
+        <div className="card-row">
+          <strong>App Update</strong>
+          <span className="pill">{appUpdateStatus?.state ?? "idle"}</span>
+        </div>
+        <p className="subtle">
+          {appUpdateStatus?.message ?? "No update activity reported yet."}
+        </p>
       </div>
 
       <div className="card">

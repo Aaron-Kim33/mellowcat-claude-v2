@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { ClaudeInstallationStatus, ClaudeOutputEvent } from "../common/types/claude";
 import type { MellowCatAPI } from "../common/types/ipc";
 import type { MCPOutputEvent } from "../common/types/mcp";
-import type { AppSettings } from "../common/types/settings";
+import type { AppSettings, AppUpdateStatus } from "../common/types/settings";
 
 const claudeBridge: MellowCatAPI["claude"] = {
   startSession: (profileId?: string) => ipcRenderer.invoke("claude:start", profileId),
@@ -42,7 +42,14 @@ const mcpBridge: MellowCatAPI["mcp"] = {
 
 const settingsBridge: MellowCatAPI["settings"] = {
   get: () => ipcRenderer.invoke("settings:get"),
-  set: (patch: Partial<AppSettings>) => ipcRenderer.invoke("settings:set", patch)
+  set: (patch: Partial<AppSettings>) => ipcRenderer.invoke("settings:set", patch),
+  getUpdateStatus: () => ipcRenderer.invoke("settings:getUpdateStatus"),
+  onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: AppUpdateStatus) =>
+      callback(payload);
+    ipcRenderer.on("app:update-status", listener);
+    return () => ipcRenderer.removeListener("app:update-status", listener);
+  }
 };
 
 const authBridge: MellowCatAPI["auth"] = {
