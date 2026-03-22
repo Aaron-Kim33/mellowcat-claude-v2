@@ -163,6 +163,23 @@ select {
   gap: 8px;
 }
 
+.secret-input {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.secret-toggle {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f7fb;
+  min-width: 64px;
+}
+
 .field span {
   font-weight: 600;
 }

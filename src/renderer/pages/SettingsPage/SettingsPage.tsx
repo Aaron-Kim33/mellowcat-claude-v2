@@ -36,6 +36,9 @@ export function SettingsPage() {
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramAdminChatId, setTelegramAdminChatId] = useState("");
   const [telegramOutputLanguage, setTelegramOutputLanguage] = useState<"en" | "ko">("en");
+  const [showOpenRouterApiKey, setShowOpenRouterApiKey] = useState(false);
+  const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
+  const [showTelegramBotToken, setShowTelegramBotToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
   const selectedProvider = scriptProvider;
@@ -183,12 +186,23 @@ export function SettingsPage() {
             <>
               <label className="field">
                 <span>Provider API Key</span>
-                <input
-                  className="text-input"
-                  value={openRouterApiKey}
-                  onChange={(event) => setOpenRouterApiKey(event.target.value)}
-                  placeholder="sk-or-v1-..."
-                />
+                <div className="secret-input">
+                  <input
+                    className="text-input"
+                    type={showOpenRouterApiKey ? "text" : "password"}
+                    value={openRouterApiKey}
+                    onChange={(event) => setOpenRouterApiKey(event.target.value)}
+                    placeholder="sk-or-v1-..."
+                  />
+                  <button
+                    type="button"
+                    className="secret-toggle"
+                    onClick={() => setShowOpenRouterApiKey((value) => !value)}
+                    aria-label={showOpenRouterApiKey ? "Hide OpenRouter API key" : "Show OpenRouter API key"}
+                  >
+                    {showOpenRouterApiKey ? "Hide" : "Show"}
+                  </button>
+                </div>
               </label>
 
               <label className="field">
@@ -212,12 +226,23 @@ export function SettingsPage() {
             <>
               <label className="field">
                 <span>Provider API Key</span>
-                <input
-                  className="text-input"
-                  value={openAiApiKey}
-                  onChange={(event) => setOpenAiApiKey(event.target.value)}
-                  placeholder="sk-..."
-                />
+                <div className="secret-input">
+                  <input
+                    className="text-input"
+                    type={showOpenAiApiKey ? "text" : "password"}
+                    value={openAiApiKey}
+                    onChange={(event) => setOpenAiApiKey(event.target.value)}
+                    placeholder="sk-..."
+                  />
+                  <button
+                    type="button"
+                    className="secret-toggle"
+                    onClick={() => setShowOpenAiApiKey((value) => !value)}
+                    aria-label={showOpenAiApiKey ? "Hide OpenAI API key" : "Show OpenAI API key"}
+                  >
+                    {showOpenAiApiKey ? "Hide" : "Show"}
+                  </button>
+                </div>
               </label>
 
               <label className="field">
@@ -251,12 +276,23 @@ export function SettingsPage() {
 
           <label className="field">
             <span>Telegram Bot Token</span>
-            <input
-              className="text-input"
-              value={telegramBotToken}
-              onChange={(event) => setTelegramBotToken(event.target.value)}
-              placeholder="123456:ABC..."
-            />
+            <div className="secret-input">
+              <input
+                className="text-input"
+                type={showTelegramBotToken ? "text" : "password"}
+                value={telegramBotToken}
+                onChange={(event) => setTelegramBotToken(event.target.value)}
+                placeholder="123456:ABC..."
+              />
+              <button
+                type="button"
+                className="secret-toggle"
+                onClick={() => setShowTelegramBotToken((value) => !value)}
+                aria-label={showTelegramBotToken ? "Hide Telegram bot token" : "Show Telegram bot token"}
+              >
+                {showTelegramBotToken ? "Hide" : "Show"}
+              </button>
+            </div>
           </label>
 
           <label className="field">

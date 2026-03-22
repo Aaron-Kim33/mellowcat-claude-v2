@@ -11,6 +11,7 @@ import { PathService } from "../services/system/path-service";
 import { FileService } from "../services/system/file-service";
 import { ManifestRepository } from "../services/storage/manifest-repository";
 import { SettingsRepository } from "../services/storage/settings-repository";
+import { SecretsStore } from "../services/storage/secrets-store";
 import { ClaudeEngine } from "../services/claude/claude-engine";
 import { ClaudeInstallationService } from "../services/claude/claude-installation-service";
 import { CatalogService } from "../services/catalog/catalog-service";
@@ -31,7 +32,8 @@ export async function bootstrap(): Promise<void> {
   const pathService = new PathService();
   const fileService = new FileService();
   const manifestRepository = new ManifestRepository(pathService);
-  const settingsRepository = new SettingsRepository(pathService);
+  const secretsStore = new SecretsStore(pathService);
+  const settingsRepository = new SettingsRepository(pathService, secretsStore);
   const claudeInstallationService = new ClaudeInstallationService(settingsRepository);
   claudeInstallationService.detectAndPersist();
   const apiClient = new MellowCatApiClient(settingsRepository.get().apiBaseUrl);

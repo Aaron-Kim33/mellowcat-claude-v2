@@ -19,6 +19,10 @@ export class PathService {
     return path.join(this.getDefaultVaultPath(), "settings.json");
   }
 
+  getSecretsPath(): string {
+    return path.join(this.getDefaultVaultPath(), "secrets.json");
+  }
+
   getAutomationStatePath(fileName: string): string {
     return path.join(this.getDefaultVaultPath(), "automation", fileName);
   }
