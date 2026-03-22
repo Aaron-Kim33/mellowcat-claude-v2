@@ -1,5 +1,6 @@
 import { ClaudeTerminal } from "../../components/Terminal/ClaudeTerminal";
 import { useAppStore } from "../../store/app-store";
+import { getLauncherCopy } from "../../lib/launcher-copy";
 
 type LauncherPageProps = {
   onNavigate: (tab: "launcher" | "store" | "installed" | "settings" | "login") => void;
@@ -11,14 +12,18 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
     claudeInstallation,
     claudeDetectionMessage,
     appUpdateStatus,
+    telegramStatus,
     settings,
     installed,
     startClaude,
     stopClaude,
     resetClaudeSession,
     detectClaudeInstallation,
-    installClaudeCode
+    installClaudeCode,
+    refreshTelegramStatus,
+    sendMockShortlist
   } = useAppStore();
+  const copy = getLauncherCopy(settings?.launcherLanguage).pages.launcher;
   const hasClaudePath = Boolean(settings?.claudeExecutablePath?.trim()) || claudeInstallation?.installed;
   const claudeArgsText = settings?.claudeArgs?.length ? settings.claudeArgs.join(" ") : "(none)";
   const enabledMcps = installed.filter((item) => item.enabled);
@@ -30,9 +35,9 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
     <section className="page">
       <div className="hero">
         <div>
-          <p className="eyebrow">Launcher</p>
-          <h2>Claude session control</h2>
-          <p className="subtle">Start a local Claude session, stream its output, and prepare to wire in the real engine.</p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2>{copy.title}</h2>
+          <p className="subtle">{copy.subtitle}</p>
         </div>
         <div className="button-row">
           <button
@@ -194,6 +199,76 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
         <p className="subtle">
           {appUpdateStatus?.message ?? "No update activity reported yet."}
         </p>
+      </div>
+
+      <div className="card">
+        <div className="card-row">
+          <strong>Telegram Control</strong>
+          <span className="pill">{telegramStatus?.state ?? "idle"}</span>
+        </div>
+        <div className="settings-row">
+          <span>Transport</span>
+          <code>{telegramStatus?.transport ?? "mock"}</code>
+        </div>
+        <div className="settings-row">
+          <span>Admin Chat</span>
+          <code>{settings?.telegramAdminChatId ?? "Not configured"}</code>
+        </div>
+        <div className="settings-row">
+          <span>Last Callback</span>
+          <code>{telegramStatus?.lastCallbackData ?? "None yet"}</code>
+        </div>
+        <div className="settings-row">
+          <span>Last Draft Source</span>
+          <code>{telegramStatus?.lastDraftSource ?? "None yet"}</code>
+        </div>
+        <div className="settings-row">
+          <span>Last Draft Error</span>
+          <code>{telegramStatus?.lastDraftError ?? "None"}</code>
+        </div>
+        <div className="settings-row">
+          <span>Last Package Path</span>
+          <code>{telegramStatus?.lastPackagePath ?? "Not created yet"}</code>
+        </div>
+        {telegramStatus?.trendSourceDebug?.map((item) => (
+          <div key={item.sourceId} className="settings-row">
+            <span>{item.sourceId}</span>
+            <code>
+              {item.count} ({item.status}
+              {item.message ? `, ${item.message}` : ""})
+            </code>
+          </div>
+        ))}
+        <p className="subtle">
+          {telegramStatus?.message ??
+            "Telegram control will drive topic selection and review for the shortform assistant pack."}
+        </p>
+        <p className="subtle">
+          Use Telegram commands like <code>/shortlist</code>, <code>/status</code>, and <code>/help</code> for real usage. The buttons below are for testing and admin checks.
+        </p>
+        <div className="button-row">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onNavigate("settings")}
+          >
+            Open Telegram Settings
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void sendMockShortlist()}
+          >
+            Send Test Trend Shortlist
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void refreshTelegramStatus()}
+          >
+            Sync Telegram
+          </button>
+        </div>
       </div>
 
       <div className="card">

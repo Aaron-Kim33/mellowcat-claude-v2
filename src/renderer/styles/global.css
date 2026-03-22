@@ -20,7 +20,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -268,6 +269,11 @@ input {
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
+}
+
+select.text-input option {
+  color: #111827;
+  background: #ffffff;
 }
 
 .terminal-panel {

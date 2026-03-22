@@ -6,6 +6,7 @@ import { registerSettingsIpc } from "../ipc/settings-ipc";
 import { registerAuthIpc } from "../ipc/store-ipc";
 import { registerSystemIpc } from "../ipc/system-ipc";
 import { registerAppIpc } from "../ipc/app-ipc";
+import { registerAutomationIpc } from "../ipc/automation-ipc";
 import { PathService } from "../services/system/path-service";
 import { FileService } from "../services/system/file-service";
 import { ManifestRepository } from "../services/storage/manifest-repository";
@@ -21,6 +22,10 @@ import { MCPUpdateService } from "../services/mcp/mcp-update-service";
 import { MCPConfigService } from "../services/mcp/mcp-config-service";
 import { MellowCatApiClient } from "../api/mellowcat-api-client";
 import { AppUpdateService } from "../services/update/app-update-service";
+import { ProductionPackageService } from "../services/automation/production-package-service";
+import { TelegramControlService } from "../services/automation/telegram-control-service";
+import { ShortformScriptService } from "../services/automation/shortform-script-service";
+import { TrendDiscoveryService } from "../services/automation/trend-discovery-service";
 
 export async function bootstrap(): Promise<void> {
   const pathService = new PathService();
@@ -32,6 +37,16 @@ export async function bootstrap(): Promise<void> {
   const apiClient = new MellowCatApiClient(settingsRepository.get().apiBaseUrl);
   const claudeEngine = new ClaudeEngine(settingsRepository, pathService);
   const appUpdateService = new AppUpdateService();
+  const trendDiscoveryService = new TrendDiscoveryService();
+  const shortformScriptService = new ShortformScriptService(settingsRepository);
+  const productionPackageService = new ProductionPackageService(pathService, fileService);
+  const telegramControlService = new TelegramControlService(
+    settingsRepository,
+    pathService,
+    trendDiscoveryService,
+    shortformScriptService,
+    productionPackageService
+  );
   const catalogService = new CatalogService(pathService, fileService, apiClient);
   const authService = new AuthService(apiClient);
   const installService = new MCPInstallService(
@@ -54,6 +69,7 @@ export async function bootstrap(): Promise<void> {
   app.whenReady().then(() => {
     manifestRepository.ensureManifest();
     appUpdateService.initialize();
+    telegramControlService.startPolling();
 
     registerClaudeIpc(claudeEngine, claudeInstallationService);
     registerMcpIpc({
@@ -69,6 +85,7 @@ export async function bootstrap(): Promise<void> {
     registerSettingsIpc(settingsRepository);
     registerAuthIpc(authService);
     registerSystemIpc(appUpdateService);
+    registerAutomationIpc(telegramControlService);
 
     new WindowManager().createMainWindow();
   });

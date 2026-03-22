@@ -1,22 +1,24 @@
 import { useAppStore } from "../../store/app-store";
+import { getLauncherCopy } from "../../lib/launcher-copy";
 
 export function AboutPage() {
-  const { appMeta } = useAppStore();
+  const { appMeta, settings } = useAppStore();
+  const copy = getLauncherCopy(settings?.launcherLanguage).pages.about;
 
   return (
     <section className="page">
       <div className="hero">
         <div>
-          <p className="eyebrow">About</p>
-          <h2>MellowCat Claude</h2>
-          <p className="subtle">Desktop launcher for Claude Code and MCP workflows.</p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2>{copy.title}</h2>
+          <p className="subtle">{copy.subtitle}</p>
         </div>
       </div>
 
       <div className="card">
         <div className="meta-list">
           <div className="meta-item">
-            <span>App Version</span>
+            <span>{copy.appVersion}</span>
             <strong>{appMeta?.version ?? "-"}</strong>
           </div>
           <div className="meta-item">

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppMeta } from "../common/types/app";
+import type { TelegramControlStatus } from "../common/types/automation";
 import type { ClaudeInstallationStatus, ClaudeOutputEvent } from "../common/types/claude";
 import type { MellowCatAPI } from "../common/types/ipc";
 import type { MCPOutputEvent } from "../common/types/mcp";
@@ -59,6 +60,15 @@ const authBridge: MellowCatAPI["auth"] = {
   logout: () => ipcRenderer.invoke("auth:logout")
 };
 
+const automationBridge: MellowCatAPI["automation"] = {
+  getTelegramStatus: (): Promise<TelegramControlStatus> =>
+    ipcRenderer.invoke("automation:telegram:getStatus"),
+  syncTelegram: (): Promise<TelegramControlStatus> =>
+    ipcRenderer.invoke("automation:telegram:sync"),
+  sendMockShortlist: (): Promise<TelegramControlStatus> =>
+    ipcRenderer.invoke("automation:telegram:sendMockShortlist")
+};
+
 const api: MellowCatAPI = {
   app: {
     getMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta")
@@ -66,7 +76,8 @@ const api: MellowCatAPI = {
   claude: claudeBridge,
   mcp: mcpBridge,
   settings: settingsBridge,
-  auth: authBridge
+  auth: authBridge,
+  automation: automationBridge
 };
 
 contextBridge.exposeInMainWorld("mellowcat", api);

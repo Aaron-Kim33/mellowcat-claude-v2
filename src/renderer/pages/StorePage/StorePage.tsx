@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { MCPCard } from "../../components/MCPCard/MCPCard";
 import { useAppStore } from "../../store/app-store";
+import { getLauncherCopy } from "../../lib/launcher-copy";
 
 export function StorePage() {
-  const { catalog, installed, installMcp, updateMcp } = useAppStore();
+  const { catalog, installed, installMcp, updateMcp, settings } = useAppStore();
+  const copy = getLauncherCopy(settings?.launcherLanguage).pages.store;
   const [query, setQuery] = useState("");
   const installedCount = installed.length;
   const runningCount = installed.filter((item) => item.runtime.status === "running").length;
@@ -31,24 +33,24 @@ export function StorePage() {
     <section className="page">
       <div className="hero">
         <div>
-          <p className="eyebrow">Store</p>
-          <h2>Free-first MCP catalog</h2>
-          <p className="subtle">This page is structured for future paid entitlement checks, but stays frictionless for free distribution today.</p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2>{copy.title}</h2>
+          <p className="subtle">{copy.subtitle}</p>
         </div>
         <div className="hero-stats">
-          <span className="pill">{installedCount} installed</span>
-          <span className="pill">{runningCount} running</span>
+          <span className="pill">{installedCount} {copy.installed}</span>
+          <span className="pill">{runningCount} {copy.running}</span>
         </div>
       </div>
 
       <div className="card">
         <div className="settings-row">
-          <span>Search</span>
+          <span>{copy.search}</span>
           <input
             className="text-input"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search MCPs by name, summary, or tag"
+            placeholder={copy.searchPlaceholder}
           />
         </div>
       </div>

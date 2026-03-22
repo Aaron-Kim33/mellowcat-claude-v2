@@ -19,6 +19,18 @@ export class PathService {
     return path.join(this.getDefaultVaultPath(), "settings.json");
   }
 
+  getAutomationStatePath(fileName: string): string {
+    return path.join(this.getDefaultVaultPath(), "automation", fileName);
+  }
+
+  getAutomationPackagesRootPath(): string {
+    return path.join(this.getDefaultVaultPath(), "automation", "packages");
+  }
+
+  getAutomationPackagePath(jobId: string): string {
+    return path.join(this.getAutomationPackagesRootPath(), jobId);
+  }
+
   getBundledResourcesPath(): string {
     return app.isPackaged
       ? path.join(process.resourcesPath, "bundled")

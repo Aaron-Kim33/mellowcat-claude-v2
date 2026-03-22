@@ -1,5 +1,6 @@
 import { useAppStore } from "../../store/app-store";
 import { LogPanel } from "../../components/Terminal/LogPanel";
+import { getLauncherCopy } from "../../lib/launcher-copy";
 
 export function InstalledPage() {
   const {
@@ -11,8 +12,10 @@ export function InstalledPage() {
     uninstallMcp,
     selectedMcpLogId,
     selectMcpLog,
-    mcpOutputById
+    mcpOutputById,
+    settings
   } = useAppStore();
+  const copy = getLauncherCopy(settings?.launcherLanguage).pages.installed;
 
   const selectedOutput = selectedMcpLogId ? mcpOutputById[selectedMcpLogId] ?? "" : "";
   const sortedInstalled = [...installed].sort((left, right) => {
@@ -34,9 +37,9 @@ export function InstalledPage() {
     <section className="page">
       <div className="hero">
         <div>
-          <p className="eyebrow">Installed</p>
-          <h2>Local MCP registry</h2>
-          <p className="subtle">Installed MCPs are tracked locally so the app can later sync account entitlements without changing the core model.</p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2>{copy.title}</h2>
+          <p className="subtle">{copy.subtitle}</p>
         </div>
       </div>
 
@@ -46,7 +49,7 @@ export function InstalledPage() {
             <div className="card-row">
               <div>
                 <h3>{item.id}</h3>
-                <p className="subtle">Version {item.version}</p>
+                <p className="subtle">{copy.version} {item.version}</p>
               </div>
               <button
                 type="button"
@@ -58,15 +61,15 @@ export function InstalledPage() {
             </div>
             <div className="meta-list">
               <div className="meta-item">
-                <span>Enabled</span>
+                <span>{copy.enabled}</span>
                 <strong>{item.enabled ? "Yes" : "No"}</strong>
               </div>
               <div className="meta-item">
-                <span>Install Path</span>
+                <span>{copy.installPath}</span>
                 <code className="meta-code">{item.installPath}</code>
               </div>
               <div className="meta-item">
-                <span>Entrypoint</span>
+                <span>{copy.entrypoint}</span>
                 <code className="meta-code">{item.entrypoint ?? "-"}</code>
               </div>
             </div>
@@ -86,10 +89,10 @@ export function InstalledPage() {
                 className="secondary-button"
                 onClick={() => void (item.enabled ? disableMcp(item.id) : enableMcp(item.id))}
               >
-                {item.enabled ? "Disable" : "Enable"}
+                {item.enabled ? copy.disable : copy.enable}
               </button>
               <button type="button" className="danger-button" onClick={() => void uninstallMcp(item.id)}>
-                Remove
+                {copy.remove}
               </button>
             </div>
           </article>
@@ -97,11 +100,11 @@ export function InstalledPage() {
       </div>
 
       <LogPanel
-        title="MCP Logs"
+        title={copy.logsTitle}
         output={
           selectedMcpLogId
-            ? selectedOutput || `No logs yet for ${selectedMcpLogId}.`
-            : "Select an installed MCP to inspect its runtime logs."
+            ? selectedOutput || copy.noLogs(selectedMcpLogId)
+            : copy.selectLogs
         }
       />
     </section>

@@ -65,8 +65,14 @@ export class SettingsRepository {
       generatedMcpConfigPath: this.pathService.getGeneratedConfigPath(),
       autoUpdate: true,
       launchOnStartup: false,
+      launcherLanguage: "en",
+      trendWindow: "24h",
       apiBaseUrl: process.env.MELLOWCAT_API_URL,
-      claudeArgs: []
+      claudeArgs: [],
+      scriptProvider: "openrouter_api",
+      openRouterModel: "openai/gpt-4o-mini",
+      openAiModel: "gpt-5-mini",
+      telegramOutputLanguage: "en"
     };
   }
 }

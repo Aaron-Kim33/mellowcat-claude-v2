@@ -1,4 +1,5 @@
 import type { AppMeta } from "./app";
+import type { TelegramControlStatus } from "./automation";
 import type { AuthSession } from "./auth";
 import type {
   ClaudeInstallationStatus,
@@ -44,5 +45,10 @@ export interface MellowCatAPI {
     getSession: () => Promise<AuthSession>;
     loginWithBrowser: () => Promise<AuthSession>;
     logout: () => Promise<void>;
+  };
+  automation: {
+    getTelegramStatus: () => Promise<TelegramControlStatus>;
+    syncTelegram: () => Promise<TelegramControlStatus>;
+    sendMockShortlist: () => Promise<TelegramControlStatus>;
   };
 }

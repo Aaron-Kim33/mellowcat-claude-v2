@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 export class FileService {
   ensureDir(targetPath: string): void {
@@ -20,5 +21,15 @@ export class FileService {
 
   readJsonFile<T>(filePath: string): T {
     return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  }
+
+  writeJsonFile(filePath: string, payload: unknown): void {
+    this.ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf-8");
+  }
+
+  writeTextFile(filePath: string, contents: string): void {
+    this.ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, contents, "utf-8");
   }
 }

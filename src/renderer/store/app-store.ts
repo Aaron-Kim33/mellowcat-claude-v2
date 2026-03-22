@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AppMeta } from "@common/types/app";
+import type { TelegramControlStatus } from "@common/types/automation";
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
@@ -9,6 +10,7 @@ interface AppState {
   catalog: MCPCatalogItem[];
   installed: InstalledMCPRecord[];
   appMeta?: AppMeta;
+  telegramStatus?: TelegramControlStatus;
   settings?: AppSettings;
   appUpdateStatus?: AppUpdateStatus;
   authSession?: AuthSession;
@@ -25,6 +27,8 @@ interface AppState {
   refreshClaudeInstallation: () => Promise<void>;
   detectClaudeInstallation: () => Promise<void>;
   installClaudeCode: () => Promise<void>;
+  refreshTelegramStatus: () => Promise<void>;
+  sendMockShortlist: () => Promise<void>;
   sendClaudeInput: (sessionId: string, input: string) => Promise<void>;
   installMcp: (mcpId: string) => Promise<void>;
   uninstallMcp: (mcpId: string) => Promise<void>;
@@ -50,7 +54,7 @@ export const useAppStore = create<AppState>((set) => ({
   claudeOutput: "",
   mcpOutputById: {},
   hydrate: async () => {
-    const [catalog, installed, appMeta, settings, authSession, claudeInstallation, appUpdateStatus] =
+    const [catalog, installed, appMeta, settings, authSession, claudeInstallation, appUpdateStatus, telegramStatus] =
       await Promise.all([
       window.mellowcat.mcp.listCatalog(),
       window.mellowcat.mcp.listInstalled(),
@@ -58,7 +62,8 @@ export const useAppStore = create<AppState>((set) => ({
       window.mellowcat.settings.get(),
       window.mellowcat.auth.getSession(),
       window.mellowcat.claude.getInstallationStatus(),
-      window.mellowcat.settings.getUpdateStatus()
+      window.mellowcat.settings.getUpdateStatus(),
+      window.mellowcat.automation.getTelegramStatus()
     ]);
 
     if (!unsubscribeOutput) {
@@ -96,6 +101,7 @@ export const useAppStore = create<AppState>((set) => ({
       appMeta,
       settings,
       appUpdateStatus,
+      telegramStatus,
       authSession,
       claudeInstallation,
       claudeDetectionMessage: claudeInstallation.installed
@@ -183,6 +189,15 @@ export const useAppStore = create<AppState>((set) => ({
       }, 4000);
     }
   },
+  refreshTelegramStatus: async () => {
+    await window.mellowcat.automation.syncTelegram();
+    const telegramStatus = await window.mellowcat.automation.getTelegramStatus();
+    set({ telegramStatus });
+  },
+  sendMockShortlist: async () => {
+    const telegramStatus = await window.mellowcat.automation.sendMockShortlist();
+    set({ telegramStatus });
+  },
   sendClaudeInput: async (sessionId: string, input: string) => {
     await window.mellowcat.claude.sendInput(sessionId, input);
   },
@@ -239,10 +254,14 @@ export const useAppStore = create<AppState>((set) => ({
     set({ selectedMcpLogId: mcpId });
   },
   saveSettings: async (patch: Partial<AppSettings>) => {
-    const settings = await window.mellowcat.settings.set(patch);
-    const claudeInstallation = await window.mellowcat.claude.getInstallationStatus();
+    const [settings, claudeInstallation, telegramStatus] = await Promise.all([
+      window.mellowcat.settings.set(patch),
+      window.mellowcat.claude.getInstallationStatus(),
+      window.mellowcat.automation.getTelegramStatus()
+    ]);
     set({
       settings,
+      telegramStatus,
       claudeInstallation,
       claudeDetectionMessage: claudeInstallation.installed
         ? `Claude detected at ${claudeInstallation.executablePath ?? "saved path"}`
