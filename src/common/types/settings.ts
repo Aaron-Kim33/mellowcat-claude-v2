@@ -15,6 +15,7 @@ export interface AppSettings {
   telegramBotToken?: string;
   telegramAdminChatId?: string;
   telegramOutputLanguage?: "en" | "ko";
+  mediaAnalysisPolicy?: "text_only" | "vision_on_demand";
   launchOnStartup: boolean;
 }
 

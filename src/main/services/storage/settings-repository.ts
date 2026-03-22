@@ -72,7 +72,8 @@ export class SettingsRepository {
       scriptProvider: "openrouter_api",
       openRouterModel: "openai/gpt-4o-mini",
       openAiModel: "gpt-5-mini",
-      telegramOutputLanguage: "en"
+      telegramOutputLanguage: "en",
+      mediaAnalysisPolicy: "text_only"
     };
   }
 }

@@ -15,6 +15,11 @@ export interface TrendCandidate {
   summary: string;
   operatorSummary: string;
   contentAngle: string;
+  media: {
+    hasMedia: boolean;
+    imageUrls: string[];
+    analysisPolicy: "text_only" | "vision_on_demand";
+  };
   sourceKind: TrendSourceKind;
   sourceRegion: TrendSourceRegion;
   sourceLabel: string;

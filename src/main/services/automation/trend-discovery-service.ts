@@ -149,6 +149,7 @@ export class TrendDiscoveryService {
                 "A first-person confession-style story with strong emotional stakes and clear retell potential.",
               contentAngle:
                 "confession retell / twist reveal / audience judgment",
+              media: this.buildMediaMetadata(),
               sourceKind: "reddit",
               sourceRegion: "global",
               sourceLabel: "Reddit Hot Fallback",
@@ -184,6 +185,7 @@ export class TrendDiscoveryService {
               "A broad format trend that can be localized into a Korean reaction or explainer short.",
             contentAngle:
               "format remix / Korean reaction angle / curiosity-led storytelling",
+            media: this.buildMediaMetadata(),
             sourceKind: "rss",
             sourceRegion: "global",
             sourceLabel: "Global Creator Feed",
@@ -210,6 +212,14 @@ export class TrendDiscoveryService {
         const messages: string[] = [];
 
         try {
+          const fmKoreaCandidates = await this.fetchFmKoreaBestCandidates(request.timeWindow);
+          candidates.push(...fmKoreaCandidates);
+          messages.push(`fmkorea:${fmKoreaCandidates.length}`);
+        } catch (error) {
+          messages.push(`fmkorea:error:${error instanceof Error ? error.message : "unknown"}`);
+        }
+
+        try {
           const pannCandidates = await this.fetchPannRankingCandidates(request.timeWindow);
           candidates.push(...pannCandidates);
           messages.push(`pann:${pannCandidates.length}`);
@@ -227,7 +237,7 @@ export class TrendDiscoveryService {
 
         if (candidates.length > 0) {
           return {
-            candidates: candidates.sort((left, right) => right.score - left.score).slice(0, 5),
+            candidates: this.pickDiverseTopCandidates(candidates, 5),
             status: "ok" as const,
             message: messages.join(" | ")
           };
@@ -244,6 +254,7 @@ export class TrendDiscoveryService {
                 "Fallback domestic issue placeholder while live Korean community parsing is unavailable.",
               contentAngle:
                 "community outrage / reaction commentary / local issue framing",
+              media: this.buildMediaMetadata(),
               sourceKind: "mock",
               sourceRegion: "domestic",
               sourceLabel: "Domestic community fallback",
@@ -302,11 +313,19 @@ export class TrendDiscoveryService {
           summary,
           operatorSummary: this.buildRedditOperatorSummary(post.title ?? "", summary),
           contentAngle: this.buildRedditContentAngle(post.title ?? "", post.selftext ?? ""),
+          media: this.buildMediaMetadata(),
           sourceKind: "reddit" as const,
           sourceRegion: "global" as const,
           sourceLabel: `r/${post.subreddit ?? subreddit}`,
           sourceUrl: post.permalink ? `https://www.reddit.com${post.permalink}` : undefined,
-          score: this.calculateRedditScore(post),
+          score: this.calculateRedditScore({
+            title: post.title,
+            created_utc: post.created_utc,
+            ups: post.ups,
+            num_comments: post.num_comments,
+            upvote_ratio: post.upvote_ratio,
+            selftext: post.selftext
+          }),
           metrics: {
             upvoteRatio: post.upvote_ratio,
             upvotes: post.ups,
@@ -342,6 +361,7 @@ export class TrendDiscoveryService {
   }
 
   private calculateRedditScore(post: {
+    title?: string;
     created_utc?: number;
     ups?: number;
     num_comments?: number;
@@ -355,7 +375,14 @@ export class TrendDiscoveryService {
     const lengthFit = length >= 650 && length <= 900 ? 12 : 6;
     const recencyBoost =
       post.created_utc && Date.now() / 1000 - post.created_utc <= 24 * 60 * 60 ? 8 : 3;
-    return Math.round(upvotes + comments + ratio + lengthFit + recencyBoost);
+    const hookFit = this.calculateShortformHookScore(post.title ?? "", post.selftext ?? "");
+    const discussionDensity = Math.min(
+      (((post.num_comments ?? 0) / Math.max(post.ups ?? 1, 1)) * 120),
+      10
+    );
+    return Math.round(
+      upvotes + comments + ratio + lengthFit + recencyBoost + hookFit + discussionDensity
+    );
   }
 
   private async fetchPannRankingCandidates(timeWindow: "24h" | "3d"): Promise<TrendCandidate[]> {
@@ -393,17 +420,99 @@ export class TrendDiscoveryService {
         summary: "Nate Pann ranking topic with strong local reaction signals and comment volume.",
         operatorSummary: this.buildDomesticOperatorSummary(title),
         contentAngle: this.buildDomesticContentAngle(title),
+        media: this.buildMediaMetadata(),
         sourceKind: "nate-pann",
         sourceRegion: "domestic",
         sourceLabel: `Nate Pann ${timeWindow === "24h" ? "Daily" : "Weekly"} Ranking`,
         sourceUrl: href ? `https://pann.nate.com${href}` : undefined,
-        score: this.calculateDomesticScore({ views, comments, recommends }),
+        score: this.calculateDomesticScore({ title, views, comments, recommends }),
         metrics: {
           views,
           comments
         },
         fitReason:
           "High local engagement and clear emotional angle that can be reframed into a Korean shortform narrative."
+      });
+    });
+
+    return candidates.slice(0, 5);
+  }
+
+  private async fetchFmKoreaBestCandidates(timeWindow: "24h" | "3d"): Promise<TrendCandidate[]> {
+    const response = await fetch("https://m.fmkorea.com/index.php?mid=best", {
+      headers: HTML_HEADERS
+    });
+
+    if (!response.ok) {
+      throw new Error(`FMKorea HTTP ${response.status}`);
+    }
+
+    const html = await this.readHtml(response, "fmkorea");
+    const text = this.htmlToText(html);
+    this.writeDebugSnapshot("fmkorea", html, text);
+    const $ = load(html);
+    const candidates: TrendCandidate[] = [];
+    const minDate = new Date();
+    minDate.setHours(0, 0, 0, 0);
+    if (timeWindow === "3d") {
+      minDate.setDate(minDate.getDate() - 2);
+    }
+
+    const seen = new Set<string>();
+    $("a[href*='document_srl='], a[href*='/best/']").each((_, element) => {
+      const anchor = $(element);
+      const href = anchor.attr("href");
+      const title = anchor.text().replace(/\s+/g, " ").trim();
+
+      if (!href || !title || title.length < 6) {
+        return;
+      }
+
+      const documentIdMatch = href.match(/document_srl=(\d+)|\/best\/(\d+)/);
+      const documentId = documentIdMatch?.[1] ?? documentIdMatch?.[2];
+      if (!documentId || seen.has(documentId)) {
+        return;
+      }
+
+      const containerText = anchor.closest("li, article, .fm_best_item, .li, .wrap, .rd").text();
+      const publishedAt = this.parseFmKoreaDate(containerText);
+      if (publishedAt && publishedAt < minDate) {
+        return;
+      }
+
+      const views = this.extractNumber(this.extractMetric(containerText, ["조회", "조회 수", "조회수"]));
+      const recommends = this.extractNumber(this.extractMetric(containerText, ["추천", "추천 수", "추천수", "포텐"]));
+      const comments = this.extractNumber(this.extractMetric(containerText, ["댓글", "댓글 수", "댓글수"]));
+
+      if (views < 20000 && recommends < 80 && comments < 60) {
+        return;
+      }
+
+      seen.add(documentId);
+      const resolvedUrl = href.startsWith("http")
+        ? href
+        : href.startsWith("/")
+          ? `https://m.fmkorea.com${href}`
+          : `https://m.fmkorea.com/${href.replace(/^\/+/, "")}`;
+
+      candidates.push({
+        id: `fmkorea-${documentId}`,
+        title,
+        summary: "FMKorea best topic with proven local traction and strong reaction potential.",
+        operatorSummary: this.buildDomesticOperatorSummary(title),
+        contentAngle: this.buildDomesticContentAngle(title),
+        media: this.buildMediaMetadata(),
+        sourceKind: "fmkorea",
+        sourceRegion: "domestic",
+        sourceLabel: "FMKorea Best",
+        sourceUrl: resolvedUrl,
+        score: this.calculateDomesticScore({ title, views, comments, recommends }),
+        metrics: {
+          views,
+          comments
+        },
+        fitReason:
+          "Already active in a high-traffic Korean community and suitable for fast reaction-based shortform framing."
       });
     });
 
@@ -449,11 +558,12 @@ export class TrendDiscoveryService {
         summary: "DC hit gallery topic with proven community traction and strong retell potential.",
         operatorSummary: this.buildDomesticOperatorSummary(title),
         contentAngle: this.buildDomesticContentAngle(title),
+        media: this.buildMediaMetadata(),
         sourceKind: "dcinside",
         sourceRegion: "domestic",
         sourceLabel: "DC Hit Gallery",
         sourceUrl: href ? `https://gall.dcinside.com${href}` : undefined,
-        score: this.calculateDomesticScore({ views, comments, recommends }),
+        score: this.calculateDomesticScore({ title, views, comments, recommends }),
         metrics: {
           views,
           comments
@@ -467,6 +577,7 @@ export class TrendDiscoveryService {
   }
 
   private calculateDomesticScore(input: {
+    title?: string;
     views: number;
     comments: number;
     recommends: number;
@@ -474,7 +585,164 @@ export class TrendDiscoveryService {
     const views = Math.min(input.views / 2500, 35);
     const comments = Math.min(input.comments / 8, 30);
     const recommends = Math.min(input.recommends / 10, 25);
-    return Math.round(views + comments + recommends);
+    const commentVelocity = Math.min(
+      (input.comments / Math.max(input.views, 1)) * 2500,
+      12
+    );
+    const recommendationStrength = Math.min(
+      (input.recommends / Math.max(input.views, 1)) * 4000,
+      8
+    );
+    const hookFit = this.calculateShortformHookScore(input.title ?? "");
+    return Math.round(
+      views + comments + recommends + commentVelocity + recommendationStrength + hookFit
+    );
+  }
+
+  private calculateShortformHookScore(title: string, body = ""): number {
+    const text = `${title} ${body}`.toLowerCase();
+    let score = 0;
+
+    if (title.length >= 8 && title.length <= 42) {
+      score += 3;
+    }
+
+    if (/\d/.test(title)) {
+      score += 2;
+    }
+
+    if (/[!?]/.test(title)) {
+      score += 2;
+    }
+
+    const highRetentionPatterns = [
+      "salary",
+      "coworker",
+      "boss",
+      "team",
+      "partner",
+      "cheat",
+      "husband",
+      "wife",
+      "boyfriend",
+      "girlfriend",
+      "concert",
+      "fandom",
+      "bts",
+      "psy",
+      "event",
+      "caught",
+      "secret",
+      "lying",
+      "ex",
+      "revenge",
+      "money",
+      "debt",
+      "wedding",
+      "drama",
+      "confession",
+      "연봉",
+      "회사",
+      "직장",
+      "남친",
+      "여친",
+      "남편",
+      "아내",
+      "바람",
+      "공연",
+      "팬",
+      "방탄",
+      "아이브",
+      "싸이",
+      "출입",
+      "마감",
+      "논란",
+      "충격",
+      "실화",
+      "비밀",
+      "폭로",
+      "배신",
+      "집",
+      "돈"
+    ];
+
+    const emotionalPatterns = [
+      "i ",
+      "my ",
+      "me ",
+      "am i",
+      "tifu",
+      "aita",
+      "hurt",
+      "broken",
+      "lost",
+      "angry",
+      "억울",
+      "화남",
+      "울",
+      "답답",
+      "소름",
+      "충격"
+    ];
+
+    if (highRetentionPatterns.some((pattern) => text.includes(pattern))) {
+      score += 4;
+    }
+
+    if (emotionalPatterns.some((pattern) => text.includes(pattern))) {
+      score += 3;
+    }
+
+    return Math.min(score, 10);
+  }
+
+  private pickDiverseTopCandidates(
+    candidates: TrendCandidate[],
+    limit: number
+  ): TrendCandidate[] {
+    const sorted = [...candidates].sort((left, right) => right.score - left.score);
+    const selected: TrendCandidate[] = [];
+    const seenSources = new Set<string>();
+
+    for (const candidate of sorted) {
+      if (selected.length >= limit) {
+        break;
+      }
+
+      if (seenSources.has(candidate.sourceKind)) {
+        continue;
+      }
+
+      selected.push(candidate);
+      seenSources.add(candidate.sourceKind);
+    }
+
+    if (selected.length < limit) {
+      for (const candidate of sorted) {
+        if (selected.length >= limit) {
+          break;
+        }
+
+        if (selected.some((item) => item.id === candidate.id)) {
+          continue;
+        }
+
+        selected.push(candidate);
+      }
+    }
+
+    return selected;
+  }
+
+  private buildMediaMetadata(
+    imageUrls: string[] = [],
+    analysisPolicy: "text_only" | "vision_on_demand" = "text_only"
+  ): TrendCandidate["media"] {
+    return {
+      hasMedia: imageUrls.length > 0,
+      imageUrls,
+      analysisPolicy
+    };
   }
 
   private buildDomesticOperatorSummary(title: string): string {
@@ -532,7 +800,34 @@ export class TrendDiscoveryService {
     return undefined;
   }
 
-  private async readHtml(response: Response, source: "pann" | "dc"): Promise<string> {
+  private parseFmKoreaDate(value: string): Date | undefined {
+    const full = value.match(/(20\d{2})[.\-/](\d{2})[.\-/](\d{2})/);
+    if (full) {
+      return new Date(`${full[1]}-${full[2]}-${full[3]}T00:00:00`);
+    }
+
+    const short = value.match(/(\d{2})[.\-/](\d{2})\s+(\d{2}):(\d{2})/);
+    if (short) {
+      const year = new Date().getFullYear();
+      return new Date(`${year}-${short[1]}-${short[2]}T${short[3]}:${short[4]}:00`);
+    }
+
+    return undefined;
+  }
+
+  private extractMetric(value: string, labels: string[]): string {
+    for (const label of labels) {
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = value.match(new RegExp(`${escaped}\\s*[:]?\\s*([0-9,]+)`));
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+
+    return "";
+  }
+
+  private async readHtml(response: Response, source: "pann" | "dc" | "fmkorea"): Promise<string> {
     const buffer = await response.arrayBuffer();
     const bytes = Buffer.from(buffer);
     const candidates: string[] = [];
@@ -618,7 +913,7 @@ export class TrendDiscoveryService {
     return koreanMatches * 3 - replacementChars * 5 - mojibakeHints * 2;
   }
 
-  private writeDebugSnapshot(source: "pann" | "dc", html: string, text: string): void {
+  private writeDebugSnapshot(source: "pann" | "dc" | "fmkorea", html: string, text: string): void {
     try {
       const debugDir = path.join(
         app.getPath("userData"),

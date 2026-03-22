@@ -4,6 +4,7 @@ export type AutomationJobStage =
   | "selected"
   | "scripting"
   | "awaiting_review"
+  | "awaiting_revision_input"
   | "approved"
   | "packaging"
   | "ready"

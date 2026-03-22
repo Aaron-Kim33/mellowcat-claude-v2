@@ -22,6 +22,7 @@ interface TelegramControlStateFile {
   lastDraftSource?: "claude" | "openrouter" | "openai" | "mock";
   lastDraftError?: string;
   lastDraft?: ShortformScriptDraft;
+  lastRevisionRequest?: string;
   lastPackagePath?: string;
   activeCandidates?: TrendCandidate[];
   allGlobalCandidates?: TrendCandidate[];
@@ -220,7 +221,7 @@ export class TelegramControlService {
       domesticCandidateCount: enrichedDomesticCandidates.length,
       trendSourceDebug: trendResult.sourceDebug,
       activeJob: {
-        id: `job-${Date.now()}`,
+        id: this.createJobId(now),
         title: "Trend shortlist for Korean shortform review",
         stage: "shortlisted",
         createdAt: now,
@@ -233,7 +234,7 @@ export class TelegramControlService {
         await this.sendTelegramShortlist(
           settings.telegramBotToken.trim(),
           settings.telegramAdminChatId.trim(),
-          nextState.activeJob?.id ?? `job-${Date.now()}`,
+          nextState.activeJob?.id ?? this.createJobId(now),
           language,
           shortlistSelection
         );
@@ -362,7 +363,12 @@ export class TelegramControlService {
     jobId: string,
     language: "en" | "ko",
     selection: string,
-    draft: ShortformScriptDraft
+    draft: ShortformScriptDraft,
+    context?: {
+      title?: string;
+      summary?: string;
+      revisionRequest?: string;
+    }
   ): Promise<void> {
     const draftLabel =
       selection === "revised" ? this.t(language, "revisedScriptDraft") : this.formatCandidateDraftLabel(language, selection);
@@ -376,6 +382,22 @@ export class TelegramControlService {
         chat_id: chatId,
         text: [
           `${draftLabel}`,
+          ...(context?.title
+            ? [
+                "",
+                `${this.t(language, "selectedTopic")}: ${context.title}`
+              ]
+            : []),
+          ...(context?.summary
+            ? [
+                `${this.t(language, "selectedSummary")}: ${context.summary}`
+              ]
+            : []),
+          ...(context?.revisionRequest
+            ? [
+                `${this.t(language, "revisionRequest")}: ${context.revisionRequest}`
+              ]
+            : []),
           "",
           this.t(language, "titleIdeas"),
           ...draft.titleOptions.map((item, index) => `${index + 1}. ${item}`),
@@ -449,7 +471,7 @@ export class TelegramControlService {
               updatedAt: now
             }
           : {
-              id: `job-${Date.now()}`,
+              id: this.createJobId(now),
               title: this.resolveSelectedCandidateTitle(currentState.activeCandidates, selection),
               stage: "awaiting_review",
               createdAt: now,
@@ -473,7 +495,30 @@ export class TelegramControlService {
         nextState.activeJob?.id ?? jobId,
         language,
         selection,
-        draftResult.draft
+        draftResult.draft,
+        {
+          title: nextState.activeJob?.title,
+          summary: this.localizeCandidateSummary(
+            currentState.activeCandidates?.[Number(selection) - 1] ?? {
+              id: "selected",
+              title: nextState.activeJob?.title ?? "",
+              summary: nextState.activeJob?.title ?? "",
+              operatorSummary: "",
+              contentAngle: "",
+              media: {
+                hasMedia: false,
+                imageUrls: [],
+                analysisPolicy: "text_only"
+              },
+              sourceKind: "mock",
+              sourceRegion: "global",
+              sourceLabel: "",
+              score: 0,
+              fitReason: ""
+            },
+            language
+          )
+        }
       );
     }
 
@@ -522,31 +567,19 @@ export class TelegramControlService {
 
       nextState = {
         ...nextState,
+        lastRevisionRequest: undefined,
         activeJob: nextState.activeJob
           ? {
               ...nextState.activeJob,
-              stage: "awaiting_review",
+              stage: "awaiting_revision_input",
               updatedAt: now
             }
           : undefined
       };
-
-      const draftResult = await this.shortformScriptService.generateDraft(
-        `Revised version of ${nextState.activeJob?.title ?? "selected candidate"}`
-      );
-      nextState = {
-        ...nextState,
-        lastDraftSource: draftResult.source,
-        lastDraftError: draftResult.error,
-        lastDraft: draftResult.draft
-      };
-      await this.sendTelegramScriptReview(
+      await this.sendTelegramText(
         botToken,
         chatId,
-        nextState.activeJob?.id ?? jobId,
-        language,
-        "revised",
-        draftResult.draft
+        this.t(language, "revisePrompt")
       );
     }
 
@@ -612,6 +645,41 @@ export class TelegramControlService {
     if (normalized === "/shortlist") {
       const status = await this.dispatchTrendShortlist();
       return this.readStateWithFallback(status, currentState);
+    }
+
+    if (currentState.activeJob?.stage === "awaiting_revision_input" && !normalized.startsWith("/")) {
+      const revisionRequest = messageText.trim();
+      const draftResult = await this.shortformScriptService.generateDraft(
+        currentState.activeJob.title,
+        revisionRequest
+      );
+      const nextState: TelegramControlStateFile = {
+        ...currentState,
+        lastEventAt: new Date().toISOString(),
+        lastRevisionRequest: revisionRequest,
+        lastDraftSource: draftResult.source,
+        lastDraftError: draftResult.error,
+        lastDraft: draftResult.draft,
+        activeJob: {
+          ...currentState.activeJob,
+          stage: "awaiting_review",
+          updatedAt: new Date().toISOString()
+        }
+      };
+      this.writeState(nextState);
+      await this.sendTelegramScriptReview(
+        botToken,
+        chatId,
+        currentState.activeJob.id,
+        language,
+        "revised",
+        draftResult.draft,
+        {
+          title: currentState.activeJob.title,
+          revisionRequest
+        }
+      );
+      return nextState;
     }
 
     if (normalized === "/lang ko" || normalized === "/lang en") {
@@ -729,6 +797,8 @@ export class TelegramControlService {
         ? ` Global ${state?.globalCandidateCount ?? 0} / Domestic ${state?.domesticCandidateCount ?? 0}.`
         : "";
     switch (job.stage) {
+      case "awaiting_revision_input":
+        return `Revision feedback is waiting in Telegram for ${job.title}.${candidateSummary}`;
       case "awaiting_review":
         return `Script review is waiting in Telegram for ${job.title}.${candidateSummary}`;
       case "approved":
@@ -804,8 +874,8 @@ export class TelegramControlService {
     globalCount: number;
     domesticCount: number;
   } {
-    const topGlobal = globalCandidates.slice(0, 2);
-    const topDomestic = domesticCandidates.slice(0, 2);
+    const topGlobal = this.pickDiverseCandidates(globalCandidates, 2);
+    const topDomestic = this.pickDiverseCandidates(domesticCandidates, 2);
     const combinedCandidates = [...topGlobal, ...topDomestic];
 
     const formatCandidateLines = (
@@ -875,6 +945,59 @@ export class TelegramControlService {
     );
   }
 
+  private pickDiverseCandidates(candidates: TrendCandidate[], limit: number): TrendCandidate[] {
+    const realCandidates = candidates.filter((candidate) => !this.isFallbackCandidate(candidate));
+    const candidatePool = realCandidates.length >= limit ? realCandidates : candidates;
+
+    if (candidatePool.length <= limit) {
+      return candidatePool;
+    }
+
+    const selected: TrendCandidate[] = [];
+    const seenSources = new Set<string>();
+
+    for (const candidate of candidatePool) {
+      if (selected.length >= limit) {
+        break;
+      }
+
+      if (seenSources.has(candidate.sourceKind)) {
+        continue;
+      }
+
+      selected.push(candidate);
+      seenSources.add(candidate.sourceKind);
+    }
+
+    if (selected.length < limit) {
+      for (const candidate of candidatePool) {
+        if (selected.length >= limit) {
+          break;
+        }
+
+        if (selected.some((item) => item.id === candidate.id)) {
+          continue;
+        }
+
+        selected.push(candidate);
+      }
+    }
+
+    return selected;
+  }
+
+  private isFallbackCandidate(candidate: TrendCandidate): boolean {
+    if (candidate.sourceKind === "mock") {
+      return true;
+    }
+
+    if (candidate.sourceKind === "rss" && !candidate.sourceUrl) {
+      return true;
+    }
+
+    return false;
+  }
+
   private readState(): TelegramControlStateFile {
     const filePath = this.pathService.getAutomationStatePath("telegram-control.json");
     const directory = path.dirname(filePath);
@@ -907,6 +1030,18 @@ export class TelegramControlService {
   private writeState(nextState: TelegramControlStateFile): void {
     const filePath = this.pathService.getAutomationStatePath("telegram-control.json");
     fs.writeFileSync(filePath, JSON.stringify(nextState, null, 2), "utf-8");
+  }
+
+  private createJobId(isoDate: string): string {
+    const date = new Date(isoDate);
+    const pad = (value: number) => value.toString().padStart(2, "0");
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hour = pad(date.getHours());
+    const minute = pad(date.getMinutes());
+    const second = pad(date.getSeconds());
+    return `job-${year}${month}${day}-${hour}${minute}${second}`;
   }
 
   private resolveTelegramLanguage(
@@ -1099,6 +1234,10 @@ export class TelegramControlService {
       packageReady: "제작 패키지가 준비되었습니다.",
       packageMissing: "스크립트는 승인됐지만 제작 패키지는 생성되지 않았습니다.",
       scriptRejected: "스크립트를 거절했습니다. 다른 각도로 다시 시도하려면 새 후보를 받아보세요.",
+      selectedTopic: "선택한 주제",
+      selectedSummary: "주제 요약",
+      revisionRequest: "수정 요청",
+      revisePrompt: "어떤 방향으로 수정할지 한 줄로 보내주세요. 예: 더 자극적으로, 20대 여성 톤으로, 훅을 더 짧게",
       shortlistInactive: "이 후보 목록은 더 이상 활성 상태가 아닙니다.",
       reviewInactive: "이 검토 항목은 더 이상 활성 상태가 아닙니다.",
       received: "반영됐습니다",
@@ -1157,6 +1296,10 @@ export class TelegramControlService {
       packageReady: "Production package ready.",
       packageMissing: "Script approved, but no production package was created.",
       scriptRejected: "Script rejected. Send a new shortlist when you want to try another angle.",
+      selectedTopic: "Selected topic",
+      selectedSummary: "Topic summary",
+      revisionRequest: "Revision request",
+      revisePrompt: "Send one short message describing how to revise it. Example: make it more provocative, target women in their 20s, shorten the hook",
       shortlistInactive: "This shortlist is no longer active.",
       reviewInactive: "This review is no longer active.",
       received: "Received",

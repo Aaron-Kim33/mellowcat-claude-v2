@@ -57,7 +57,7 @@ export class ShortformScriptService {
     return fallbackSummary;
   }
 
-  async generateDraft(selection: string): Promise<ShortformScriptResult> {
+  async generateDraft(selection: string, revisionRequest?: string): Promise<ShortformScriptResult> {
     const settings = this.settingsRepository.get();
     const scriptProvider = settings.scriptProvider ?? "openrouter_api";
     const executablePath = settings.claudeExecutablePath?.trim();
@@ -68,7 +68,12 @@ export class ShortformScriptService {
 
     if (scriptProvider === "openrouter_api" && openRouterApiKey) {
       try {
-        const draft = await this.runOpenRouter(openRouterApiKey, openRouterModel, selection);
+        const draft = await this.runOpenRouter(
+          openRouterApiKey,
+          openRouterModel,
+          selection,
+          revisionRequest
+        );
         return {
           source: "openrouter",
           draft
@@ -84,7 +89,12 @@ export class ShortformScriptService {
 
     if (scriptProvider === "openai_api" && openAiApiKey) {
       try {
-        const draft = await this.runOpenAI(openAiApiKey, openAiModel, selection);
+        const draft = await this.runOpenAI(
+          openAiApiKey,
+          openAiModel,
+          selection,
+          revisionRequest
+        );
         return {
           source: "openai",
           draft
@@ -125,7 +135,8 @@ export class ShortformScriptService {
       `Selected topic: ${selection}`,
       "Audience: Korean social media users.",
       "Style: curiosity-driven, viral, high-retention but not spammy.",
-      "Return Korean output for all fields except keep brand names as-is."
+      "Return Korean output for all fields except keep brand names as-is.",
+      revisionRequest ? `Revision request: ${revisionRequest}` : ""
     ].join("\n");
 
     try {
@@ -213,7 +224,8 @@ export class ShortformScriptService {
   private async runOpenRouter(
     apiKey: string,
     model: string,
-    selection: string
+    selection: string,
+    revisionRequest?: string
   ): Promise<ShortformScriptDraft> {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -239,6 +251,7 @@ export class ShortformScriptService {
               "Audience: Korean social media users.",
               "Style: curiosity-driven, viral, high-retention but not spammy.",
               "Return Korean output for all fields except keep brand names as-is.",
+              revisionRequest ? `Revision request: ${revisionRequest}` : "",
               'titleOptions must be an array with 2 or 3 strings.'
             ].join("\n")
           }
@@ -348,7 +361,8 @@ export class ShortformScriptService {
   private async runOpenAI(
     apiKey: string,
     model: string,
-    selection: string
+    selection: string,
+    revisionRequest?: string
   ): Promise<ShortformScriptDraft> {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -371,6 +385,7 @@ export class ShortformScriptService {
               "Audience: Korean social media users.",
               "Style: curiosity-driven, viral, high-retention but not spammy.",
               "Return Korean output for all fields except keep brand names as-is.",
+              revisionRequest ? `Revision request: ${revisionRequest}` : "",
               'titleOptions must be an array with 2 or 3 strings.'
             ].join("\n")
           }
