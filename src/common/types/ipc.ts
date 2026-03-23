@@ -1,12 +1,18 @@
 import type { AppMeta } from "./app";
-import type { TelegramControlStatus } from "./automation";
+import type { ShortformWorkflowConfig, TelegramControlStatus } from "./automation";
 import type { AuthSession } from "./auth";
 import type {
   ClaudeInstallationStatus,
   ClaudeOutputEvent,
   ClaudeSession
 } from "./claude";
-import type { AppSettings, AppUpdateStatus } from "./settings";
+import type {
+  AppSettings,
+  AppUpdateStatus,
+  YouTubeAuthStatus,
+  YouTubeUploadRequest,
+  YouTubeUploadResult
+} from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 
 export interface MellowCatAPI {
@@ -47,8 +53,17 @@ export interface MellowCatAPI {
     logout: () => Promise<void>;
   };
   automation: {
+    getWorkflowConfig: () => Promise<ShortformWorkflowConfig>;
+    setWorkflowConfig: (
+      patch: Partial<ShortformWorkflowConfig>
+    ) => Promise<ShortformWorkflowConfig>;
     getTelegramStatus: () => Promise<TelegramControlStatus>;
     syncTelegram: () => Promise<TelegramControlStatus>;
     sendMockShortlist: () => Promise<TelegramControlStatus>;
+    getYouTubeStatus: () => Promise<YouTubeAuthStatus>;
+    connectYouTube: () => Promise<YouTubeAuthStatus>;
+    disconnectYouTube: () => Promise<YouTubeAuthStatus>;
+    inspectYouTubeUploadRequest: (packagePath: string) => Promise<YouTubeUploadRequest>;
+    uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
   };
 }

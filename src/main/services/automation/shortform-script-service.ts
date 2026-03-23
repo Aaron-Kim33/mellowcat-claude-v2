@@ -3,6 +3,7 @@ import type {
   ShortformScriptDraft,
   ShortformScriptResult
 } from "../../../common/types/automation";
+import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 import { SettingsRepository } from "../storage/settings-repository";
 
 const SCRIPT_SCHEMA = JSON.stringify({
@@ -22,7 +23,10 @@ const SCRIPT_SCHEMA = JSON.stringify({
 });
 
 export class ShortformScriptService {
-  constructor(private readonly settingsRepository: SettingsRepository) {}
+  constructor(
+    private readonly settingsRepository: SettingsRepository,
+    private readonly workflowConfigService: ShortformWorkflowConfigService
+  ) {}
 
   async generateTrendSummary(input: {
     title: string;
@@ -30,12 +34,14 @@ export class ShortformScriptService {
     sourceLabel?: string;
   }): Promise<string> {
     const settings = this.settingsRepository.get();
-    const scriptProvider = settings.scriptProvider ?? "openrouter_api";
+    const workflowConfig = this.workflowConfigService.get();
+    const scriptProvider = workflowConfig.scriptProvider ?? "openrouter_api";
     const executablePath = settings.claudeExecutablePath?.trim();
-    const openRouterApiKey = settings.openRouterApiKey?.trim();
-    const openRouterModel = settings.openRouterModel?.trim() || "openai/gpt-4o-mini";
-    const openAiApiKey = settings.openAiApiKey?.trim();
-    const openAiModel = settings.openAiModel?.trim() || "gpt-5-mini";
+    const openRouterApiKey = workflowConfig.openRouterApiKey?.trim();
+    const openRouterModel =
+      workflowConfig.openRouterModel?.trim() || "openai/gpt-4o-mini";
+    const openAiApiKey = workflowConfig.openAiApiKey?.trim();
+    const openAiModel = workflowConfig.openAiModel?.trim() || "gpt-5-mini";
     const fallbackSummary = input.body?.trim() || input.title;
 
     try {
@@ -59,12 +65,14 @@ export class ShortformScriptService {
 
   async generateDraft(selection: string, revisionRequest?: string): Promise<ShortformScriptResult> {
     const settings = this.settingsRepository.get();
-    const scriptProvider = settings.scriptProvider ?? "openrouter_api";
+    const workflowConfig = this.workflowConfigService.get();
+    const scriptProvider = workflowConfig.scriptProvider ?? "openrouter_api";
     const executablePath = settings.claudeExecutablePath?.trim();
-    const openRouterApiKey = settings.openRouterApiKey?.trim();
-    const openRouterModel = settings.openRouterModel?.trim() || "openai/gpt-4o-mini";
-    const openAiApiKey = settings.openAiApiKey?.trim();
-    const openAiModel = settings.openAiModel?.trim() || "gpt-5-mini";
+    const openRouterApiKey = workflowConfig.openRouterApiKey?.trim();
+    const openRouterModel =
+      workflowConfig.openRouterModel?.trim() || "openai/gpt-4o-mini";
+    const openAiApiKey = workflowConfig.openAiApiKey?.trim();
+    const openAiModel = workflowConfig.openAiModel?.trim() || "gpt-5-mini";
 
     if (scriptProvider === "openrouter_api" && openRouterApiKey) {
       try {

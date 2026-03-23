@@ -60,6 +60,7 @@ export function StorePage() {
           <MCPCard
             key={item.id}
             item={item}
+            installedList={installed}
             installed={installed.find((installedItem) => installedItem.id === item.id)}
             onInstall={(id) => void installMcp(id)}
             onUpdate={(id) => void updateMcp(id)}

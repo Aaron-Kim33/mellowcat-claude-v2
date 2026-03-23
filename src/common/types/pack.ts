@@ -1,3 +1,9 @@
+import type {
+  MCPDataContract,
+  MCPDependencyRule,
+  MCPExecutionMode
+} from "./mcp-contract";
+
 export type MCPPackDistributionType = "free" | "paid" | "private" | "bundled";
 export type MCPPackInstallState = "not_installed" | "installing" | "installed" | "error";
 
@@ -34,6 +40,12 @@ export interface MCPPackIncludedMCP {
   required: boolean;
   autoEnable?: boolean;
   role: "control" | "discovery" | "generation" | "packaging" | "delivery" | "support";
+  contracts?: {
+    accepts?: MCPDataContract[];
+    emits?: MCPDataContract[];
+  };
+  executionModes?: MCPExecutionMode[];
+  dependencies?: MCPDependencyRule[];
 }
 
 export interface MCPPackManifest {

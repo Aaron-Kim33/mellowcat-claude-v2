@@ -5,15 +5,18 @@ import type {
 } from "../../../common/types/automation";
 import { FileService } from "../system/file-service";
 import { PathService } from "../system/path-service";
+import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 
 export class ProductionPackageService {
   constructor(
     private readonly pathService: PathService,
-    private readonly fileService: FileService
+    private readonly fileService: FileService,
+    private readonly workflowConfigService: ShortformWorkflowConfigService
   ) {}
 
   createPackage(job: AutomationJobSnapshot, draft: ShortformScriptDraft): string {
     const packagePath = this.pathService.getAutomationPackagePath(job.id);
+    const workflowConfig = this.workflowConfigService.get();
     this.fileService.ensureDir(packagePath);
     const primaryTitle = draft.titleOptions[0] ?? job.title;
     const secondaryTitle = draft.titleOptions[1] ?? primaryTitle;
@@ -49,6 +52,7 @@ export class ProductionPackageService {
         "shotlist.md",
         "asset-prompts.md",
         "upload-metadata.json",
+        "youtube-upload-request.json",
         "production-checklist.md"
       ]
     });
@@ -117,7 +121,34 @@ export class ProductionPackageService {
         description: uploadDescription,
         hashtags: hashtags.split(" "),
         titleOptions: draft.titleOptions,
-        callToAction: draft.callToAction
+        callToAction: draft.callToAction,
+        youtube: {
+          channelLabel: workflowConfig.youtubeChannelLabel,
+          privacyStatus: workflowConfig.youtubePrivacyStatus ?? "private",
+          categoryId: workflowConfig.youtubeCategoryId ?? "22",
+          selfDeclaredMadeForKids:
+            (workflowConfig.youtubeAudience ?? "not_made_for_kids") === "made_for_kids"
+        }
+      }
+    );
+
+    this.fileService.writeJsonFile(
+      path.join(packagePath, "youtube-upload-request.json"),
+      {
+        platform: "youtube",
+        status: "draft",
+        videoFilePath: "",
+        thumbnailFilePath: "",
+        scheduledPublishAt: "",
+        metadata: {
+          title: uploadTitle,
+          description: uploadDescription,
+          tags: hashtags.split(" "),
+          categoryId: workflowConfig.youtubeCategoryId ?? "22",
+          privacyStatus: workflowConfig.youtubePrivacyStatus ?? "private",
+          selfDeclaredMadeForKids:
+            (workflowConfig.youtubeAudience ?? "not_made_for_kids") === "made_for_kids"
+        }
       }
     );
 
@@ -131,6 +162,7 @@ export class ProductionPackageService {
         "- Add Korean subtitles with strong contrast words",
         "- Prepare thumbnail using `thumbnail.txt`",
         "- Prepare upload copy using `upload-metadata.json`",
+        "- Fill in local video path and schedule in `youtube-upload-request.json`",
         "- Review CTA tone before publishing"
       ].join("\n")
     );

@@ -1,10 +1,18 @@
 import { create } from "zustand";
 import type { AppMeta } from "@common/types/app";
-import type { TelegramControlStatus } from "@common/types/automation";
+import type {
+  ShortformWorkflowConfig,
+  TelegramControlStatus
+} from "@common/types/automation";
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
-import type { AppSettings, AppUpdateStatus } from "@common/types/settings";
+import type {
+  AppSettings,
+  AppUpdateStatus,
+  YouTubeAuthStatus,
+  YouTubeUploadResult
+} from "@common/types/settings";
 
 interface AppState {
   catalog: MCPCatalogItem[];
@@ -12,7 +20,10 @@ interface AppState {
   appMeta?: AppMeta;
   telegramStatus?: TelegramControlStatus;
   settings?: AppSettings;
+  workflowConfig?: ShortformWorkflowConfig;
   appUpdateStatus?: AppUpdateStatus;
+  youTubeAuthStatus?: YouTubeAuthStatus;
+  lastYouTubeUploadResult?: YouTubeUploadResult;
   authSession?: AuthSession;
   claudeSession?: ClaudeSession;
   claudeInstallation?: ClaudeInstallationStatus;
@@ -29,6 +40,10 @@ interface AppState {
   installClaudeCode: () => Promise<void>;
   refreshTelegramStatus: () => Promise<void>;
   sendMockShortlist: () => Promise<void>;
+  refreshYouTubeStatus: () => Promise<void>;
+  connectYouTube: () => Promise<void>;
+  disconnectYouTube: () => Promise<void>;
+  uploadLastPackageToYouTube: () => Promise<void>;
   sendClaudeInput: (sessionId: string, input: string) => Promise<void>;
   installMcp: (mcpId: string) => Promise<void>;
   uninstallMcp: (mcpId: string) => Promise<void>;
@@ -39,6 +54,7 @@ interface AppState {
   updateMcp: (mcpId: string) => Promise<void>;
   selectMcpLog: (mcpId: string) => void;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  saveWorkflowConfig: (patch: Partial<ShortformWorkflowConfig>) => Promise<void>;
   login: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -54,16 +70,18 @@ export const useAppStore = create<AppState>((set) => ({
   claudeOutput: "",
   mcpOutputById: {},
   hydrate: async () => {
-    const [catalog, installed, appMeta, settings, authSession, claudeInstallation, appUpdateStatus, telegramStatus] =
+    const [catalog, installed, appMeta, settings, workflowConfig, authSession, claudeInstallation, appUpdateStatus, telegramStatus, youTubeAuthStatus] =
       await Promise.all([
       window.mellowcat.mcp.listCatalog(),
       window.mellowcat.mcp.listInstalled(),
       window.mellowcat.app.getMeta(),
       window.mellowcat.settings.get(),
+      window.mellowcat.automation.getWorkflowConfig(),
       window.mellowcat.auth.getSession(),
       window.mellowcat.claude.getInstallationStatus(),
       window.mellowcat.settings.getUpdateStatus(),
-      window.mellowcat.automation.getTelegramStatus()
+      window.mellowcat.automation.getTelegramStatus(),
+      window.mellowcat.automation.getYouTubeStatus()
     ]);
 
     if (!unsubscribeOutput) {
@@ -100,8 +118,10 @@ export const useAppStore = create<AppState>((set) => ({
       installed,
       appMeta,
       settings,
+      workflowConfig,
       appUpdateStatus,
       telegramStatus,
+      youTubeAuthStatus,
       authSession,
       claudeInstallation,
       claudeDetectionMessage: claudeInstallation.installed
@@ -198,6 +218,28 @@ export const useAppStore = create<AppState>((set) => ({
     const telegramStatus = await window.mellowcat.automation.sendMockShortlist();
     set({ telegramStatus });
   },
+  refreshYouTubeStatus: async () => {
+    const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
+    set({ youTubeAuthStatus });
+  },
+  connectYouTube: async () => {
+    const youTubeAuthStatus = await window.mellowcat.automation.connectYouTube();
+    set({ youTubeAuthStatus });
+  },
+  disconnectYouTube: async () => {
+    const youTubeAuthStatus = await window.mellowcat.automation.disconnectYouTube();
+    set({ youTubeAuthStatus });
+  },
+  uploadLastPackageToYouTube: async () => {
+    const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
+    if (!packagePath) {
+      return;
+    }
+
+    const lastYouTubeUploadResult = await window.mellowcat.automation.uploadYouTubePackage(packagePath);
+    const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
+    set({ lastYouTubeUploadResult, youTubeAuthStatus });
+  },
   sendClaudeInput: async (sessionId: string, input: string) => {
     await window.mellowcat.claude.sendInput(sessionId, input);
   },
@@ -266,6 +308,19 @@ export const useAppStore = create<AppState>((set) => ({
       claudeDetectionMessage: claudeInstallation.installed
         ? `Claude detected at ${claudeInstallation.executablePath ?? "saved path"}`
         : claudeInstallation.message
+    });
+  },
+  saveWorkflowConfig: async (patch: Partial<ShortformWorkflowConfig>) => {
+    const [workflowConfig, telegramStatus, youTubeAuthStatus] = await Promise.all([
+      window.mellowcat.automation.setWorkflowConfig(patch),
+      window.mellowcat.automation.getTelegramStatus(),
+      window.mellowcat.automation.getYouTubeStatus()
+    ]);
+
+    set({
+      workflowConfig,
+      telegramStatus,
+      youTubeAuthStatus
     });
   },
   login: async () => {

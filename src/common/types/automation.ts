@@ -54,3 +54,22 @@ export interface TelegramControlStatus {
   }>;
   activeJob?: AutomationJobSnapshot;
 }
+
+export interface ShortformWorkflowConfig {
+  trendWindow: "24h" | "3d";
+  scriptProvider: "claude_cli" | "openrouter_api" | "openai_api" | "mock";
+  openRouterApiKey?: string;
+  openRouterModel?: string;
+  openAiApiKey?: string;
+  openAiModel?: string;
+  telegramBotToken?: string;
+  telegramAdminChatId?: string;
+  telegramOutputLanguage?: "en" | "ko";
+  youtubeChannelLabel?: string;
+  youtubePrivacyStatus?: "private" | "unlisted" | "public";
+  youtubeCategoryId?: string;
+  youtubeAudience?: "not_made_for_kids" | "made_for_kids";
+  youtubeOAuthClientId?: string;
+  youtubeOAuthClientSecret?: string;
+  youtubeOAuthRedirectPort?: string;
+}

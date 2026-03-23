@@ -2,14 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   AutomationJobSnapshot,
+  ShortformWorkflowConfig,
   ShortformScriptDraft,
   TelegramControlStatus
 } from "../../../common/types/automation";
 import type { TrendCandidate } from "../../../common/types/trend";
-import { SettingsRepository } from "../storage/settings-repository";
 import { PathService } from "../system/path-service";
 import { ProductionPackageService } from "./production-package-service";
 import { ShortformScriptService } from "./shortform-script-service";
+import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 import { TrendDiscoveryService } from "./trend-discovery-service";
 
 interface TelegramControlStateFile {
@@ -38,7 +39,7 @@ export class TelegramControlService {
   private syncInFlight = false;
 
   constructor(
-    private readonly settingsRepository: SettingsRepository,
+    private readonly workflowConfigService: ShortformWorkflowConfigService,
     private readonly pathService: PathService,
     private readonly trendDiscoveryService: TrendDiscoveryService,
     private readonly shortformScriptService: ShortformScriptService,
@@ -60,9 +61,9 @@ export class TelegramControlService {
   }
 
   getStatus(): TelegramControlStatus {
-    const settings = this.settingsRepository.get();
+    const workflowConfig = this.workflowConfigService.get();
     const state = this.readState();
-    return this.toStatus(settings, state);
+    return this.toStatus(workflowConfig, state);
   }
 
   async syncUpdates(): Promise<TelegramControlStatus> {
@@ -71,9 +72,9 @@ export class TelegramControlService {
     }
 
     this.syncInFlight = true;
-    const settings = this.settingsRepository.get();
-    const botToken = settings.telegramBotToken?.trim();
-    const chatId = settings.telegramAdminChatId?.trim();
+    const workflowConfig = this.workflowConfigService.get();
+    const botToken = workflowConfig.telegramBotToken?.trim();
+    const chatId = workflowConfig.telegramAdminChatId?.trim();
 
     if (!botToken || !chatId) {
       this.syncInFlight = false;
@@ -166,10 +167,10 @@ export class TelegramControlService {
         this.writeState(persistedState);
       }
 
-      return this.toStatus(settings, persistedState);
+      return this.toStatus(workflowConfig, persistedState);
     } catch (error) {
       return {
-        ...this.toStatus(settings, state),
+        ...this.toStatus(workflowConfig, state),
         state: "error",
         message:
           error instanceof Error
@@ -186,14 +187,14 @@ export class TelegramControlService {
   }
 
   private async dispatchTrendShortlist(): Promise<TelegramControlStatus> {
-    const settings = this.settingsRepository.get();
+    const workflowConfig = this.workflowConfigService.get();
     const currentState = this.readState();
-    const language = this.resolveTelegramLanguage(settings, currentState);
+    const language = this.resolveTelegramLanguage(workflowConfig, currentState);
     const now = new Date().toISOString();
     const trendResult = await this.trendDiscoveryService.discoverCandidates({
       regions: ["global", "domestic"],
       limit: 4,
-      timeWindow: settings.trendWindow ?? "24h"
+      timeWindow: workflowConfig.trendWindow ?? "24h"
     });
     const enrichedGlobalCandidates = await this.enrichShortlistSummaries(
       trendResult.globalCandidates,
@@ -229,11 +230,11 @@ export class TelegramControlService {
       }
     };
 
-    if (settings.telegramBotToken?.trim() && settings.telegramAdminChatId?.trim()) {
+    if (workflowConfig.telegramBotToken?.trim() && workflowConfig.telegramAdminChatId?.trim()) {
       try {
         await this.sendTelegramShortlist(
-          settings.telegramBotToken.trim(),
-          settings.telegramAdminChatId.trim(),
+          workflowConfig.telegramBotToken.trim(),
+          workflowConfig.telegramAdminChatId.trim(),
           nextState.activeJob?.id ?? this.createJobId(now),
           language,
           shortlistSelection
@@ -242,7 +243,7 @@ export class TelegramControlService {
         this.writeState(nextState);
 
         return {
-          ...this.toStatus(settings, nextState),
+          ...this.toStatus(workflowConfig, nextState),
           state: "error",
           message:
             error instanceof Error
@@ -255,20 +256,20 @@ export class TelegramControlService {
     this.writeState(nextState);
 
     return {
-      ...this.toStatus(settings, nextState),
+      ...this.toStatus(workflowConfig, nextState),
       message:
-        settings.telegramBotToken?.trim() && settings.telegramAdminChatId?.trim()
+        workflowConfig.telegramBotToken?.trim() && workflowConfig.telegramAdminChatId?.trim()
           ? this.t(language, "shortlistSent")
           : this.t(language, "shortlistPreparedLocal")
     };
   }
 
   private toStatus(
-    settings: ReturnType<SettingsRepository["get"]>,
+    workflowConfig: ShortformWorkflowConfig,
     state: TelegramControlStateFile
   ): TelegramControlStatus {
-    const botTokenConfigured = Boolean(settings.telegramBotToken?.trim());
-    const adminChatIdConfigured = Boolean(settings.telegramAdminChatId?.trim());
+    const botTokenConfigured = Boolean(workflowConfig.telegramBotToken?.trim());
+    const adminChatIdConfigured = Boolean(workflowConfig.telegramAdminChatId?.trim());
     const configured = botTokenConfigured && adminChatIdConfigured;
     const transport = configured ? "telegram" : "mock";
 
@@ -442,7 +443,10 @@ export class TelegramControlService {
     callbackData: string
   ): Promise<TelegramControlStateFile> {
     const now = new Date().toISOString();
-    const language = this.resolveTelegramLanguage(this.settingsRepository.get(), currentState);
+    const language = this.resolveTelegramLanguage(
+      this.workflowConfigService.get(),
+      currentState
+    );
     let nextState: TelegramControlStateFile = {
       ...currentState,
       lastEventAt: now,
@@ -639,8 +643,8 @@ export class TelegramControlService {
     messageText: string
   ): Promise<TelegramControlStateFile> {
     const normalized = messageText.toLowerCase();
-    const settings = this.settingsRepository.get();
-    const language = this.resolveTelegramLanguage(settings, currentState);
+    const workflowConfig = this.workflowConfigService.get();
+    const language = this.resolveTelegramLanguage(workflowConfig, currentState);
 
     if (normalized === "/shortlist") {
       const status = await this.dispatchTrendShortlist();
@@ -684,6 +688,7 @@ export class TelegramControlService {
 
     if (normalized === "/lang ko" || normalized === "/lang en") {
       const nextLanguage: "en" | "ko" = normalized.endsWith("ko") ? "ko" : "en";
+      this.workflowConfigService.set({ telegramOutputLanguage: nextLanguage });
       const nextState = {
         ...currentState,
         telegramOutputLanguage: nextLanguage
@@ -694,7 +699,7 @@ export class TelegramControlService {
     }
 
     if (normalized === "/status") {
-      const status = this.toStatus(settings, currentState);
+      const status = this.toStatus(workflowConfig, currentState);
       await this.sendTelegramText(
         botToken,
         chatId,
@@ -1045,10 +1050,10 @@ export class TelegramControlService {
   }
 
   private resolveTelegramLanguage(
-    settings: ReturnType<SettingsRepository["get"]>,
+    workflowConfig: ShortformWorkflowConfig,
     state: TelegramControlStateFile
   ): "en" | "ko" {
-    return state.telegramOutputLanguage ?? settings.telegramOutputLanguage ?? "en";
+    return state.telegramOutputLanguage ?? workflowConfig.telegramOutputLanguage ?? "en";
   }
 
   private formatSectionTitle(

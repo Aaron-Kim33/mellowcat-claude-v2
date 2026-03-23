@@ -2,46 +2,21 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "../../store/app-store";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 
-const OPENROUTER_MODEL_OPTIONS = [
-  "openai/gpt-4o-mini",
-  "openai/gpt-4o",
-  "anthropic/claude-3.5-sonnet",
-  "google/gemini-2.0-flash-001"
-] as const;
-
-const OPENAI_MODEL_OPTIONS = ["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini"] as const;
-
 export function SettingsPage() {
   const {
     settings,
-    telegramStatus,
     claudeInstallation,
     claudeDetectionMessage,
     saveSettings,
     detectClaudeInstallation,
-    installClaudeCode,
-    refreshTelegramStatus,
-    sendMockShortlist
+    installClaudeCode
   } = useAppStore();
   const [claudeExecutablePath, setClaudeExecutablePath] = useState("");
   const [claudeArgsText, setClaudeArgsText] = useState("");
   const [apiBaseUrl, setApiBaseUrl] = useState("");
   const [launcherLanguage, setLauncherLanguage] = useState<"en" | "ko">("en");
-  const [trendWindow, setTrendWindow] = useState<"24h" | "3d">("24h");
-  const [scriptProvider, setScriptProvider] = useState("openrouter_api");
-  const [openRouterApiKey, setOpenRouterApiKey] = useState("");
-  const [openRouterModel, setOpenRouterModel] = useState("");
-  const [openAiApiKey, setOpenAiApiKey] = useState("");
-  const [openAiModel, setOpenAiModel] = useState("");
-  const [telegramBotToken, setTelegramBotToken] = useState("");
-  const [telegramAdminChatId, setTelegramAdminChatId] = useState("");
-  const [telegramOutputLanguage, setTelegramOutputLanguage] = useState<"en" | "ko">("en");
-  const [showOpenRouterApiKey, setShowOpenRouterApiKey] = useState(false);
-  const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
-  const [showTelegramBotToken, setShowTelegramBotToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
-  const selectedProvider = scriptProvider;
   const copy = getLauncherCopy(launcherLanguage).pages.settings;
 
   useEffect(() => {
@@ -49,15 +24,6 @@ export function SettingsPage() {
     setClaudeArgsText(settings?.claudeArgs?.join(" ") ?? "");
     setApiBaseUrl(settings?.apiBaseUrl ?? "");
     setLauncherLanguage(settings?.launcherLanguage ?? "en");
-    setTrendWindow(settings?.trendWindow ?? "24h");
-    setScriptProvider(settings?.scriptProvider ?? "openrouter_api");
-    setOpenRouterApiKey(settings?.openRouterApiKey ?? "");
-    setOpenRouterModel(settings?.openRouterModel ?? "openai/gpt-4o-mini");
-    setOpenAiApiKey(settings?.openAiApiKey ?? "");
-    setOpenAiModel(settings?.openAiModel ?? "gpt-5-mini");
-    setTelegramBotToken(settings?.telegramBotToken ?? "");
-    setTelegramAdminChatId(settings?.telegramAdminChatId ?? "");
-    setTelegramOutputLanguage(settings?.telegramOutputLanguage ?? "en");
   }, [settings]);
 
   const handleSave = async () => {
@@ -68,21 +34,7 @@ export function SettingsPage() {
       claudeExecutablePath: claudeExecutablePath.trim() || undefined,
       claudeArgs: claudeArgsText.trim() ? claudeArgsText.trim().split(/\s+/) : [],
       apiBaseUrl: apiBaseUrl.trim() || undefined,
-      launcherLanguage,
-      trendWindow,
-      scriptProvider:
-        scriptProvider === "claude_cli" ||
-        scriptProvider === "mock" ||
-        scriptProvider === "openai_api"
-          ? scriptProvider
-          : "openrouter_api",
-      openRouterApiKey: openRouterApiKey.trim() || undefined,
-      openRouterModel: openRouterModel.trim() || undefined,
-      openAiApiKey: openAiApiKey.trim() || undefined,
-      openAiModel: openAiModel.trim() || undefined,
-      telegramBotToken: telegramBotToken.trim() || undefined,
-      telegramAdminChatId: telegramAdminChatId.trim() || undefined,
-      telegramOutputLanguage
+      launcherLanguage
     });
 
     setSaving(false);
@@ -147,6 +99,16 @@ export function SettingsPage() {
           </label>
 
           <label className="field">
+            <span>Claude Args</span>
+            <input
+              className="text-input"
+              value={claudeArgsText}
+              onChange={(event) => setClaudeArgsText(event.target.value)}
+              placeholder="--model sonnet --verbose"
+            />
+          </label>
+
+          <label className="field">
             <span>API Base URL</span>
             <input
               className="text-input"
@@ -154,169 +116,6 @@ export function SettingsPage() {
               onChange={(event) => setApiBaseUrl(event.target.value)}
               placeholder="https://api.mellowcat.dev/"
             />
-          </label>
-
-          <label className="field">
-            <span>Trend Window</span>
-            <select
-              className="text-input"
-              value={trendWindow}
-              onChange={(event) => setTrendWindow(event.target.value as "24h" | "3d")}
-            >
-              <option value="24h">Recent 24 hours</option>
-              <option value="3d">Recent 3 days</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Script Provider</span>
-            <select
-              className="text-input"
-              value={scriptProvider}
-              onChange={(event) => setScriptProvider(event.target.value)}
-            >
-              <option value="openrouter_api">OpenRouter</option>
-              <option value="openai_api">OpenAI</option>
-              <option value="claude_cli">Claude CLI</option>
-              <option value="mock">Mock</option>
-            </select>
-          </label>
-
-          {selectedProvider === "openrouter_api" && (
-            <>
-              <label className="field">
-                <span>Provider API Key</span>
-                <div className="secret-input">
-                  <input
-                    className="text-input"
-                    type={showOpenRouterApiKey ? "text" : "password"}
-                    value={openRouterApiKey}
-                    onChange={(event) => setOpenRouterApiKey(event.target.value)}
-                    placeholder="sk-or-v1-..."
-                  />
-                  <button
-                    type="button"
-                    className="secret-toggle"
-                    onClick={() => setShowOpenRouterApiKey((value) => !value)}
-                    aria-label={showOpenRouterApiKey ? "Hide OpenRouter API key" : "Show OpenRouter API key"}
-                  >
-                    {showOpenRouterApiKey ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </label>
-
-              <label className="field">
-                <span>Provider Model</span>
-                <select
-                  className="text-input"
-                  value={openRouterModel}
-                  onChange={(event) => setOpenRouterModel(event.target.value)}
-                >
-                  {OPENROUTER_MODEL_OPTIONS.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-
-          {selectedProvider === "openai_api" && (
-            <>
-              <label className="field">
-                <span>Provider API Key</span>
-                <div className="secret-input">
-                  <input
-                    className="text-input"
-                    type={showOpenAiApiKey ? "text" : "password"}
-                    value={openAiApiKey}
-                    onChange={(event) => setOpenAiApiKey(event.target.value)}
-                    placeholder="sk-..."
-                  />
-                  <button
-                    type="button"
-                    className="secret-toggle"
-                    onClick={() => setShowOpenAiApiKey((value) => !value)}
-                    aria-label={showOpenAiApiKey ? "Hide OpenAI API key" : "Show OpenAI API key"}
-                  >
-                    {showOpenAiApiKey ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </label>
-
-              <label className="field">
-                <span>Provider Model</span>
-                <select
-                  className="text-input"
-                  value={openAiModel}
-                  onChange={(event) => setOpenAiModel(event.target.value)}
-                >
-                  {OPENAI_MODEL_OPTIONS.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-
-          {selectedProvider === "claude_cli" && (
-            <label className="field">
-              <span>Claude Args</span>
-              <input
-                className="text-input"
-                value={claudeArgsText}
-                onChange={(event) => setClaudeArgsText(event.target.value)}
-                placeholder="--model sonnet --verbose"
-              />
-            </label>
-          )}
-
-          <label className="field">
-            <span>Telegram Bot Token</span>
-            <div className="secret-input">
-              <input
-                className="text-input"
-                type={showTelegramBotToken ? "text" : "password"}
-                value={telegramBotToken}
-                onChange={(event) => setTelegramBotToken(event.target.value)}
-                placeholder="123456:ABC..."
-              />
-              <button
-                type="button"
-                className="secret-toggle"
-                onClick={() => setShowTelegramBotToken((value) => !value)}
-                aria-label={showTelegramBotToken ? "Hide Telegram bot token" : "Show Telegram bot token"}
-              >
-                {showTelegramBotToken ? "Hide" : "Show"}
-              </button>
-            </div>
-          </label>
-
-          <label className="field">
-            <span>Telegram Admin Chat ID</span>
-            <input
-              className="text-input"
-              value={telegramAdminChatId}
-              onChange={(event) => setTelegramAdminChatId(event.target.value)}
-              placeholder="123456789"
-            />
-          </label>
-
-          <label className="field">
-            <span>Telegram Output Language</span>
-            <select
-              className="text-input"
-              value={telegramOutputLanguage}
-              onChange={(event) =>
-                setTelegramOutputLanguage(event.target.value as "en" | "ko")
-              }
-            >
-              <option value="en">English</option>
-              <option value="ko">Korean</option>
-            </select>
           </label>
         </div>
 
@@ -344,26 +143,12 @@ export function SettingsPage() {
           >
             {copy.installClaudeCode}
           </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void refreshTelegramStatus()}
-          >
-            {copy.syncTelegram}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void sendMockShortlist()}
-          >
-            {copy.sendTestTrendShortlist}
-          </button>
         </div>
         <div className="button-row">
           <span className="subtle">
             {claudeDetectionMessage ??
               claudeInstallation?.message ??
-              "Changes apply to new Claude sessions and future API reads."}
+              "Workflow-specific configuration now lives in Installed."}
           </span>
           <span className="subtle">{savedMessage}</span>
         </div>
@@ -382,50 +167,9 @@ export function SettingsPage() {
           </div>
         )}
         <div className="manual-install-box">
-          <strong>Telegram Control</strong>
-          <div className="settings-row">
-            <span>Configured</span>
-            <strong>{telegramStatus?.configured ? "Yes" : "No"}</strong>
-          </div>
-          <div className="settings-row">
-            <span>Transport</span>
-            <strong>{telegramStatus?.transport ?? "mock"}</strong>
-          </div>
-          <div className="settings-row">
-            <span>Status</span>
-            <strong>{telegramStatus?.state ?? "idle"}</strong>
-          </div>
-          <div className="settings-row">
-            <span>Last Callback</span>
-            <code>{telegramStatus?.lastCallbackData ?? "None yet"}</code>
-          </div>
-          <div className="settings-row">
-            <span>Last Draft Source</span>
-            <code>{telegramStatus?.lastDraftSource ?? "None yet"}</code>
-          </div>
-          <div className="settings-row">
-            <span>Last Draft Error</span>
-            <code>{telegramStatus?.lastDraftError ?? "None"}</code>
-          </div>
-          <div className="settings-row">
-            <span>Last Package Path</span>
-            <code>{telegramStatus?.lastPackagePath ?? "Not created yet"}</code>
-          </div>
-          {telegramStatus?.trendSourceDebug?.map((item) => (
-            <div key={item.sourceId} className="settings-row">
-              <span>{item.sourceId}</span>
-              <code>
-                {item.count} ({item.status}
-                {item.message ? `, ${item.message}` : ""})
-              </code>
-            </div>
-          ))}
+          <strong>Workflow Config Has Moved</strong>
           <p className="subtle">
-            {telegramStatus?.message ??
-              "Add Telegram settings, then use mock shortlist while the real bot transport is being wired in."}
-          </p>
-          <p className="subtle">
-            {copy.realFlowHint}
+            Telegram, generation provider, and YouTube publishing settings are now managed from the Installed page so automation-specific config stays with the workflow layer.
           </p>
         </div>
       </div>

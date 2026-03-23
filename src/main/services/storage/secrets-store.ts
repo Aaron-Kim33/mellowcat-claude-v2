@@ -10,18 +10,23 @@ export class SecretsStore {
 
   get(key: string): string | undefined {
     const secrets = this.readAll();
-    const encrypted = secrets[key];
+    const stored = secrets[key];
 
-    if (!encrypted) {
+    if (!stored) {
       return undefined;
     }
 
     try {
       if (safeStorage.isEncryptionAvailable()) {
-        return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+        return safeStorage.decryptString(Buffer.from(stored, "base64"));
       }
 
-      return Buffer.from(encrypted, "base64").toString("utf-8");
+      const decoded = Buffer.from(stored, "base64").toString("utf-8");
+      if (decoded.startsWith("v10")) {
+        return undefined;
+      }
+
+      return decoded;
     } catch {
       return undefined;
     }

@@ -13,7 +13,10 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
     claudeDetectionMessage,
     appUpdateStatus,
     telegramStatus,
+    youTubeAuthStatus,
+    lastYouTubeUploadResult,
     settings,
+    workflowConfig,
     installed,
     startClaude,
     stopClaude,
@@ -21,7 +24,7 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
     detectClaudeInstallation,
     installClaudeCode,
     refreshTelegramStatus,
-    sendMockShortlist
+    uploadLastPackageToYouTube
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.launcher;
   const hasClaudePath = Boolean(settings?.claudeExecutablePath?.trim()) || claudeInstallation?.installed;
@@ -212,7 +215,7 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
         </div>
         <div className="settings-row">
           <span>Admin Chat</span>
-          <code>{settings?.telegramAdminChatId ?? "Not configured"}</code>
+          <code>{workflowConfig?.telegramAdminChatId ?? "Not configured"}</code>
         </div>
         <div className="settings-row">
           <span>Last Callback</span>
@@ -244,22 +247,15 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
             "Telegram control will drive topic selection and review for the shortform assistant pack."}
         </p>
         <p className="subtle">
-          Use Telegram commands like <code>/shortlist</code>, <code>/status</code>, and <code>/help</code> for real usage. The buttons below are for testing and admin checks.
+          Use Telegram commands like <code>/shortlist</code>, <code>/status</code>, and <code>/help</code> for day-to-day operation. Launcher only keeps the latest state in view.
         </p>
         <div className="button-row">
           <button
             type="button"
             className="secondary-button"
-            onClick={() => onNavigate("settings")}
+            onClick={() => onNavigate("installed")}
           >
-            Open Telegram Settings
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void sendMockShortlist()}
-          >
-            Send Test Trend Shortlist
+            Open Workflow Config
           </button>
           <button
             type="button"
@@ -267,6 +263,57 @@ export function LauncherPage({ onNavigate }: LauncherPageProps) {
             onClick={() => void refreshTelegramStatus()}
           >
             Sync Telegram
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-row">
+          <strong>YouTube Upload</strong>
+          <span className="pill">{youTubeAuthStatus?.connected ? "connected" : "not connected"}</span>
+        </div>
+        <div className="settings-row">
+          <span>Channel</span>
+          <code>{workflowConfig?.youtubeChannelLabel ?? "Not configured"}</code>
+        </div>
+        <div className="settings-row">
+          <span>Last Package</span>
+          <code>{telegramStatus?.lastPackagePath ?? "Not created yet"}</code>
+        </div>
+        <p className="subtle">
+          {youTubeAuthStatus?.message ??
+            "Connect YouTube in Installed workflow config, then upload the latest approved production package."}
+        </p>
+        {lastYouTubeUploadResult && (
+          <div className="manual-install-box">
+            <strong>
+              {lastYouTubeUploadResult.ok
+                ? "Upload complete. The latest package is now on YouTube."
+                : "Upload failed. Review the message below and try again."}
+            </strong>
+            <span className={lastYouTubeUploadResult.ok ? "" : "warning-text"}>
+              {lastYouTubeUploadResult.message}
+            </span>
+            {lastYouTubeUploadResult.videoUrl && (
+              <a
+                className="inline-link"
+                href={lastYouTubeUploadResult.videoUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open uploaded video
+              </a>
+            )}
+          </div>
+        )}
+        <div className="button-row">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void uploadLastPackageToYouTube()}
+            disabled={!youTubeAuthStatus?.connected || !telegramStatus?.lastPackagePath}
+          >
+            Upload Last Package
           </button>
         </div>
       </div>

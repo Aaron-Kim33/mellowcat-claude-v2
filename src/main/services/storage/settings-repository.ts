@@ -7,7 +7,8 @@ import { SecretsStore } from "./secrets-store";
 const SECRET_KEYS = [
   "openRouterApiKey",
   "openAiApiKey",
-  "telegramBotToken"
+  "telegramBotToken",
+  "youtubeOAuthClientSecret"
 ] as const;
 
 export class SettingsRepository {
@@ -21,6 +22,11 @@ export class SettingsRepository {
   }
 
   get(): AppSettings {
+    return this.currentSettings;
+  }
+
+  refreshSecrets(): AppSettings {
+    this.currentSettings = this.readMergedSettings();
     return this.currentSettings;
   }
 
@@ -97,6 +103,10 @@ export class SettingsRepository {
       openRouterModel: "openai/gpt-4o-mini",
       openAiModel: "gpt-5-mini",
       telegramOutputLanguage: "en",
+      youtubePrivacyStatus: "private",
+      youtubeCategoryId: "22",
+      youtubeAudience: "not_made_for_kids",
+      youtubeOAuthRedirectPort: "45123",
       mediaAnalysisPolicy: "text_only"
     };
   }

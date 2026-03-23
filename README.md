@@ -40,6 +40,8 @@ Initial MCP planning for this is documented in [docs/telegram-control-mcp.md](./
 
 The sellable product layer for that direction is documented in [docs/mcp-pack-manifest.md](./docs/mcp-pack-manifest.md).
 
+Composable MCP compatibility and dependency rules are documented in [docs/mcp-contract-and-dependency-model.md](./docs/mcp-contract-and-dependency-model.md).
+
 Multi-provider script generation planning is documented in [docs/script-provider-architecture.md](./docs/script-provider-architecture.md).
 
 Trend shortlist discovery planning is documented in [docs/trend-discovery-mcp.md](./docs/trend-discovery-mcp.md).

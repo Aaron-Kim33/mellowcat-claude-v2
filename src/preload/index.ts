@@ -1,10 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppMeta } from "../common/types/app";
-import type { TelegramControlStatus } from "../common/types/automation";
+import type {
+  ShortformWorkflowConfig,
+  TelegramControlStatus
+} from "../common/types/automation";
 import type { ClaudeInstallationStatus, ClaudeOutputEvent } from "../common/types/claude";
 import type { MellowCatAPI } from "../common/types/ipc";
 import type { MCPOutputEvent } from "../common/types/mcp";
-import type { AppSettings, AppUpdateStatus } from "../common/types/settings";
+import type {
+  AppSettings,
+  AppUpdateStatus,
+  YouTubeAuthStatus,
+  YouTubeUploadRequest,
+  YouTubeUploadResult
+} from "../common/types/settings";
 
 const claudeBridge: MellowCatAPI["claude"] = {
   startSession: (profileId?: string) => ipcRenderer.invoke("claude:start", profileId),
@@ -61,12 +70,28 @@ const authBridge: MellowCatAPI["auth"] = {
 };
 
 const automationBridge: MellowCatAPI["automation"] = {
+  getWorkflowConfig: (): Promise<ShortformWorkflowConfig> =>
+    ipcRenderer.invoke("automation:workflow:getConfig"),
+  setWorkflowConfig: (
+    patch: Partial<ShortformWorkflowConfig>
+  ): Promise<ShortformWorkflowConfig> =>
+    ipcRenderer.invoke("automation:workflow:setConfig", patch),
   getTelegramStatus: (): Promise<TelegramControlStatus> =>
     ipcRenderer.invoke("automation:telegram:getStatus"),
   syncTelegram: (): Promise<TelegramControlStatus> =>
     ipcRenderer.invoke("automation:telegram:sync"),
   sendMockShortlist: (): Promise<TelegramControlStatus> =>
-    ipcRenderer.invoke("automation:telegram:sendMockShortlist")
+    ipcRenderer.invoke("automation:telegram:sendMockShortlist"),
+  getYouTubeStatus: (): Promise<YouTubeAuthStatus> =>
+    ipcRenderer.invoke("automation:youtube:getStatus"),
+  connectYouTube: (): Promise<YouTubeAuthStatus> =>
+    ipcRenderer.invoke("automation:youtube:connect"),
+  disconnectYouTube: (): Promise<YouTubeAuthStatus> =>
+    ipcRenderer.invoke("automation:youtube:disconnect"),
+  inspectYouTubeUploadRequest: (packagePath: string): Promise<YouTubeUploadRequest> =>
+    ipcRenderer.invoke("automation:youtube:inspectUploadRequest", packagePath),
+  uploadYouTubePackage: (packagePath: string): Promise<YouTubeUploadResult> =>
+    ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath)
 };
 
 const api: MellowCatAPI = {

@@ -16,6 +16,13 @@ export interface AppSettings {
   telegramAdminChatId?: string;
   telegramOutputLanguage?: "en" | "ko";
   mediaAnalysisPolicy?: "text_only" | "vision_on_demand";
+  youtubeChannelLabel?: string;
+  youtubePrivacyStatus?: "private" | "unlisted" | "public";
+  youtubeCategoryId?: string;
+  youtubeAudience?: "not_made_for_kids" | "made_for_kids";
+  youtubeOAuthClientId?: string;
+  youtubeOAuthClientSecret?: string;
+  youtubeOAuthRedirectPort?: string;
   launchOnStartup: boolean;
 }
 
@@ -30,4 +37,42 @@ export interface AppUpdateStatus {
     | "error";
   version?: string;
   message?: string;
+}
+
+export interface YouTubeAuthStatus {
+  configured: boolean;
+  connected: boolean;
+  clientIdConfigured: boolean;
+  channelLabel?: string;
+  scope: string;
+  connectedAt?: string;
+  expiresAt?: string;
+  message: string;
+}
+
+export interface YouTubeUploadRequest {
+  platform: "youtube";
+  status: "draft" | "ready" | "uploaded" | "error";
+  videoFilePath: string;
+  thumbnailFilePath: string;
+  scheduledPublishAt: string;
+  metadata: {
+    title: string;
+    description: string;
+    tags: string[];
+    categoryId: string;
+    privacyStatus: "private" | "unlisted" | "public";
+    selfDeclaredMadeForKids: boolean;
+  };
+}
+
+export interface YouTubeUploadResult {
+  ok: boolean;
+  packagePath: string;
+  status: "uploaded" | "error";
+  videoId?: string;
+  videoUrl?: string;
+  requestPath: string;
+  resultPath: string;
+  message: string;
 }

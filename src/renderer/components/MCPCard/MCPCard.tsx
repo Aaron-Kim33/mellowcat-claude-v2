@@ -1,16 +1,24 @@
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
+import { evaluateMcpComposition } from "../../lib/mcp-composition";
 
 interface MCPCardProps {
   item: MCPCatalogItem;
+  installedList: InstalledMCPRecord[];
   installed?: InstalledMCPRecord;
   onInstall?: (id: string) => void;
   onUpdate?: (id: string) => void;
 }
 
-export function MCPCard({ item, installed, onInstall, onUpdate }: MCPCardProps) {
+export function MCPCard({ item, installedList, installed, onInstall, onUpdate }: MCPCardProps) {
   const isInstalled = Boolean(installed);
   const isRunning = installed?.runtime.status === "running";
   const hasUpdate = installed ? installed.version !== item.latestVersion : false;
+  const selectedIds = [
+    ...installedList.map((installedItem) => installedItem.id),
+    ...(installedList.some((installedItem) => installedItem.id === item.id) ? [] : [item.id])
+  ];
+  const composition = evaluateMcpComposition(selectedIds);
+  const itemIssues = composition.issues.filter((issue) => issue.mcpId === item.id);
 
   return (
     <article className={isInstalled ? "card card-installed" : "card"}>
@@ -31,7 +39,22 @@ export function MCPCard({ item, installed, onInstall, onUpdate }: MCPCardProps) 
           <span>Local Version</span>
           <strong>{installed?.version ?? "-"}</strong>
         </div>
+        {itemIssues.length > 0 && (
+          <div className="meta-item">
+            <span>Compatibility</span>
+            <strong className="warning-text">Needs {itemIssues.length} more requirement{itemIssues.length > 1 ? "s" : ""}</strong>
+          </div>
+        )}
       </div>
+      {itemIssues.length > 0 && (
+        <div className="manual-install-box">
+          {itemIssues.map((issue) => (
+            <span key={issue.message} className="subtle">
+              {issue.message}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="card-row">
         <div className="tag-row">
           {isInstalled && <span className="tag">{installed?.enabled ? "enabled" : "disabled"}</span>}
