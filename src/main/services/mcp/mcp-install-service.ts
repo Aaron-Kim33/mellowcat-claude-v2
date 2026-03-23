@@ -45,6 +45,9 @@ export class MCPInstallService {
       source: {
         type: "bundled"
       },
+      workflow: {
+        ids: catalogItem.workflow?.ids ?? []
+      },
       entitlement: {
         status: "free",
         checkedAt: new Date().toISOString()

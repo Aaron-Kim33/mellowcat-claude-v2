@@ -53,6 +53,13 @@ export interface MCPCatalogItem {
     source: "bundled" | "remote";
     manifestPath?: string;
   };
+  availability?: {
+    state: "installable" | "coming_soon";
+    note?: string;
+  };
+  workflow?: {
+    ids: string[];
+  };
 }
 
 export interface InstalledMCPRecord {
@@ -69,6 +76,9 @@ export interface InstalledMCPRecord {
   source: {
     type: "catalog" | "local" | "bundled";
     url?: string;
+  };
+  workflow?: {
+    ids: string[];
   };
   entitlement: {
     status: MCPEntitlementStatus;

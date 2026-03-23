@@ -1,5 +1,7 @@
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
 import { evaluateMcpComposition } from "../../lib/mcp-composition";
+import { detectMcpRole } from "../../lib/mcp-role";
+import { detectStorePlatform, getPlatformTone } from "../../lib/store-platform";
 
 interface MCPCardProps {
   item: MCPCatalogItem;
@@ -13,6 +15,10 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
   const isInstalled = Boolean(installed);
   const isRunning = installed?.runtime.status === "running";
   const hasUpdate = installed ? installed.version !== item.latestVersion : false;
+  const isInstallable = item.availability?.state !== "coming_soon";
+  const platform = detectStorePlatform(item);
+  const platformTone = getPlatformTone(platform);
+  const role = detectMcpRole(item);
   const selectedIds = [
     ...installedList.map((installedItem) => installedItem.id),
     ...(installedList.some((installedItem) => installedItem.id === item.id) ? [] : [item.id])
@@ -21,10 +27,16 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
   const itemIssues = composition.issues.filter((issue) => issue.mcpId === item.id);
 
   return (
-    <article className={isInstalled ? "card card-installed" : "card"}>
+    <article className={`${isInstalled ? "card card-installed" : "card"} compact-card platform-card ${platformTone}`}>
       <div className="card-row">
         <div>
-          <p className="eyebrow">{item.distribution.priceText ?? item.distribution.type}</p>
+          <div className="tag-row">
+            <span className={`platform-badge ${platformTone}`}>
+              {platform === "all" ? "Core" : platform === "packs" ? "Pack" : item.tags.find((tag) => tag.toLowerCase() === platform) ?? platform}
+            </span>
+            <span className={`role-badge ${role.tone}`}>{role.label}</span>
+            <span className="eyebrow">{item.distribution.priceText ?? item.distribution.type}</span>
+          </div>
           <h3>{item.name}</h3>
         </div>
         <span className="pill">{item.latestVersion}</span>
@@ -33,7 +45,15 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
       <div className="meta-list">
         <div className="meta-item">
           <span>Status</span>
-          <strong>{isInstalled ? (isRunning ? "Running" : "Installed") : "Not installed"}</strong>
+          <strong>
+            {isInstalled
+              ? isRunning
+                ? "Running"
+                : "Installed"
+              : isInstallable
+                ? "Not installed"
+                : "Coming soon"}
+          </strong>
         </div>
         <div className="meta-item">
           <span>Local Version</span>
@@ -55,10 +75,23 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
           ))}
         </div>
       )}
+      {item.availability?.state === "coming_soon" && (
+        <div className="manual-install-box">
+          <span className="subtle">
+            {item.availability.note ??
+              "This workflow piece is mapped out in the marketplace but not bundled yet."}
+          </span>
+        </div>
+      )}
       <div className="card-row">
         <div className="tag-row">
           {isInstalled && <span className="tag">{installed?.enabled ? "enabled" : "disabled"}</span>}
           {hasUpdate && <span className="tag">update available</span>}
+          {item.workflow?.ids?.map((workflowId) => (
+            <span key={workflowId} className="tag">
+              workflow:{workflowId}
+            </span>
+          ))}
           {item.tags.map((tag) => (
             <span key={tag} className="tag">
               {tag}
@@ -68,13 +101,21 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
         {installed ? (
           <button
             type="button"
-            className={hasUpdate ? "primary-button" : "secondary-button"}
+            className={hasUpdate ? `primary-button ${platformTone}` : "secondary-button"}
             onClick={() => onUpdate?.(item.id)}
           >
             {hasUpdate ? "Update Now" : "Recheck"}
           </button>
+        ) : !isInstallable ? (
+          <button type="button" className="secondary-button" disabled>
+            Coming Soon
+          </button>
         ) : (
-          <button type="button" className="primary-button" onClick={() => onInstall?.(item.id)}>
+          <button
+            type="button"
+            className={`primary-button ${platformTone}`}
+            onClick={() => onInstall?.(item.id)}
+          >
             Install
           </button>
         )}

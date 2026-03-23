@@ -1,5 +1,7 @@
-import { ipcMain } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
+import type { OpenDialogOptions } from "electron";
 import type { ShortformWorkflowConfig } from "../../common/types/automation";
+import type { YouTubeUploadRequest } from "../../common/types/settings";
 import { TelegramControlService } from "../services/automation/telegram-control-service";
 import { ShortformWorkflowConfigService } from "../services/automation/shortform-workflow-config-service";
 import { YouTubeAuthService } from "../services/automation/youtube-auth-service";
@@ -27,6 +29,45 @@ export function registerAutomationIpc(
   ipcMain.handle("automation:youtube:inspectUploadRequest", (_event, packagePath: string) =>
     youTubeAuthService.inspectUploadRequest(packagePath)
   );
+  ipcMain.handle(
+    "automation:youtube:updateUploadRequest",
+    (_event, packagePath: string, patch: Partial<YouTubeUploadRequest>) =>
+      youTubeAuthService.updateUploadRequest(packagePath, patch)
+  );
+  ipcMain.handle("automation:youtube:pickVideoFile", async (event) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Video files",
+          extensions: ["mp4", "mov", "webm", "mkv"]
+        }
+      ]
+    };
+    const result = ownerWindow
+      ? await dialog.showOpenDialog(ownerWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    return result.canceled ? undefined : result.filePaths[0];
+  });
+  ipcMain.handle("automation:youtube:pickThumbnailFile", async (event) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Image files",
+          extensions: ["png", "jpg", "jpeg", "webp"]
+        }
+      ]
+    };
+    const result = ownerWindow
+      ? await dialog.showOpenDialog(ownerWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    return result.canceled ? undefined : result.filePaths[0];
+  });
   ipcMain.handle("automation:youtube:uploadPackage", (_event, packagePath: string) =>
     youTubeAuthService.uploadPackage(packagePath)
   );

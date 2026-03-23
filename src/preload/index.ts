@@ -90,6 +90,15 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:youtube:disconnect"),
   inspectYouTubeUploadRequest: (packagePath: string): Promise<YouTubeUploadRequest> =>
     ipcRenderer.invoke("automation:youtube:inspectUploadRequest", packagePath),
+  updateYouTubeUploadRequest: (
+    packagePath: string,
+    patch: Partial<YouTubeUploadRequest>
+  ): Promise<YouTubeUploadRequest> =>
+    ipcRenderer.invoke("automation:youtube:updateUploadRequest", packagePath, patch),
+  pickYouTubeVideoFile: (): Promise<string | undefined> =>
+    ipcRenderer.invoke("automation:youtube:pickVideoFile"),
+  pickYouTubeThumbnailFile: (): Promise<string | undefined> =>
+    ipcRenderer.invoke("automation:youtube:pickThumbnailFile"),
   uploadYouTubePackage: (packagePath: string): Promise<YouTubeUploadResult> =>
     ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath)
 };

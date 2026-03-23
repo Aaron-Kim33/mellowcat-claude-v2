@@ -64,6 +64,12 @@ export interface MellowCatAPI {
     connectYouTube: () => Promise<YouTubeAuthStatus>;
     disconnectYouTube: () => Promise<YouTubeAuthStatus>;
     inspectYouTubeUploadRequest: (packagePath: string) => Promise<YouTubeUploadRequest>;
+    updateYouTubeUploadRequest: (
+      packagePath: string,
+      patch: Partial<YouTubeUploadRequest>
+    ) => Promise<YouTubeUploadRequest>;
+    pickYouTubeVideoFile: () => Promise<string | undefined>;
+    pickYouTubeThumbnailFile: () => Promise<string | undefined>;
     uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
   };
 }

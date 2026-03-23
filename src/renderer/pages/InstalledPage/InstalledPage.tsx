@@ -3,30 +3,46 @@ import { useAppStore } from "../../store/app-store";
 import { LogPanel } from "../../components/Terminal/LogPanel";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 import { evaluateMcpComposition } from "../../lib/mcp-composition";
+import { WorkflowConfigRenderer } from "../../components/Workflow/WorkflowConfigRenderer";
+import { resolveRegisteredWorkflows } from "../../lib/workflow-registry";
 
-const OPENROUTER_MODEL_OPTIONS = [
-  "openai/gpt-4o-mini",
-  "openai/gpt-4o",
-  "anthropic/claude-3.5-sonnet",
-  "google/gemini-2.0-flash-001"
-] as const;
+function isoToLocalDateTimeInput(value?: string) {
+  if (!value) {
+    return "";
+  }
 
-const OPENAI_MODEL_OPTIONS = ["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini"] as const;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
 
-const YOUTUBE_CATEGORY_OPTIONS = [
-  { value: "22", label: "People & Blogs" },
-  { value: "24", label: "Entertainment" },
-  { value: "25", label: "News & Politics" },
-  { value: "27", label: "Education" }
-] as const;
+  const pad = (part: number) => part.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function localDateTimeInputToIso(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toISOString();
+}
 
 export function InstalledPage() {
   const {
+    catalog,
     installed,
     settings,
     workflowConfig,
     telegramStatus,
     youTubeAuthStatus,
+    youTubeUploadRequest,
+    lastYouTubeUploadResult,
     enableMcp,
     disableMcp,
     startMcp,
@@ -39,10 +55,23 @@ export function InstalledPage() {
     refreshTelegramStatus,
     refreshYouTubeStatus,
     connectYouTube,
-    disconnectYouTube
+    disconnectYouTube,
+    refreshYouTubeUploadRequest,
+    saveYouTubeUploadRequest,
+    pickYouTubeVideoFile,
+    pickYouTubeThumbnailFile,
+    uploadLastPackageToYouTube
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.installed;
   const composition = evaluateMcpComposition(installed.map((item) => item.id));
+  const resolvedWorkflows = resolveRegisteredWorkflows({
+    installedIds: installed.map((item) => item.id),
+    installedWorkflowIds: installed.flatMap((item) => item.workflow?.ids ?? []),
+    workflowConfig,
+    telegramStatus,
+    youTubeAuthStatus,
+    lastYouTubeUploadResult
+  });
   const [trendWindow, setTrendWindow] = useState<"24h" | "3d">("24h");
   const [scriptProvider, setScriptProvider] = useState("openrouter_api");
   const [openRouterApiKey, setOpenRouterApiKey] = useState("");
@@ -51,7 +80,6 @@ export function InstalledPage() {
   const [openAiModel, setOpenAiModel] = useState("gpt-5-mini");
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramAdminChatId, setTelegramAdminChatId] = useState("");
-  const [telegramOutputLanguage, setTelegramOutputLanguage] = useState<"en" | "ko">("en");
   const [youtubeChannelLabel, setYoutubeChannelLabel] = useState("");
   const [youtubePrivacyStatus, setYoutubePrivacyStatus] = useState<"private" | "unlisted" | "public">("private");
   const [youtubeCategoryId, setYoutubeCategoryId] = useState("22");
@@ -59,6 +87,10 @@ export function InstalledPage() {
   const [youtubeOAuthClientId, setYoutubeOAuthClientId] = useState("");
   const [youtubeOAuthClientSecret, setYoutubeOAuthClientSecret] = useState("");
   const [youtubeOAuthRedirectPort, setYoutubeOAuthRedirectPort] = useState("45123");
+  const [youtubeVideoFilePath, setYoutubeVideoFilePath] = useState("");
+  const [youtubeThumbnailFilePath, setYoutubeThumbnailFilePath] = useState("");
+  const [youtubePublishMode, setYoutubePublishMode] = useState<"now" | "scheduled">("now");
+  const [youtubeScheduledPublishAt, setYoutubeScheduledPublishAt] = useState("");
   const [showOpenRouterApiKey, setShowOpenRouterApiKey] = useState(false);
   const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
   const [showTelegramBotToken, setShowTelegramBotToken] = useState(false);
@@ -74,7 +106,6 @@ export function InstalledPage() {
     setOpenAiModel(workflowConfig?.openAiModel ?? "gpt-5-mini");
     setTelegramBotToken(workflowConfig?.telegramBotToken ?? "");
     setTelegramAdminChatId(workflowConfig?.telegramAdminChatId ?? "");
-    setTelegramOutputLanguage(workflowConfig?.telegramOutputLanguage ?? "en");
     setYoutubeChannelLabel(workflowConfig?.youtubeChannelLabel ?? "");
     setYoutubePrivacyStatus(workflowConfig?.youtubePrivacyStatus ?? "private");
     setYoutubeCategoryId(workflowConfig?.youtubeCategoryId ?? "22");
@@ -83,6 +114,17 @@ export function InstalledPage() {
     setYoutubeOAuthClientSecret(workflowConfig?.youtubeOAuthClientSecret ?? "");
     setYoutubeOAuthRedirectPort(workflowConfig?.youtubeOAuthRedirectPort ?? "45123");
   }, [workflowConfig]);
+
+  useEffect(() => {
+    setYoutubeVideoFilePath(youTubeUploadRequest?.videoFilePath ?? "");
+    setYoutubeThumbnailFilePath(youTubeUploadRequest?.thumbnailFilePath ?? "");
+    setYoutubePublishMode(
+      youTubeUploadRequest?.scheduledPublishAt ? "scheduled" : "now"
+    );
+    setYoutubeScheduledPublishAt(
+      isoToLocalDateTimeInput(youTubeUploadRequest?.scheduledPublishAt)
+    );
+  }, [youTubeUploadRequest]);
 
   const handleSaveWorkflowConfig = async () => {
     setSavedMessage("");
@@ -100,7 +142,6 @@ export function InstalledPage() {
       openAiModel: openAiModel.trim() || undefined,
       telegramBotToken: telegramBotToken.trim() || undefined,
       telegramAdminChatId: telegramAdminChatId.trim() || undefined,
-      telegramOutputLanguage,
       youtubeChannelLabel: youtubeChannelLabel.trim() || undefined,
       youtubePrivacyStatus,
       youtubeCategoryId,
@@ -110,6 +151,87 @@ export function InstalledPage() {
       youtubeOAuthRedirectPort: youtubeOAuthRedirectPort.trim() || undefined
     });
     setSavedMessage("Workflow config saved.");
+  };
+
+  const handleSaveUploadRequest = async () => {
+    await saveYouTubeUploadRequest({
+      videoFilePath: youtubeVideoFilePath.trim(),
+      thumbnailFilePath: youtubeThumbnailFilePath.trim(),
+      scheduledPublishAt:
+        youtubePublishMode === "scheduled"
+          ? localDateTimeInputToIso(youtubeScheduledPublishAt)
+          : ""
+    });
+    setSavedMessage("Upload request saved.");
+  };
+
+  const handleChooseVideoFile = async () => {
+    if (!telegramStatus?.lastPackagePath) {
+      window.alert(
+        "먼저 Telegram에서 후보를 승인해서 package를 만들어주세요. Approve 후 다시 시도하면 됩니다."
+      );
+      return;
+    }
+
+    const selectedPath = await pickYouTubeVideoFile();
+    if (!selectedPath) {
+      return;
+    }
+
+    setYoutubeVideoFilePath(selectedPath);
+    await saveYouTubeUploadRequest({
+      videoFilePath: selectedPath,
+      thumbnailFilePath: youtubeThumbnailFilePath.trim(),
+      scheduledPublishAt:
+        youtubePublishMode === "scheduled"
+          ? localDateTimeInputToIso(youtubeScheduledPublishAt)
+          : ""
+    });
+    setSavedMessage("Video file selected.");
+  };
+
+  const handleChooseThumbnailFile = async () => {
+    if (!telegramStatus?.lastPackagePath) {
+      window.alert(
+        "먼저 Telegram에서 후보를 승인해서 package를 만들어주세요. Approve 후 다시 시도하면 됩니다."
+      );
+      return;
+    }
+
+    const selectedPath = await pickYouTubeThumbnailFile();
+    if (!selectedPath) {
+      return;
+    }
+
+    setYoutubeThumbnailFilePath(selectedPath);
+    await saveYouTubeUploadRequest({
+      videoFilePath: youtubeVideoFilePath.trim(),
+      thumbnailFilePath: selectedPath,
+      scheduledPublishAt:
+        youtubePublishMode === "scheduled"
+          ? localDateTimeInputToIso(youtubeScheduledPublishAt)
+          : ""
+    });
+    setSavedMessage("Thumbnail file selected.");
+  };
+
+  const handleUploadLastPackage = async () => {
+    if (!telegramStatus?.lastPackagePath) {
+      window.alert(
+        "업로드하려면 먼저 Telegram 흐름에서 package를 만들어야 합니다. 후보 선택 후 Approve까지 진행해 주세요."
+      );
+      return;
+    }
+
+    await saveYouTubeUploadRequest({
+      videoFilePath: youtubeVideoFilePath.trim(),
+      thumbnailFilePath: youtubeThumbnailFilePath.trim(),
+      scheduledPublishAt:
+        youtubePublishMode === "scheduled"
+          ? localDateTimeInputToIso(youtubeScheduledPublishAt)
+          : ""
+    });
+    await uploadLastPackageToYouTube();
   };
 
   const selectedOutput = selectedMcpLogId ? mcpOutputById[selectedMcpLogId] ?? "" : "";
@@ -153,256 +275,227 @@ export function InstalledPage() {
         <div className="card-row">
           <div>
             <p className="eyebrow">Installed Workflow Config</p>
-            <h3>Shortform Automation Stack</h3>
+            <h3>{resolvedWorkflows[0]?.schema.title ?? "Workflow Stack"}</h3>
           </div>
           <span className="pill">{workflowConfig?.scriptProvider ?? "openrouter_api"}</span>
         </div>
         <p className="subtle">
-          Manage Telegram, generation, and YouTube delivery settings here so automation-specific config stays with the workflow layer, not global app settings.
+          {resolvedWorkflows[0]?.schema.description ??
+            "Workflow-specific configuration will appear here when compatible packs or MCPs are installed."}
         </p>
-        <div className="form-grid">
-          <label className="field">
-            <span>Trend Window</span>
-            <select
-              className="text-input"
-              value={trendWindow}
-              onChange={(event) => setTrendWindow(event.target.value as "24h" | "3d")}
-            >
-              <option value="24h">Recent 24 hours</option>
-              <option value="3d">Recent 3 days</option>
-            </select>
-          </label>
 
-          <label className="field">
-            <span>Script Provider</span>
-            <select
-              className="text-input"
-              value={scriptProvider}
-              onChange={(event) => setScriptProvider(event.target.value)}
-            >
-              <option value="openrouter_api">OpenRouter</option>
-              <option value="openai_api">OpenAI</option>
-              <option value="claude_cli">Claude CLI</option>
-              <option value="mock">Mock</option>
-            </select>
-          </label>
-
-          {scriptProvider === "openrouter_api" && (
-            <>
-              <label className="field">
-                <span>OpenRouter API Key</span>
-                <div className="secret-input">
-                  <input
-                    className="text-input"
-                    type={showOpenRouterApiKey ? "text" : "password"}
-                    value={openRouterApiKey}
-                    onChange={(event) => setOpenRouterApiKey(event.target.value)}
-                    placeholder="sk-or-v1-..."
-                  />
-                  <button
-                    type="button"
-                    className="secret-toggle"
-                    onClick={() => setShowOpenRouterApiKey((value) => !value)}
-                  >
-                    {showOpenRouterApiKey ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </label>
-              <label className="field">
-                <span>OpenRouter Model</span>
-                <select
-                  className="text-input"
-                  value={openRouterModel}
-                  onChange={(event) => setOpenRouterModel(event.target.value)}
-                >
-                  {OPENROUTER_MODEL_OPTIONS.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-
-          {scriptProvider === "openai_api" && (
-            <>
-              <label className="field">
-                <span>OpenAI API Key</span>
-                <div className="secret-input">
-                  <input
-                    className="text-input"
-                    type={showOpenAiApiKey ? "text" : "password"}
-                    value={openAiApiKey}
-                    onChange={(event) => setOpenAiApiKey(event.target.value)}
-                    placeholder="sk-..."
-                  />
-                  <button
-                    type="button"
-                    className="secret-toggle"
-                    onClick={() => setShowOpenAiApiKey((value) => !value)}
-                  >
-                    {showOpenAiApiKey ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </label>
-              <label className="field">
-                <span>OpenAI Model</span>
-                <select
-                  className="text-input"
-                  value={openAiModel}
-                  onChange={(event) => setOpenAiModel(event.target.value)}
-                >
-                  {OPENAI_MODEL_OPTIONS.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-
-          <label className="field">
-            <span>Telegram Bot Token</span>
-            <div className="secret-input">
-              <input
-                className="text-input"
-                type={showTelegramBotToken ? "text" : "password"}
-                value={telegramBotToken}
-                onChange={(event) => setTelegramBotToken(event.target.value)}
-                placeholder="123456:ABC..."
+        {resolvedWorkflows.length > 0 ? (
+          resolvedWorkflows.map((workflow) => (
+            <div key={workflow.id} className="workflow-stack-block">
+              <WorkflowConfigRenderer
+                schema={workflow.schema}
+                fields={{
+                  trendWindow: {
+                    value: trendWindow,
+                    onChange: (value) => setTrendWindow(value as "24h" | "3d")
+                  },
+                  scriptProvider: {
+                    value: scriptProvider,
+                    onChange: setScriptProvider
+                  },
+                  openRouterApiKey: {
+                    value: openRouterApiKey,
+                    onChange: setOpenRouterApiKey,
+                    visible: showOpenRouterApiKey,
+                    onToggleVisibility: () => setShowOpenRouterApiKey((value) => !value)
+                  },
+                  openRouterModel: {
+                    value: openRouterModel,
+                    onChange: setOpenRouterModel
+                  },
+                  openAiApiKey: {
+                    value: openAiApiKey,
+                    onChange: setOpenAiApiKey,
+                    visible: showOpenAiApiKey,
+                    onToggleVisibility: () => setShowOpenAiApiKey((value) => !value)
+                  },
+                  openAiModel: {
+                    value: openAiModel,
+                    onChange: setOpenAiModel
+                  },
+                  telegramBotToken: {
+                    value: telegramBotToken,
+                    onChange: setTelegramBotToken,
+                    visible: showTelegramBotToken,
+                    onToggleVisibility: () => setShowTelegramBotToken((value) => !value)
+                  },
+                  telegramAdminChatId: {
+                    value: telegramAdminChatId,
+                    onChange: setTelegramAdminChatId
+                  },
+                  youtubeChannelLabel: {
+                    value: youtubeChannelLabel,
+                    onChange: setYoutubeChannelLabel
+                  },
+                  youtubePrivacyStatus: {
+                    value: youtubePrivacyStatus,
+                    onChange: (value) =>
+                      setYoutubePrivacyStatus(value as "private" | "unlisted" | "public")
+                  },
+                  youtubeCategoryId: {
+                    value: youtubeCategoryId,
+                    onChange: setYoutubeCategoryId
+                  },
+                  youtubeAudience: {
+                    value: youtubeAudience,
+                    onChange: (value) =>
+                      setYoutubeAudience(value as "not_made_for_kids" | "made_for_kids")
+                  },
+                  youtubeOAuthClientId: {
+                    value: youtubeOAuthClientId,
+                    onChange: setYoutubeOAuthClientId
+                  },
+                  youtubeOAuthClientSecret: {
+                    value: youtubeOAuthClientSecret,
+                    onChange: setYoutubeOAuthClientSecret,
+                    visible: showYouTubeClientSecret,
+                    onToggleVisibility: () => setShowYouTubeClientSecret((value) => !value)
+                  },
+                  youtubeOAuthRedirectPort: {
+                    value: youtubeOAuthRedirectPort,
+                    onChange: setYoutubeOAuthRedirectPort
+                  },
+                  youtubePublishMode: {
+                    value: youtubePublishMode,
+                    onChange: (value) =>
+                      setYoutubePublishMode(value as "now" | "scheduled")
+                  },
+                  youtubeScheduledPublishAt: {
+                    value: youtubeScheduledPublishAt,
+                    onChange: setYoutubeScheduledPublishAt
+                  }
+                }}
+                actions={{
+                  syncTelegram: {
+                    onClick: () => void refreshTelegramStatus()
+                  },
+                  refreshYouTube: {
+                    onClick: () => void refreshYouTubeStatus()
+                  },
+                  connectYouTube: {
+                    onClick: () => void connectYouTube(),
+                    disabled: !youtubeOAuthClientId.trim()
+                  },
+                  disconnectYouTube: {
+                    onClick: () => void disconnectYouTube(),
+                    disabled: !youTubeAuthStatus?.connected
+                  },
+                  chooseVideoFile: {
+                    onClick: () => void handleChooseVideoFile()
+                  },
+                  chooseThumbnailFile: {
+                    onClick: () => void handleChooseThumbnailFile()
+                  },
+                  uploadLastPackage: {
+                    onClick: () => void handleUploadLastPackage(),
+                    disabled:
+                      !youTubeAuthStatus?.connected ||
+                      !telegramStatus?.lastPackagePath ||
+                      !youtubeVideoFilePath.trim()
+                  }
+                }}
+                statuses={{
+                  savedMessage: {
+                    value: savedMessage || "Save workflow config after edits."
+                  },
+                  telegramQuickStart: {
+                    value: "텔레그램에서 /help 또는 /shortlist 를 보내면 시작할 수 있습니다."
+                  },
+                  telegramMessage: {
+                    value:
+                      telegramStatus?.message ?? "Telegram control status will appear here."
+                  },
+                  telegramTransport: {
+                    value: telegramStatus?.state ?? "idle"
+                  },
+                  youtubeState: {
+                    value: youTubeAuthStatus?.connected ? "connected" : "not connected",
+                    tone: youTubeAuthStatus?.connected ? "default" : "warning"
+                  },
+                  selectedVideoFile: {
+                    value: youtubeVideoFilePath || "No video selected yet",
+                    tone: youtubeVideoFilePath ? "default" : "warning"
+                  },
+                  selectedThumbnailFile: {
+                    value: youtubeThumbnailFilePath || "No thumbnail selected",
+                    tone: "default"
+                  },
+                  latestPackage: {
+                    value: telegramStatus?.lastPackagePath ?? "Not created yet"
+                  },
+                  uploadRequestStatus: {
+                    value: youTubeUploadRequest
+                      ? `${youTubeUploadRequest.status} ${youTubeUploadRequest.videoFilePath ? "· video path set" : "· video path missing"}`
+                      : "No upload request loaded yet",
+                    tone:
+                      !youTubeUploadRequest || youTubeUploadRequest.videoFilePath
+                        ? "default"
+                        : "warning"
+                  },
+                  lastUpload: {
+                    value: lastYouTubeUploadResult
+                      ? lastYouTubeUploadResult.ok
+                        ? "Upload complete. The latest package is now on YouTube."
+                        : lastYouTubeUploadResult.message
+                      : youTubeAuthStatus?.message ??
+                        "Connect YouTube here when this workflow needs publishing.",
+                    tone:
+                      lastYouTubeUploadResult && !lastYouTubeUploadResult.ok
+                        ? "warning"
+                        : "default",
+                    href: lastYouTubeUploadResult?.videoUrl,
+                    linkLabel: "Open uploaded video"
+                  },
+                  instagramState: {
+                    value: "delivery connector coming soon",
+                    tone: "warning"
+                  }
+                }}
               />
-              <button
-                type="button"
-                className="secret-toggle"
-                onClick={() => setShowTelegramBotToken((value) => !value)}
-              >
-                {showTelegramBotToken ? "Hide" : "Show"}
-              </button>
+
+              <div className="manual-install-box">
+                <strong>Marketplace links</strong>
+                <div className="tag-row">
+                  {catalog
+                    .filter((item) => item.workflow?.ids?.includes(workflow.id))
+                    .map((item) => {
+                      const installedRecord = installed.find(
+                        (installedItem) => installedItem.id === item.id
+                      );
+                      const stateLabel = installedRecord
+                        ? installedRecord.runtime.status === "running"
+                          ? "running"
+                          : "installed"
+                        : item.availability?.state === "coming_soon"
+                          ? "coming soon"
+                          : "available";
+
+                      return (
+                        <span key={item.id} className="tag">
+                          {item.name} {"\u00b7"} {stateLabel}
+                        </span>
+                      );
+                    })}
+                </div>
+                <p className="subtle">
+                  This workflow lights up from marketplace items that declare the same workflow id.
+                </p>
+              </div>
             </div>
-          </label>
-
-          <label className="field">
-            <span>Telegram Admin Chat ID</span>
-            <input
-              className="text-input"
-              value={telegramAdminChatId}
-              onChange={(event) => setTelegramAdminChatId(event.target.value)}
-              placeholder="123456789"
-            />
-          </label>
-
-          <label className="field">
-            <span>Telegram Output Language</span>
-            <select
-              className="text-input"
-              value={telegramOutputLanguage}
-              onChange={(event) => setTelegramOutputLanguage(event.target.value as "en" | "ko")}
-            >
-              <option value="en">English</option>
-              <option value="ko">Korean</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>YouTube Channel Label</span>
-            <input
-              className="text-input"
-              value={youtubeChannelLabel}
-              onChange={(event) => setYoutubeChannelLabel(event.target.value)}
-              placeholder="Main Shorts Channel"
-            />
-          </label>
-
-          <label className="field">
-            <span>YouTube Privacy</span>
-            <select
-              className="text-input"
-              value={youtubePrivacyStatus}
-              onChange={(event) =>
-                setYoutubePrivacyStatus(
-                  event.target.value as "private" | "unlisted" | "public"
-                )
-              }
-            >
-              <option value="private">Private</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="public">Public</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>YouTube Category</span>
-            <select
-              className="text-input"
-              value={youtubeCategoryId}
-              onChange={(event) => setYoutubeCategoryId(event.target.value)}
-            >
-              {YOUTUBE_CATEGORY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span>YouTube Audience</span>
-            <select
-              className="text-input"
-              value={youtubeAudience}
-              onChange={(event) =>
-                setYoutubeAudience(
-                  event.target.value as "not_made_for_kids" | "made_for_kids"
-                )
-              }
-            >
-              <option value="not_made_for_kids">Not made for kids</option>
-              <option value="made_for_kids">Made for kids</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>YouTube OAuth Client ID</span>
-            <input
-              className="text-input"
-              value={youtubeOAuthClientId}
-              onChange={(event) => setYoutubeOAuthClientId(event.target.value)}
-              placeholder="1234567890-xxxx.apps.googleusercontent.com"
-            />
-          </label>
-
-          <label className="field">
-            <span>YouTube OAuth Client Secret</span>
-            <div className="secret-input">
-              <input
-                className="text-input"
-                type={showYouTubeClientSecret ? "text" : "password"}
-                value={youtubeOAuthClientSecret}
-                onChange={(event) => setYoutubeOAuthClientSecret(event.target.value)}
-                placeholder="GOCSPX-..."
-              />
-              <button
-                type="button"
-                className="secret-toggle"
-                onClick={() => setShowYouTubeClientSecret((value) => !value)}
-              >
-                {showYouTubeClientSecret ? "Hide" : "Show"}
-              </button>
-            </div>
-          </label>
-
-          <label className="field">
-            <span>YouTube Redirect Port</span>
-            <input
-              className="text-input"
-              value={youtubeOAuthRedirectPort}
-              onChange={(event) => setYoutubeOAuthRedirectPort(event.target.value)}
-              placeholder="45123"
-            />
-          </label>
-        </div>
+          ))
+        ) : (
+          <div className="manual-install-box">
+            <strong>No workflow stack detected yet</strong>
+            <p className="subtle">
+              Install a compatible Pack or automation MCP set to light up this area.
+            </p>
+          </div>
+        )}
 
         <div className="button-row">
           <button
@@ -412,59 +505,6 @@ export function InstalledPage() {
           >
             Save Workflow Config
           </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void refreshTelegramStatus()}
-          >
-            Sync Telegram
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void refreshYouTubeStatus()}
-          >
-            Refresh YouTube
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void connectYouTube()}
-            disabled={!youtubeOAuthClientId.trim()}
-          >
-            Connect YouTube
-          </button>
-          <button
-            type="button"
-            className="danger-button"
-            onClick={() => void disconnectYouTube()}
-            disabled={!youTubeAuthStatus?.connected}
-          >
-            Disconnect YouTube
-          </button>
-        </div>
-
-        <div className="button-row">
-          <span className="subtle">{savedMessage}</span>
-          <span className="subtle">
-            {telegramStatus?.message ?? "Telegram control status will appear here."}
-          </span>
-        </div>
-
-        <div className="manual-install-box">
-          <strong>Automation Transports</strong>
-          <div className="settings-row">
-            <span>Telegram</span>
-            <code>{telegramStatus?.state ?? "idle"}</code>
-          </div>
-          <div className="settings-row">
-            <span>YouTube</span>
-            <code>{youTubeAuthStatus?.connected ? "connected" : "not connected"}</code>
-          </div>
-          <p className="subtle">
-            {youTubeAuthStatus?.message ??
-              "Connect YouTube here when this workflow needs publishing."}
-          </p>
         </div>
       </div>
 

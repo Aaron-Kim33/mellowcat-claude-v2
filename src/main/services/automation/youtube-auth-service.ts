@@ -160,6 +160,25 @@ export class YouTubeAuthService {
     return JSON.parse(fs.readFileSync(requestPath, "utf-8")) as YouTubeUploadRequest;
   }
 
+  updateUploadRequest(
+    packagePath: string,
+    patch: Partial<YouTubeUploadRequest>
+  ): YouTubeUploadRequest {
+    const requestPath = path.join(packagePath, "youtube-upload-request.json");
+    const current = this.inspectUploadRequest(packagePath);
+    const next: YouTubeUploadRequest = {
+      ...current,
+      ...patch,
+      metadata: {
+        ...current.metadata,
+        ...patch.metadata
+      }
+    };
+
+    fs.writeFileSync(requestPath, JSON.stringify(next, null, 2), "utf-8");
+    return next;
+  }
+
   async uploadPackage(packagePath: string): Promise<YouTubeUploadResult> {
     const requestPath = path.join(packagePath, "youtube-upload-request.json");
     const resultPath = path.join(packagePath, "youtube-upload-result.json");

@@ -26,10 +26,13 @@ export function Shell() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">{copy.shell.eyebrow}</p>
-          <h1>{copy.shell.title}</h1>
-          <p className="subtle">{copy.shell.subtitle}</p>
+        <div className="sidebar-brand">
+          <div className="brand-mark">M</div>
+          <div>
+            <p className="eyebrow">{copy.shell.eyebrow}</p>
+            <h1>{copy.shell.title}</h1>
+            <p className="subtle">{copy.shell.subtitle}</p>
+          </div>
         </div>
         <nav className="nav">
           {tabs.map((item) => (

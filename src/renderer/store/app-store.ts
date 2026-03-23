@@ -11,6 +11,7 @@ import type {
   AppSettings,
   AppUpdateStatus,
   YouTubeAuthStatus,
+  YouTubeUploadRequest,
   YouTubeUploadResult
 } from "@common/types/settings";
 
@@ -23,6 +24,7 @@ interface AppState {
   workflowConfig?: ShortformWorkflowConfig;
   appUpdateStatus?: AppUpdateStatus;
   youTubeAuthStatus?: YouTubeAuthStatus;
+  youTubeUploadRequest?: YouTubeUploadRequest;
   lastYouTubeUploadResult?: YouTubeUploadResult;
   authSession?: AuthSession;
   claudeSession?: ClaudeSession;
@@ -43,6 +45,10 @@ interface AppState {
   refreshYouTubeStatus: () => Promise<void>;
   connectYouTube: () => Promise<void>;
   disconnectYouTube: () => Promise<void>;
+  refreshYouTubeUploadRequest: () => Promise<void>;
+  saveYouTubeUploadRequest: (patch: Partial<YouTubeUploadRequest>) => Promise<void>;
+  pickYouTubeVideoFile: () => Promise<string | undefined>;
+  pickYouTubeThumbnailFile: () => Promise<string | undefined>;
   uploadLastPackageToYouTube: () => Promise<void>;
   sendClaudeInput: (sessionId: string, input: string) => Promise<void>;
   installMcp: (mcpId: string) => Promise<void>;
@@ -83,6 +89,11 @@ export const useAppStore = create<AppState>((set) => ({
       window.mellowcat.automation.getTelegramStatus(),
       window.mellowcat.automation.getYouTubeStatus()
     ]);
+    const youTubeUploadRequest = telegramStatus.lastPackagePath
+      ? await window.mellowcat.automation
+          .inspectYouTubeUploadRequest(telegramStatus.lastPackagePath)
+          .catch(() => undefined)
+      : undefined;
 
     if (!unsubscribeOutput) {
       unsubscribeOutput = window.mellowcat.claude.onOutput((event) => {
@@ -122,6 +133,7 @@ export const useAppStore = create<AppState>((set) => ({
       appUpdateStatus,
       telegramStatus,
       youTubeAuthStatus,
+      youTubeUploadRequest,
       authSession,
       claudeInstallation,
       claudeDetectionMessage: claudeInstallation.installed
@@ -212,7 +224,12 @@ export const useAppStore = create<AppState>((set) => ({
   refreshTelegramStatus: async () => {
     await window.mellowcat.automation.syncTelegram();
     const telegramStatus = await window.mellowcat.automation.getTelegramStatus();
-    set({ telegramStatus });
+    const youTubeUploadRequest = telegramStatus.lastPackagePath
+      ? await window.mellowcat.automation
+          .inspectYouTubeUploadRequest(telegramStatus.lastPackagePath)
+          .catch(() => undefined)
+      : undefined;
+    set({ telegramStatus, youTubeUploadRequest });
   },
   sendMockShortlist: async () => {
     const telegramStatus = await window.mellowcat.automation.sendMockShortlist();
@@ -230,6 +247,30 @@ export const useAppStore = create<AppState>((set) => ({
     const youTubeAuthStatus = await window.mellowcat.automation.disconnectYouTube();
     set({ youTubeAuthStatus });
   },
+  refreshYouTubeUploadRequest: async () => {
+    const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
+    if (!packagePath) {
+      set({ youTubeUploadRequest: undefined });
+      return;
+    }
+
+    const youTubeUploadRequest =
+      await window.mellowcat.automation.inspectYouTubeUploadRequest(packagePath);
+    set({ youTubeUploadRequest });
+  },
+  saveYouTubeUploadRequest: async (patch: Partial<YouTubeUploadRequest>) => {
+    const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
+    if (!packagePath) {
+      return;
+    }
+
+    const youTubeUploadRequest =
+      await window.mellowcat.automation.updateYouTubeUploadRequest(packagePath, patch);
+    set({ youTubeUploadRequest });
+  },
+  pickYouTubeVideoFile: async () => window.mellowcat.automation.pickYouTubeVideoFile(),
+  pickYouTubeThumbnailFile: async () =>
+    window.mellowcat.automation.pickYouTubeThumbnailFile(),
   uploadLastPackageToYouTube: async () => {
     const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
     if (!packagePath) {
@@ -238,7 +279,9 @@ export const useAppStore = create<AppState>((set) => ({
 
     const lastYouTubeUploadResult = await window.mellowcat.automation.uploadYouTubePackage(packagePath);
     const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
-    set({ lastYouTubeUploadResult, youTubeAuthStatus });
+    const youTubeUploadRequest =
+      await window.mellowcat.automation.inspectYouTubeUploadRequest(packagePath);
+    set({ lastYouTubeUploadResult, youTubeAuthStatus, youTubeUploadRequest });
   },
   sendClaudeInput: async (sessionId: string, input: string) => {
     await window.mellowcat.claude.sendInput(sessionId, input);
@@ -317,10 +360,16 @@ export const useAppStore = create<AppState>((set) => ({
       window.mellowcat.automation.getYouTubeStatus()
     ]);
 
+    const packagePath = telegramStatus.lastPackagePath;
+    const youTubeUploadRequest = packagePath
+      ? await window.mellowcat.automation.inspectYouTubeUploadRequest(packagePath).catch(() => undefined)
+      : undefined;
+
     set({
       workflowConfig,
       telegramStatus,
-      youTubeAuthStatus
+      youTubeAuthStatus,
+      youTubeUploadRequest
     });
   },
   login: async () => {

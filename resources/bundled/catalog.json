@@ -1,5 +1,165 @@
 [
   {
+    "id": "trend-discovery-mcp",
+    "slug": "trend-discovery-mcp",
+    "name": "Trend Discovery",
+    "summary": "Collect live Reddit, FMKorea, and Pann candidates for shortform workflows.",
+    "description": "Fetches and ranks candidate topics from live community sources so the workflow starts from real trend data instead of static prompts.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Built-in"
+    },
+    "latestVersion": "0.2.0",
+    "compatibility": {
+      "launcherMinVersion": "0.2.0",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["telegram", "discovery", "community", "official"],
+    "publishedAt": "2026-03-24T00:00:00.000Z",
+    "updatedAt": "2026-03-24T00:00:00.000Z",
+    "availability": {
+      "state": "coming_soon",
+      "note": "This module is already active in the current workflow, but it has not been split into a standalone installable package yet."
+    },
+    "workflow": {
+      "ids": ["shortform-automation-stack", "shortform-telegram-youtube", "shortform-telegram-instagram"]
+    }
+  },
+  {
+    "id": "telegram-control-mcp",
+    "slug": "telegram-control-mcp",
+    "name": "Telegram Control",
+    "summary": "Run shortlist, review, approval, and revision loops directly from Telegram.",
+    "description": "Handles Telegram commands, inline callbacks, and operator review flow for candidate selection and script approval.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Built-in"
+    },
+    "latestVersion": "0.2.0",
+    "compatibility": {
+      "launcherMinVersion": "0.2.0",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["telegram", "control", "review", "official"],
+    "publishedAt": "2026-03-24T00:00:00.000Z",
+    "updatedAt": "2026-03-24T00:00:00.000Z",
+    "availability": {
+      "state": "coming_soon",
+      "note": "This module is already active in the current workflow, but it has not been split into a standalone installable package yet."
+    },
+    "workflow": {
+      "ids": ["shortform-automation-stack", "shortform-telegram-youtube", "shortform-telegram-instagram"]
+    }
+  },
+  {
+    "id": "shortform-script-mcp",
+    "slug": "shortform-script-mcp",
+    "name": "Script Writer",
+    "summary": "Generate shortlist summaries and review drafts with the selected LLM provider.",
+    "description": "Turns selected candidates into shortform-ready review drafts, revise loops, and approval copies using OpenRouter, OpenAI, Claude CLI, or mock fallback.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Built-in"
+    },
+    "latestVersion": "0.2.0",
+    "compatibility": {
+      "launcherMinVersion": "0.2.0",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["telegram", "generation", "llm", "official"],
+    "publishedAt": "2026-03-24T00:00:00.000Z",
+    "updatedAt": "2026-03-24T00:00:00.000Z",
+    "availability": {
+      "state": "coming_soon",
+      "note": "This module is already active in the current workflow, but it has not been split into a standalone installable package yet."
+    },
+    "workflow": {
+      "ids": ["shortform-automation-stack", "shortform-telegram-youtube", "shortform-telegram-instagram"]
+    }
+  },
+  {
+    "id": "asset-packager-mcp",
+    "slug": "asset-packager-mcp",
+    "name": "Asset Packager",
+    "summary": "Turn approved drafts into reusable production packages and upload-ready metadata.",
+    "description": "Builds narration, captions, prompts, upload metadata, and package folder outputs after a script is approved.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Built-in"
+    },
+    "latestVersion": "0.2.0",
+    "compatibility": {
+      "launcherMinVersion": "0.2.0",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["telegram", "packaging", "workflow", "official"],
+    "publishedAt": "2026-03-24T00:00:00.000Z",
+    "updatedAt": "2026-03-24T00:00:00.000Z",
+    "availability": {
+      "state": "coming_soon",
+      "note": "This module is already active in the current workflow, but it has not been split into a standalone installable package yet."
+    },
+    "workflow": {
+      "ids": ["shortform-automation-stack", "shortform-telegram-youtube", "shortform-telegram-instagram"]
+    }
+  },
+  {
+    "id": "youtube-publish-mcp",
+    "slug": "youtube-publish-mcp",
+    "name": "YouTube Publisher",
+    "summary": "Connect OAuth and upload approved production packages to YouTube.",
+    "description": "Handles YouTube OAuth, upload request files, metadata, and final upload execution from the approved package path.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Built-in"
+    },
+    "latestVersion": "0.2.0",
+    "compatibility": {
+      "launcherMinVersion": "0.2.0",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["youtube", "delivery", "publisher", "official"],
+    "publishedAt": "2026-03-24T00:00:00.000Z",
+    "updatedAt": "2026-03-24T00:00:00.000Z",
+    "availability": {
+      "state": "coming_soon",
+      "note": "This module is already active in the current workflow, but it has not been split into a standalone installable package yet."
+    },
+    "workflow": {
+      "ids": ["shortform-automation-stack", "shortform-telegram-youtube"]
+    }
+  },
+  {
     "id": "filesystem-tools",
     "slug": "filesystem-tools",
     "name": "Filesystem Tools",
@@ -26,6 +186,9 @@
     "package": {
       "source": "bundled",
       "manifestPath": "filesystem-tools/mcp.json"
+    },
+    "availability": {
+      "state": "installable"
     }
   }
 ]

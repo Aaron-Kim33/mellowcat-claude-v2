@@ -31,7 +31,7 @@ select {
 
 .shell {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 268px 1fr;
   min-height: 100vh;
 }
 
@@ -39,30 +39,51 @@ select {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 24px;
-  padding: 28px;
+  gap: 18px;
+  padding: 22px 18px;
   background: rgba(7, 10, 15, 0.68);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(20px);
 }
 
 .content {
-  padding: 28px;
+  padding: 22px;
+}
+
+.sidebar-brand {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(105, 212, 255, 0.95), rgba(123, 241, 200, 0.95));
+  color: #081019;
+  font-weight: 800;
+  font-size: 18px;
 }
 
 .nav {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .nav-button,
 .primary-button,
 .secondary-button,
 .danger-button,
-.pill-button {
+.pill-button,
+.platform-button {
   border: 0;
-  border-radius: 16px;
-  padding: 12px 16px;
+  border-radius: 14px;
+  padding: 10px 14px;
   cursor: pointer;
   transition: transform 140ms ease, opacity 140ms ease, background 140ms ease;
 }
@@ -80,9 +101,43 @@ select {
   font-weight: 700;
 }
 
+.primary-button.youtube,
+.platform-button.youtube.active {
+  background: linear-gradient(135deg, #ff5c5c, #ff2d55);
+  color: #fff4f4;
+}
+
+.primary-button.instagram,
+.platform-button.instagram.active {
+  background: linear-gradient(135deg, #fdc468, #df4996 52%, #8a3ab9);
+  color: #fff9fe;
+}
+
+.primary-button.telegram,
+.platform-button.telegram.active {
+  background: linear-gradient(135deg, #5bc8ff, #2b87ff);
+  color: #eff7ff;
+}
+
+.primary-button.pack,
+.platform-button.pack.active {
+  background: linear-gradient(135deg, #7ef1c8, #4bc9ff);
+  color: #06121a;
+}
+
 .secondary-button {
   background: rgba(255, 255, 255, 0.08);
   color: #f5f7fb;
+}
+
+.secondary-button.telegram-soft {
+  background: rgba(52, 149, 255, 0.14);
+  color: #aadaff;
+}
+
+.secondary-button.youtube-soft {
+  background: rgba(255, 66, 66, 0.14);
+  color: #ffbbbb;
 }
 
 .danger-button {
@@ -105,7 +160,7 @@ select {
 
 .page {
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 
 .hero,
@@ -120,7 +175,7 @@ select {
 
 .hero,
 .card {
-  padding: 24px;
+  padding: 18px 18px 16px;
 }
 
 .card-row,
@@ -137,13 +192,17 @@ select {
 }
 
 .settings-row + .settings-row {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
 }
 
 .hero-stats {
@@ -154,8 +213,38 @@ select {
 
 .form-grid {
   display: grid;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.workflow-config-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.workflow-config-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workflow-section-header h4 {
+  margin-bottom: 0;
+}
+
+.workflow-status-block {
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-stack-block {
+  display: grid;
+  gap: 14px;
 }
 
 .field {
@@ -188,7 +277,7 @@ select {
   margin: 0 0 6px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 12px;
+  font-size: 11px;
   color: #8bdfff;
 }
 
@@ -203,8 +292,8 @@ select {
 .manual-install-box {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
-  padding: 14px;
+  margin-top: 10px;
+  padding: 12px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -229,20 +318,117 @@ select {
 .pill {
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
+  padding: 5px 9px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   font-size: 12px;
+}
+
+.platform-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.platform-badge.telegram {
+  background: rgba(72, 170, 255, 0.16);
+  color: #82d4ff;
+}
+
+.platform-badge.instagram {
+  background: rgba(223, 73, 150, 0.18);
+  color: #ffb9e1;
+}
+
+.platform-badge.youtube {
+  background: rgba(255, 66, 66, 0.18);
+  color: #ffaaaa;
+}
+
+.platform-badge.pack {
+  background: rgba(123, 241, 200, 0.16);
+  color: #9af3da;
+}
+
+.platform-badge.neutral {
+  background: rgba(255, 255, 255, 0.08);
+  color: #dfe7f7;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.role-badge.core {
+  background: rgba(255, 255, 255, 0.08);
+  color: #dfe7f7;
+}
+
+.role-badge.control {
+  background: rgba(91, 200, 255, 0.16);
+  color: #9ad9ff;
+}
+
+.role-badge.discovery {
+  background: rgba(123, 241, 200, 0.16);
+  color: #a8f3db;
+}
+
+.role-badge.generation {
+  background: rgba(255, 196, 104, 0.16);
+  color: #ffd79b;
+}
+
+.role-badge.packaging {
+  background: rgba(170, 141, 255, 0.16);
+  color: #d1c1ff;
+}
+
+.role-badge.delivery {
+  background: rgba(255, 92, 92, 0.16);
+  color: #ffb0b0;
 }
 
 .card-installed {
   border-color: rgba(105, 212, 255, 0.22);
 }
 
+.platform-card.youtube {
+  border-color: rgba(255, 92, 92, 0.22);
+}
+
+.platform-card.instagram {
+  border-color: rgba(223, 73, 150, 0.26);
+}
+
+.platform-card.telegram {
+  border-color: rgba(91, 200, 255, 0.24);
+}
+
+.platform-card.pack {
+  border-color: rgba(123, 241, 200, 0.24);
+}
+
+.compact-card p {
+  margin-bottom: 12px;
+}
+
 .meta-list {
   display: grid;
-  gap: 10px;
-  margin: 16px 0;
+  gap: 8px;
+  margin: 12px 0;
 }
 
 .meta-item {
@@ -273,7 +459,7 @@ select {
 }
 
 .onboarding-item {
-  padding: 16px;
+  padding: 14px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -286,6 +472,58 @@ select {
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
+}
+
+.store-toolbar {
+  display: grid;
+  gap: 14px;
+}
+
+.store-pack-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(126, 241, 200, 0.12), rgba(75, 201, 255, 0.12));
+  border: 1px solid rgba(123, 241, 200, 0.18);
+}
+
+.platform-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.platform-button {
+  background: rgba(255, 255, 255, 0.05);
+  color: #dce7fb;
+  font-weight: 600;
+}
+
+.platform-button.active {
+  transform: translateY(-1px);
+}
+
+.platform-button.youtube {
+  box-shadow: inset 0 0 0 1px rgba(255, 92, 92, 0.18);
+}
+
+.platform-button.instagram {
+  box-shadow: inset 0 0 0 1px rgba(223, 73, 150, 0.2);
+}
+
+.platform-button.telegram {
+  box-shadow: inset 0 0 0 1px rgba(91, 200, 255, 0.2);
+}
+
+.platform-button.pack {
+  box-shadow: inset 0 0 0 1px rgba(123, 241, 200, 0.2);
+}
+
+.compact-empty-state {
+  gap: 8px;
 }
 
 select.text-input option {
@@ -329,8 +567,12 @@ p {
   }
 
   .sidebar {
-    gap: 24px;
+    gap: 18px;
     border-right: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .content {
+    padding: 16px;
   }
 }

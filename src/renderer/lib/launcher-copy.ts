@@ -84,36 +84,36 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
   en: {
     shell: {
       eyebrow: "MellowCat",
-      title: "Claude Control Room",
-      subtitle: "Launch Claude, install MCPs, and grow into a real storefront later.",
+      title: "Automation Hub",
+      subtitle: "Build channel-based automations with modular MCPs and packs.",
       tabs: {
-        launcher: "Launcher",
-        store: "Store",
-        installed: "Installed",
-        settings: "Settings",
+        launcher: "Console",
+        store: "Marketplace",
+        installed: "Workflows",
+        settings: "App",
         login: "Account",
         about: "About"
       }
     },
     pages: {
       launcher: {
-        eyebrow: "Launcher",
+        eyebrow: "Console",
         title: "Claude session control",
-        subtitle: "Start a local Claude session, stream its output, and prepare to wire in the real engine."
+        subtitle: "Run Claude, monitor automations, and keep channel workflows moving."
       },
       store: {
-        eyebrow: "Store",
-        title: "Free-first MCP catalog",
-        subtitle: "This page is structured for future paid entitlement checks, but stays frictionless for free distribution today.",
+        eyebrow: "Marketplace",
+        title: "Channel-ready MCP catalog",
+        subtitle: "Browse modular workflow pieces and packs by platform so users can buy only what they need.",
         installed: "installed",
         running: "running",
         search: "Search",
         searchPlaceholder: "Search MCPs by name, summary, or tag"
       },
       installed: {
-        eyebrow: "Installed",
-        title: "Local MCP registry",
-        subtitle: "Installed MCPs are tracked locally so the app can later sync account entitlements without changing the core model.",
+        eyebrow: "Workflows",
+        title: "Installed workflow pieces",
+        subtitle: "Manage installed MCPs and workflow config in the same place so packs feel cohesive instead of scattered.",
         version: "Version",
         enabled: "Enabled",
         installPath: "Install Path",
@@ -126,9 +126,9 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
         selectLogs: "Select an installed MCP to inspect its runtime logs."
       },
       settings: {
-        eyebrow: "Settings",
-        title: "Launcher defaults",
-        subtitle: "Settings are stored through a repository layer so this can move from local JSON to a richer storage system later.",
+        eyebrow: "App",
+        title: "Global app defaults",
+        subtitle: "Keep launcher-wide settings here and push workflow-specific configuration down into installed packs.",
         launcherLanguage: "Launcher Language",
         english: "English",
         korean: "Korean",
@@ -143,7 +143,7 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
       account: {
         eyebrow: "Account",
         title: "Future-proof auth entry",
-        subtitle: "The UI stays optional for now, but the service boundary is already in place for account and payment rollout later.",
+        subtitle: "Keep the account boundary lightweight now, then grow into payments and ownership later.",
         status: "Status",
         loggedIn: "Logged In",
         loggedOut: "Logged Out",
@@ -155,7 +155,7 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
       about: {
         eyebrow: "About",
         title: "MellowCat Claude",
-        subtitle: "Desktop launcher for Claude Code and MCP workflows.",
+        subtitle: "Desktop launcher for Claude Code and modular MCP workflows.",
         appVersion: "App Version"
       }
     }
@@ -163,36 +163,36 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
   ko: {
     shell: {
       eyebrow: "MellowCat",
-      title: "클로드 컨트롤 룸",
-      subtitle: "Claude를 실행하고 MCP를 설치하며, 이후 실제 스토어로 확장할 수 있는 런처입니다.",
+      title: "오토메이션 허브",
+      subtitle: "MCP와 Pack을 조합해 채널별 자동화를 구성하는 런처입니다.",
       tabs: {
-        launcher: "런처",
-        store: "스토어",
-        installed: "설치됨",
-        settings: "설정",
+        launcher: "콘솔",
+        store: "마켓",
+        installed: "워크플로",
+        settings: "앱 설정",
         login: "계정",
         about: "정보"
       }
     },
     pages: {
       launcher: {
-        eyebrow: "런처",
+        eyebrow: "콘솔",
         title: "Claude 세션 제어",
-        subtitle: "로컬 Claude 세션을 시작하고 출력을 스트리밍하며, 실제 엔진 연결을 준비합니다."
+        subtitle: "Claude를 실행하고 자동화 상태를 보면서 채널 운영 흐름을 이어갑니다."
       },
       store: {
-        eyebrow: "스토어",
-        title: "무료 우선 MCP 카탈로그",
-        subtitle: "지금은 무료 배포 중심이지만, 이후 유료 권한 체크까지 확장할 수 있게 구조를 잡아둔 화면입니다.",
+        eyebrow: "마켓",
+        title: "채널 중심 MCP 카탈로그",
+        subtitle: "플랫폼별로 MCP와 Pack을 나눠서 필요한 자동화 조각만 골라 쓸 수 있게 구성합니다.",
         installed: "설치됨",
         running: "실행 중",
         search: "검색",
         searchPlaceholder: "이름, 설명, 태그로 MCP 검색"
       },
       installed: {
-        eyebrow: "설치됨",
-        title: "로컬 MCP 레지스트리",
-        subtitle: "설치된 MCP를 로컬에서 추적해두고, 나중에 계정 권한 동기화가 붙어도 핵심 모델을 유지할 수 있게 합니다.",
+        eyebrow: "워크플로",
+        title: "설치된 워크플로 조각",
+        subtitle: "설치된 MCP와 워크플로 설정을 한곳에서 관리해 Pack이 흩어지지 않게 정리합니다.",
         version: "버전",
         enabled: "활성화",
         installPath: "설치 경로",
@@ -205,9 +205,9 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
         selectLogs: "설치된 MCP를 선택하면 런타임 로그를 볼 수 있습니다."
       },
       settings: {
-        eyebrow: "설정",
-        title: "런처 기본 설정",
-        subtitle: "설정은 repository 계층을 통해 저장되므로, 나중에 로컬 JSON에서 더 풍부한 저장소로 옮기기 쉽습니다.",
+        eyebrow: "앱 설정",
+        title: "전역 앱 기본값",
+        subtitle: "런처 전체 설정만 여기서 관리하고, 워크플로 설정은 설치된 Pack 쪽으로 내립니다.",
         launcherLanguage: "런처 언어",
         english: "영어",
         korean: "한국어",
@@ -222,7 +222,7 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
       account: {
         eyebrow: "계정",
         title: "향후 확장 가능한 인증 진입점",
-        subtitle: "지금은 선택 UI에 가깝지만, 이후 계정과 결제 기능을 붙일 서비스 경계는 이미 준비되어 있습니다.",
+        subtitle: "지금은 가볍게 두고, 이후 결제와 소유권 개념으로 확장할 수 있게 준비합니다.",
         status: "상태",
         loggedIn: "로그인됨",
         loggedOut: "로그아웃됨",
@@ -234,7 +234,7 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
       about: {
         eyebrow: "정보",
         title: "MellowCat Claude",
-        subtitle: "Claude Code와 MCP 워크플로우를 위한 데스크톱 런처입니다.",
+        subtitle: "Claude Code와 모듈형 MCP 워크플로를 위한 데스크톱 런처입니다.",
         appVersion: "앱 버전"
       }
     }

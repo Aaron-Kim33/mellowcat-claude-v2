@@ -69,6 +69,9 @@ export interface MCPPackManifest {
   config: {
     fields: MCPPackConfigField[];
   };
+  workflow?: {
+    ids: string[];
+  };
   onboarding: {
     steps: MCPPackOnboardingStep[];
   };

@@ -2,20 +2,38 @@ import { useMemo, useState } from "react";
 import { MCPCard } from "../../components/MCPCard/MCPCard";
 import { useAppStore } from "../../store/app-store";
 import { getLauncherCopy } from "../../lib/launcher-copy";
+import {
+  type StorePlatform,
+  detectStorePlatform,
+  getPlatformTone,
+  matchesStorePlatform
+} from "../../lib/store-platform";
 
 export function StorePage() {
   const { catalog, installed, installMcp, updateMcp, settings } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.store;
   const [query, setQuery] = useState("");
+  const [platform, setPlatform] = useState<StorePlatform>("all");
   const installedCount = installed.length;
   const runningCount = installed.filter((item) => item.runtime.status === "running").length;
+  const platformTabs: Array<{ id: StorePlatform; label: string }> = [
+    { id: "telegram", label: "Telegram" },
+    { id: "instagram", label: "Instagram" },
+    { id: "youtube", label: "YouTube" },
+    { id: "packs", label: "Packs" },
+    { id: "all", label: "All" }
+  ];
   const filteredCatalog = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) {
-      return catalog;
-    }
-
     return catalog.filter((item) => {
+      if (!matchesStorePlatform(item, platform)) {
+        return false;
+      }
+
+      if (!normalized) {
+        return true;
+      }
+
       const haystack = [
         item.name,
         item.summary,
@@ -27,7 +45,12 @@ export function StorePage() {
 
       return haystack.includes(normalized);
     });
-  }, [catalog, query]);
+  }, [catalog, platform, query]);
+  const featuredPacks = useMemo(
+    () => catalog.filter((item) => detectStorePlatform(item) === "packs").slice(0, 2),
+    [catalog]
+  );
+  const filteredPieces = filteredCatalog.filter((item) => detectStorePlatform(item) !== "packs");
 
   return (
     <section className="page">
@@ -44,8 +67,42 @@ export function StorePage() {
       </div>
 
       <div className="card">
-        <div className="settings-row">
-          <span>{copy.search}</span>
+        <div className="store-toolbar">
+          {featuredPacks.length > 0 && (
+            <div className="store-pack-intro">
+              <div>
+                <p className="eyebrow">Recommended Packs</p>
+                <strong>Start with a ready-made workflow, then add single MCPs only when you need extra control.</strong>
+              </div>
+              <span className="pill">{featuredPacks.length} featured packs</span>
+            </div>
+          )}
+          {featuredPacks.length > 0 && platform === "packs" && (
+            <div className="grid compact-grid">
+              {featuredPacks.map((item) => (
+                <MCPCard
+                  key={item.id}
+                  item={item}
+                  installedList={installed}
+                  installed={installed.find((installedItem) => installedItem.id === item.id)}
+                  onInstall={(id) => void installMcp(id)}
+                  onUpdate={(id) => void updateMcp(id)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="platform-tabs">
+            {platformTabs.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`platform-button ${getPlatformTone(item.id)}${platform === item.id ? " active" : ""}`}
+                onClick={() => setPlatform(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
           <input
             className="text-input"
             value={query}
@@ -55,18 +112,43 @@ export function StorePage() {
         </div>
       </div>
 
-      <div className="grid">
-        {filteredCatalog.map((item) => (
-          <MCPCard
-            key={item.id}
-            item={item}
-            installedList={installed}
-            installed={installed.find((installedItem) => installedItem.id === item.id)}
-            onInstall={(id) => void installMcp(id)}
-            onUpdate={(id) => void updateMcp(id)}
-          />
-        ))}
-      </div>
+      {filteredCatalog.length > 0 ? (
+        <>
+          {platform !== "packs" && filteredPieces.length > 0 && (
+            <div className="card">
+              <div className="card-row">
+                <div>
+                  <p className="eyebrow">Current Modules</p>
+                  <h3>Implemented workflow pieces</h3>
+                </div>
+                <span className="pill">{filteredPieces.length}</span>
+              </div>
+              <p className="subtle">
+                This list only shows workflow pieces that already exist in the current product build.
+              </p>
+            </div>
+          )}
+          <div className="grid compact-grid">
+            {(platform === "packs" ? filteredCatalog : filteredPieces).map((item) => (
+              <MCPCard
+                key={item.id}
+                item={item}
+                installedList={installed}
+                installed={installed.find((installedItem) => installedItem.id === item.id)}
+                onInstall={(id) => void installMcp(id)}
+                onUpdate={(id) => void updateMcp(id)}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="card compact-empty-state">
+          <strong>No MCPs in this lane yet.</strong>
+          <p className="subtle">
+            This tab is ready for {platform === "packs" ? "pack bundles" : `${platform} workflow pieces`} once they are added to the catalog.
+          </p>
+        </div>
+      )}
     </section>
   );
 }
