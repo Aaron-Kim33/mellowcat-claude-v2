@@ -18,6 +18,7 @@ import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 export interface MellowCatAPI {
   app: {
     getMeta: () => Promise<AppMeta>;
+    openExternal: (url: string) => Promise<void>;
   };
   claude: {
     startSession: (profileId?: string) => Promise<ClaudeSession>;
@@ -50,6 +51,7 @@ export interface MellowCatAPI {
   auth: {
     getSession: () => Promise<AuthSession>;
     loginWithBrowser: () => Promise<AuthSession>;
+    loginWithToken: (token: string) => Promise<AuthSession>;
     logout: () => Promise<void>;
   };
   automation: {

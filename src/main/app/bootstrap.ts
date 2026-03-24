@@ -16,11 +16,13 @@ import { ClaudeEngine } from "../services/claude/claude-engine";
 import { ClaudeInstallationService } from "../services/claude/claude-installation-service";
 import { CatalogService } from "../services/catalog/catalog-service";
 import { AuthService } from "../services/auth/auth-service";
+import { EntitlementService } from "../services/auth/entitlement-service";
 import { MCPInstallService } from "../services/mcp/mcp-install-service";
 import { MCPRegistryService } from "../services/mcp/mcp-registry-service";
 import { MCPRuntimeService } from "../services/mcp/mcp-runtime-service";
 import { MCPUpdateService } from "../services/mcp/mcp-update-service";
 import { MCPConfigService } from "../services/mcp/mcp-config-service";
+import { MCPRemotePackageService } from "../services/mcp/mcp-remote-package-service";
 import { MellowCatApiClient } from "../api/mellowcat-api-client";
 import { AppUpdateService } from "../services/update/app-update-service";
 import { ProductionPackageService } from "../services/automation/production-package-service";
@@ -64,13 +66,30 @@ export async function bootstrap(): Promise<void> {
     shortformScriptService,
     productionPackageService
   );
-  const catalogService = new CatalogService(pathService, fileService, apiClient);
-  const authService = new AuthService(apiClient);
+  const authService = new AuthService(
+    apiClient,
+    pathService,
+    fileService,
+    secretsStore
+  );
+  const entitlementService = new EntitlementService(apiClient);
+  const catalogService = new CatalogService(
+    pathService,
+    fileService,
+    apiClient,
+    entitlementService
+  );
+  const remotePackageService = new MCPRemotePackageService(
+    apiClient,
+    pathService,
+    fileService
+  );
   const installService = new MCPInstallService(
     manifestRepository,
     pathService,
     fileService,
-    catalogService
+    catalogService,
+    remotePackageService
   );
   const registryService = new MCPRegistryService(manifestRepository);
   const runtimeService = new MCPRuntimeService(manifestRepository);

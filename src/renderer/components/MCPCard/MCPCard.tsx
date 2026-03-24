@@ -9,13 +9,29 @@ interface MCPCardProps {
   installed?: InstalledMCPRecord;
   onInstall?: (id: string) => void;
   onUpdate?: (id: string) => void;
+  onPurchase?: (item: MCPCatalogItem) => void;
 }
 
-export function MCPCard({ item, installedList, installed, onInstall, onUpdate }: MCPCardProps) {
+export function MCPCard({
+  item,
+  installedList,
+  installed,
+  onInstall,
+  onUpdate,
+  onPurchase
+}: MCPCardProps) {
   const isInstalled = Boolean(installed);
   const isRunning = installed?.runtime.status === "running";
   const hasUpdate = installed ? installed.version !== item.latestVersion : false;
   const isInstallable = item.availability?.state !== "coming_soon";
+  const entitlementStatus = item.entitlement?.status ?? installed?.entitlement.status ?? "unknown";
+  const canInstall =
+    entitlementStatus === "free" ||
+    entitlementStatus === "owned" ||
+    entitlementStatus === "trial" ||
+    entitlementStatus === "unknown";
+  const requiresPurchase = entitlementStatus === "not_owned";
+  const hasCheckout = Boolean(item.commerce?.checkoutUrl || item.commerce?.productUrl);
   const platform = detectStorePlatform(item);
   const platformTone = getPlatformTone(platform);
   const role = detectMcpRole(item);
@@ -25,6 +41,18 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
   ];
   const composition = evaluateMcpComposition(selectedIds);
   const itemIssues = composition.issues.filter((issue) => issue.mcpId === item.id);
+  const entitlementLabelMap: Record<typeof entitlementStatus, string> = {
+    free: "free",
+    owned: "owned",
+    trial: "trial",
+    not_owned: "buy to unlock",
+    unknown: "check access"
+  };
+  const actionLabel = requiresPurchase
+    ? item.commerce?.ctaLabel ?? "Buy"
+    : entitlementStatus === "trial"
+      ? "Start Trial"
+      : "Install";
 
   return (
     <article className={`${isInstalled ? "card card-installed" : "card"} compact-card platform-card ${platformTone}`}>
@@ -59,6 +87,10 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
           <span>Local Version</span>
           <strong>{installed?.version ?? "-"}</strong>
         </div>
+        <div className="meta-item">
+          <span>Access</span>
+          <strong>{entitlementLabelMap[entitlementStatus]}</strong>
+        </div>
         {itemIssues.length > 0 && (
           <div className="meta-item">
             <span>Compatibility</span>
@@ -87,6 +119,7 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
         <div className="tag-row">
           {isInstalled && <span className="tag">{installed?.enabled ? "enabled" : "disabled"}</span>}
           {hasUpdate && <span className="tag">update available</span>}
+          <span className="tag">access:{entitlementStatus}</span>
           {item.workflow?.ids?.map((workflowId) => (
             <span key={workflowId} className="tag">
               workflow:{workflowId}
@@ -110,13 +143,27 @@ export function MCPCard({ item, installedList, installed, onInstall, onUpdate }:
           <button type="button" className="secondary-button" disabled>
             Coming Soon
           </button>
+        ) : requiresPurchase ? (
+          <button
+            type="button"
+            className={`primary-button ${platformTone}`}
+            onClick={() => onPurchase?.(item)}
+            disabled={!hasCheckout}
+            title={
+              hasCheckout
+                ? "Open product details and purchase options"
+                : "Purchase flow is not connected for this item yet"
+            }
+          >
+            {hasCheckout ? actionLabel : "Purchase Unavailable"}
+          </button>
         ) : (
           <button
             type="button"
             className={`primary-button ${platformTone}`}
-            onClick={() => onInstall?.(item.id)}
+            onClick={() => canInstall && onInstall?.(item.id)}
           >
-            Install
+            {actionLabel}
           </button>
         )}
       </div>

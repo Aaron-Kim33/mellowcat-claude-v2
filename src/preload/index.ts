@@ -66,6 +66,7 @@ const settingsBridge: MellowCatAPI["settings"] = {
 const authBridge: MellowCatAPI["auth"] = {
   getSession: () => ipcRenderer.invoke("auth:getSession"),
   loginWithBrowser: () => ipcRenderer.invoke("auth:login"),
+  loginWithToken: (token: string) => ipcRenderer.invoke("auth:loginWithToken", token),
   logout: () => ipcRenderer.invoke("auth:logout")
 };
 
@@ -105,7 +106,8 @@ const automationBridge: MellowCatAPI["automation"] = {
 
 const api: MellowCatAPI = {
   app: {
-    getMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta")
+    getMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta"),
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke("app:openExternal", url)
   },
   claude: claudeBridge,
   mcp: mcpBridge,

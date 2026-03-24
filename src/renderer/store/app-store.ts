@@ -62,6 +62,7 @@ interface AppState {
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
   saveWorkflowConfig: (patch: Partial<ShortformWorkflowConfig>) => Promise<void>;
   login: () => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -374,6 +375,10 @@ export const useAppStore = create<AppState>((set) => ({
   },
   login: async () => {
     const authSession = await window.mellowcat.auth.loginWithBrowser();
+    set({ authSession });
+  },
+  loginWithToken: async (token: string) => {
+    const authSession = await window.mellowcat.auth.loginWithToken(token);
     set({ authSession });
   },
   logout: async () => {

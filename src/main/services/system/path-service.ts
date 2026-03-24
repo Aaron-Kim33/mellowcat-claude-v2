@@ -23,6 +23,10 @@ export class PathService {
     return path.join(this.getDefaultVaultPath(), "secrets.json");
   }
 
+  getAuthSessionPath(): string {
+    return path.join(this.getDefaultVaultPath(), "auth-session.json");
+  }
+
   getAutomationStatePath(fileName: string): string {
     return path.join(this.getDefaultVaultPath(), "automation", fileName);
   }
@@ -75,5 +79,13 @@ export class PathService {
 
   getGeneratedConfigPath(): string {
     return path.join(this.getDefaultVaultPath(), "generated", "mcp-settings.json");
+  }
+
+  getRemoteDownloadsRootPath(): string {
+    return path.join(this.getDefaultVaultPath(), "downloads", "remote-mcp");
+  }
+
+  getRemoteDownloadTempPath(mcpId: string, version: string): string {
+    return path.join(this.getRemoteDownloadsRootPath(), `${mcpId}-${version}`);
   }
 }

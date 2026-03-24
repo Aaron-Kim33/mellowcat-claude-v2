@@ -1,0 +1,7 @@
+{
+  "mcpId": "youtube-publish-mcp",
+  "version": "1.0.0",
+  "manifestUrl": "https://cdn.mellowcat.com/mcp/youtube-publish/1.0.0/mcp.json",
+  "downloadUrl": "https://cdn.mellowcat.com/mcp/youtube-publish/1.0.0/package.zip?token=signed-download-token",
+  "checksumSha256": "c4b5f6c0c6d89c3d5e6f1234567890abcdef1234567890abcdef1234567890aa"
+}

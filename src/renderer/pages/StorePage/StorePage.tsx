@@ -51,6 +51,14 @@ export function StorePage() {
     [catalog]
   );
   const filteredPieces = filteredCatalog.filter((item) => detectStorePlatform(item) !== "packs");
+  const handlePurchase = (item: (typeof catalog)[number]) => {
+    const targetUrl = item.commerce?.checkoutUrl ?? item.commerce?.productUrl;
+    if (!targetUrl) {
+      window.alert("This item is not owned yet, but its checkout flow is not connected yet.");
+      return;
+    }
+    void window.mellowcat.app.openExternal(targetUrl);
+  };
 
   return (
     <section className="page">
@@ -87,6 +95,7 @@ export function StorePage() {
                   installed={installed.find((installedItem) => installedItem.id === item.id)}
                   onInstall={(id) => void installMcp(id)}
                   onUpdate={(id) => void updateMcp(id)}
+                  onPurchase={handlePurchase}
                 />
               ))}
             </div>
@@ -137,6 +146,7 @@ export function StorePage() {
                 installed={installed.find((installedItem) => installedItem.id === item.id)}
                 onInstall={(id) => void installMcp(id)}
                 onUpdate={(id) => void updateMcp(id)}
+                onPurchase={handlePurchase}
               />
             ))}
           </div>

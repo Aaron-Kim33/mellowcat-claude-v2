@@ -1,4 +1,4 @@
-import { app, ipcMain } from "electron";
+import { app, ipcMain, shell } from "electron";
 import type { AppMeta } from "../../common/types/app";
 
 export function registerAppIpc(): void {
@@ -9,4 +9,5 @@ export function registerAppIpc(): void {
     chromeVersion: process.versions.chrome,
     nodeVersion: process.versions.node
   }));
+  ipcMain.handle("app:openExternal", (_event, url: string) => shell.openExternal(url));
 }

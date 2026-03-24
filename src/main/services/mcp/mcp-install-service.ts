@@ -9,18 +9,26 @@ import { CatalogService } from "../catalog/catalog-service";
 import { FileService } from "../system/file-service";
 import { ManifestRepository } from "../storage/manifest-repository";
 import { PathService } from "../system/path-service";
+import { MCPRemotePackageService } from "./mcp-remote-package-service";
 
 export class MCPInstallService {
   constructor(
     private readonly manifestRepository: ManifestRepository,
     private readonly pathService: PathService,
     private readonly fileService: FileService,
-    private readonly catalogService: CatalogService
+    private readonly catalogService: CatalogService,
+    private readonly remotePackageService: MCPRemotePackageService
   ) {}
 
   async install(mcpId: string): Promise<void> {
     const catalogItem = await this.requireCatalogItem(mcpId);
-    const packageManifest = this.readBundledManifest(mcpId);
+    this.ensureInstallAllowed(catalogItem);
+    const isRemotePackage = catalogItem.package?.source === "remote";
+    const remoteInstall = isRemotePackage
+      ? await this.remotePackageService.prepareInstall(catalogItem)
+      : undefined;
+
+    const packageManifest = remoteInstall?.packageManifest ?? this.readBundledManifest(mcpId);
     this.validatePackageManifest(catalogItem, packageManifest);
 
     const versionPath = this.pathService.getInstalledVersionPath(mcpId, packageManifest.version);
@@ -30,7 +38,20 @@ export class MCPInstallService {
     this.fileService.ensureDir(this.pathService.getInstalledVersionsPath(mcpId));
     this.fileService.ensureDir(this.pathService.getInstalledDataPath(mcpId));
     this.fileService.remove(versionPath);
-    this.fileService.copyDirectory(bundledPackagePath, versionPath);
+    if (isRemotePackage) {
+      if (!remoteInstall?.sourceUrl) {
+        throw new Error(`Remote MCP package URL missing for ${mcpId}`);
+      }
+      await this.remotePackageService.downloadAndExtract(
+        mcpId,
+        packageManifest.version,
+        remoteInstall.sourceUrl,
+        versionPath,
+        remoteInstall.checksumSha256
+      );
+    } else {
+      this.fileService.copyDirectory(bundledPackagePath, versionPath);
+    }
     this.refreshCurrentVersion(versionPath, currentPath);
 
     const record: InstalledMCPRecord = {
@@ -43,13 +64,14 @@ export class MCPInstallService {
       installedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       source: {
-        type: "bundled"
+        type: isRemotePackage ? "remote" : "bundled",
+        url: remoteInstall?.sourceUrl
       },
       workflow: {
         ids: catalogItem.workflow?.ids ?? []
       },
       entitlement: {
-        status: "free",
+        status: catalogItem.entitlement?.status ?? "free",
         checkedAt: new Date().toISOString()
       },
       runtime: {
@@ -91,6 +113,13 @@ export class MCPInstallService {
 
     if (!packageManifest.entrypoint) {
       throw new Error(`Package entrypoint missing for ${catalogItem.id}`);
+    }
+  }
+
+  private ensureInstallAllowed(catalogItem: MCPCatalogItem): void {
+    const entitlementStatus = catalogItem.entitlement?.status;
+    if (entitlementStatus === "not_owned") {
+      throw new Error(`This MCP is not owned yet. Complete purchase before installing ${catalogItem.name}.`);
     }
   }
 

@@ -13,6 +13,14 @@ export type MCPEntitlementStatus =
   | "not_owned"
   | "unknown";
 export type MCPRuntimeStatus = "stopped" | "starting" | "running" | "errored";
+export type MCPPackageSourceType = "bundled" | "remote";
+
+export interface MCPRemotePackageDescriptor {
+  manifestUrl?: string;
+  downloadUrl?: string;
+  checksumSha256?: string;
+  requiresAuth?: boolean;
+}
 
 export interface MCPCatalogItem {
   id: string;
@@ -36,6 +44,11 @@ export interface MCPCatalogItem {
     currency?: string;
     amount?: number;
   };
+  commerce?: {
+    checkoutUrl?: string;
+    productUrl?: string;
+    ctaLabel?: string;
+  };
   latestVersion: string;
   compatibility: {
     launcherMinVersion?: string;
@@ -50,16 +63,28 @@ export interface MCPCatalogItem {
   publishedAt?: string;
   updatedAt?: string;
   package?: {
-    source: "bundled" | "remote";
+    source: MCPPackageSourceType;
     manifestPath?: string;
+    remote?: MCPRemotePackageDescriptor;
   };
   availability?: {
     state: "installable" | "coming_soon";
     note?: string;
   };
+  entitlement?: {
+    status: MCPEntitlementStatus;
+    source: "local" | "remote" | "bundled";
+    checkedAt?: string;
+  };
   workflow?: {
     ids: string[];
   };
+}
+
+export interface MCPEntitlementRecord {
+  mcpId: string;
+  status: MCPEntitlementStatus;
+  checkedAt?: string;
 }
 
 export interface InstalledMCPRecord {
@@ -74,7 +99,7 @@ export interface InstalledMCPRecord {
   lastLaunchedAt?: string;
   lastError?: string;
   source: {
-    type: "catalog" | "local" | "bundled";
+    type: "catalog" | "local" | "bundled" | "remote";
     url?: string;
   };
   workflow?: {

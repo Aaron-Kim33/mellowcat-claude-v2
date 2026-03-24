@@ -32,4 +32,9 @@ export class FileService {
     this.ensureDir(path.dirname(filePath));
     fs.writeFileSync(filePath, contents, "utf-8");
   }
+
+  writeBinaryFile(filePath: string, contents: Buffer): void {
+    this.ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, contents);
+  }
 }

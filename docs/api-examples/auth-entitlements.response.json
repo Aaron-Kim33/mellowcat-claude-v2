@@ -1,0 +1,29 @@
+{
+  "items": [
+    {
+      "mcpId": "trend-discovery-mcp",
+      "status": "owned",
+      "checkedAt": "2026-03-24T12:05:00.000Z"
+    },
+    {
+      "mcpId": "telegram-control-mcp",
+      "status": "owned",
+      "checkedAt": "2026-03-24T12:05:00.000Z"
+    },
+    {
+      "mcpId": "shortform-script-mcp",
+      "status": "owned",
+      "checkedAt": "2026-03-24T12:05:00.000Z"
+    },
+    {
+      "mcpId": "asset-packager-mcp",
+      "status": "owned",
+      "checkedAt": "2026-03-24T12:05:00.000Z"
+    },
+    {
+      "mcpId": "youtube-publish-mcp",
+      "status": "not_owned",
+      "checkedAt": "2026-03-24T12:05:00.000Z"
+    }
+  ]
+}
