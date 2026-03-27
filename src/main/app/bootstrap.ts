@@ -121,7 +121,9 @@ export async function bootstrap(): Promise<void> {
       manifestRepository
     });
     registerAppIpc();
-    registerSettingsIpc(settingsRepository);
+    registerSettingsIpc(settingsRepository, (settings) => {
+      apiClient.setBaseUrl(settings.apiBaseUrl);
+    });
     registerAuthIpc(authService);
     registerSystemIpc(appUpdateService);
     registerAutomationIpc(

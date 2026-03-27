@@ -41,6 +41,7 @@ export function LoginPage() {
             onChange={(event) => setSessionToken(event.target.value)}
             placeholder="Paste a server-issued session token"
           />
+          <span className="subtle">For local preview, set API Base URL to `mock://remote` and use any non-empty token.</span>
         </label>
         <div className="button-row">
           <button type="button" className="primary-button" onClick={() => void login()}>

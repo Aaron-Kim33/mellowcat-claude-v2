@@ -21,6 +21,7 @@ Concrete example files for backend handoff:
 - [auth-entitlements.response.json](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/api-examples/auth-entitlements.response.json)
 - [catalog.response.json](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/api-examples/catalog.response.json)
 - [mcp-download-ticket.response.json](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/api-examples/mcp-download-ticket.response.json)
+- [payment-and-entitlement-architecture.md](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/payment-and-entitlement-architecture.md)
 
 ## Auth session
 

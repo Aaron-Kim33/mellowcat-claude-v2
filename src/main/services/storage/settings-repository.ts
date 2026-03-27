@@ -61,7 +61,7 @@ export class SettingsRepository {
     }
 
     if (!fs.existsSync(settingsPath)) {
-      fs.writeFileSync(settingsPath, JSON.stringify(defaults, null, 2), "utf-8");
+      this.safeWrite(defaults);
       return defaults;
     }
 
@@ -72,10 +72,10 @@ export class SettingsRepository {
         ...defaults,
         ...parsed
       };
-      this.write(merged);
+      this.safeWrite(merged);
       return this.readMergedSettings();
     } catch {
-      this.write(defaults);
+      this.safeWrite(defaults);
       return this.readMergedSettings();
     }
   }
@@ -87,6 +87,14 @@ export class SettingsRepository {
       JSON.stringify(sanitized, null, 2),
       "utf-8"
     );
+  }
+
+  private safeWrite(settings: AppSettings): void {
+    try {
+      this.write(settings);
+    } catch (error) {
+      console.error("Failed to write settings file:", error);
+    }
   }
 
   private getDefaults(): AppSettings {
@@ -114,9 +122,15 @@ export class SettingsRepository {
   private readMergedSettings(): AppSettings {
     const settingsPath = this.pathService.getSettingsPath();
     const defaults = this.getDefaults();
-    const parsed = fs.existsSync(settingsPath)
-      ? (JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as Partial<AppSettings>)
-      : {};
+    let parsed: Partial<AppSettings> = {};
+
+    try {
+      parsed = fs.existsSync(settingsPath)
+        ? (JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as Partial<AppSettings>)
+        : {};
+    } catch (error) {
+      console.error("Failed to read settings file:", error);
+    }
 
     const merged: AppSettings = {
       ...defaults,

@@ -66,6 +66,14 @@ export class MCPRemotePackageService {
     targetPath: string,
     checksumSha256?: string
   ): Promise<void> {
+    if (downloadUrl.startsWith("mock://package/")) {
+      const parts = downloadUrl.split("/");
+      const packageId = parts[3];
+      this.fileService.remove(targetPath);
+      this.fileService.copyDirectory(this.pathService.getBundledPackagePath(packageId), targetPath);
+      return;
+    }
+
     const tempRoot = this.pathService.getRemoteDownloadTempPath(mcpId, version);
     const archivePath = path.join(tempRoot, "package.zip");
     const extractPath = path.join(tempRoot, "unzipped");
@@ -107,6 +115,14 @@ export class MCPRemotePackageService {
   }
 
   private async readManifest(manifestUrl: string): Promise<MCPPackageManifest> {
+    if (manifestUrl.startsWith("mock://manifest/")) {
+      const parts = manifestUrl.split("/");
+      const packageId = parts[3];
+      return this.fileService.readJsonFile<MCPPackageManifest>(
+        path.join(this.pathService.getBundledPackagePath(packageId), "mcp.json")
+      );
+    }
+
     const response = await fetch(manifestUrl, {
       headers: {
         Accept: "application/json"

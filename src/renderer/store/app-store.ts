@@ -61,6 +61,7 @@ interface AppState {
   selectMcpLog: (mcpId: string) => void;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
   saveWorkflowConfig: (patch: Partial<ShortformWorkflowConfig>) => Promise<void>;
+  refreshStoreAccess: () => Promise<void>;
   login: () => Promise<void>;
   loginWithToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -340,12 +341,16 @@ export const useAppStore = create<AppState>((set) => ({
     set({ selectedMcpLogId: mcpId });
   },
   saveSettings: async (patch: Partial<AppSettings>) => {
-    const [settings, claudeInstallation, telegramStatus] = await Promise.all([
+    const [settings, claudeInstallation, telegramStatus, catalog, authSession] = await Promise.all([
       window.mellowcat.settings.set(patch),
       window.mellowcat.claude.getInstallationStatus(),
-      window.mellowcat.automation.getTelegramStatus()
+      window.mellowcat.automation.getTelegramStatus(),
+      window.mellowcat.mcp.listCatalog(),
+      window.mellowcat.auth.getSession()
     ]);
     set({
+      catalog,
+      authSession,
       settings,
       telegramStatus,
       claudeInstallation,
@@ -373,17 +378,30 @@ export const useAppStore = create<AppState>((set) => ({
       youTubeUploadRequest
     });
   },
+  refreshStoreAccess: async () => {
+    const [authSession, catalog, installed] = await Promise.all([
+      window.mellowcat.auth.getSession(),
+      window.mellowcat.mcp.listCatalog(),
+      window.mellowcat.mcp.listInstalled()
+    ]);
+    set({ authSession, catalog, installed });
+  },
   login: async () => {
     const authSession = await window.mellowcat.auth.loginWithBrowser();
-    set({ authSession });
+    const catalog = await window.mellowcat.mcp.listCatalog();
+    set({ authSession, catalog });
   },
   loginWithToken: async (token: string) => {
     const authSession = await window.mellowcat.auth.loginWithToken(token);
-    set({ authSession });
+    const catalog = await window.mellowcat.mcp.listCatalog();
+    set({ authSession, catalog });
   },
   logout: async () => {
     await window.mellowcat.auth.logout();
-    const authSession = await window.mellowcat.auth.getSession();
-    set({ authSession });
+    const [authSession, catalog] = await Promise.all([
+      window.mellowcat.auth.getSession(),
+      window.mellowcat.mcp.listCatalog()
+    ]);
+    set({ authSession, catalog });
   }
 }));

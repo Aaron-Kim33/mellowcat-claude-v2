@@ -116,6 +116,7 @@ export function SettingsPage() {
               onChange={(event) => setApiBaseUrl(event.target.value)}
               placeholder="https://api.mellowcat.dev/"
             />
+            <span className="subtle">Use `mock://remote` to preview remote catalog and purchase flows without a backend.</span>
           </label>
         </div>
 

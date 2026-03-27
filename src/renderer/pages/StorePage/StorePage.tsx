@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MCPCard } from "../../components/MCPCard/MCPCard";
 import { useAppStore } from "../../store/app-store";
 import { getLauncherCopy } from "../../lib/launcher-copy";
@@ -10,10 +10,12 @@ import {
 } from "../../lib/store-platform";
 
 export function StorePage() {
-  const { catalog, installed, installMcp, updateMcp, settings } = useAppStore();
+  const { catalog, installed, installMcp, updateMcp, refreshStoreAccess, settings } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.store;
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<StorePlatform>("all");
+  const [purchasePending, setPurchasePending] = useState(false);
+  const [purchaseMessage, setPurchaseMessage] = useState("");
   const installedCount = installed.length;
   const runningCount = installed.filter((item) => item.runtime.status === "running").length;
   const platformTabs: Array<{ id: StorePlatform; label: string }> = [
@@ -51,12 +53,39 @@ export function StorePage() {
     [catalog]
   );
   const filteredPieces = filteredCatalog.filter((item) => detectStorePlatform(item) !== "packs");
+
+  useEffect(() => {
+    if (!purchasePending) {
+      return;
+    }
+
+    const handleFocus = () => {
+      setPurchaseMessage("Refreshing your purchases...");
+      void refreshStoreAccess()
+        .then(() => {
+          setPurchaseMessage("Purchase status refreshed.");
+        })
+        .finally(() => {
+          setPurchasePending(false);
+          window.setTimeout(() => setPurchaseMessage(""), 2500);
+        });
+    };
+
+    window.addEventListener("focus", handleFocus, { once: true });
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [purchasePending, refreshStoreAccess]);
+
   const handlePurchase = (item: (typeof catalog)[number]) => {
-    const targetUrl = item.commerce?.checkoutUrl ?? item.commerce?.productUrl;
+    const baseUrl = item.commerce?.checkoutUrl ?? item.commerce?.productUrl;
+    const targetUrl = baseUrl
+      ? buildPurchaseUrl(baseUrl, item.id)
+      : undefined;
     if (!targetUrl) {
       window.alert("This item is not owned yet, but its checkout flow is not connected yet.");
       return;
     }
+    setPurchasePending(true);
+    setPurchaseMessage("Complete checkout, then return to MellowCat. We will refresh access automatically.");
     void window.mellowcat.app.openExternal(targetUrl);
   };
 
@@ -76,6 +105,12 @@ export function StorePage() {
 
       <div className="card">
         <div className="store-toolbar">
+          {purchaseMessage && (
+            <div className="manual-install-box">
+              <strong>Purchase Flow</strong>
+              <span className="subtle">{purchaseMessage}</span>
+            </div>
+          )}
           {featuredPacks.length > 0 && (
             <div className="store-pack-intro">
               <div>
@@ -118,6 +153,18 @@ export function StorePage() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={copy.searchPlaceholder}
           />
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setPurchaseMessage("Refreshing your purchases...");
+              void refreshStoreAccess().finally(() =>
+                window.setTimeout(() => setPurchaseMessage(""), 2500)
+              );
+            }}
+          >
+            Refresh Purchases
+          </button>
         </div>
       </div>
 
@@ -161,4 +208,21 @@ export function StorePage() {
       )}
     </section>
   );
+}
+
+function buildPurchaseUrl(baseUrl: string, productId: string): string {
+  if (baseUrl.includes("#payment")) {
+    const [originPart, hashPart = "payment"] = baseUrl.split("#");
+    const hashQuerySeparator = hashPart.includes("?") ? "&" : "?";
+    return `${originPart}#${hashPart}${hashQuerySeparator}productId=${encodeURIComponent(productId)}&source=launcher`;
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set("productId", productId);
+    url.searchParams.set("source", "launcher");
+    return url.toString();
+  } catch {
+    return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}productId=${encodeURIComponent(productId)}&source=launcher`;
+  }
 }

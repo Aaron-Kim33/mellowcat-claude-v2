@@ -13,13 +13,153 @@ export interface RemoteListEnvelope<T> {
   items: T[];
 }
 
+const MOCK_SESSION: AuthSession = {
+  loggedIn: true,
+  userId: "user_mock_remote",
+  email: "creator@mellowcat.dev",
+  displayName: "Mock Remote Creator",
+  source: "remote",
+  lastSyncedAt: "2026-03-27T09:00:00.000Z"
+};
+
+const MOCK_ENTITLEMENTS: MCPEntitlementRecord[] = [
+  {
+    mcpId: "filesystem-tools",
+    status: "owned",
+    checkedAt: "2026-03-27T09:05:00.000Z"
+  },
+  {
+    mcpId: "youtube-publish-mcp",
+    status: "not_owned",
+    checkedAt: "2026-03-27T09:05:00.000Z"
+  }
+];
+
+const MOCK_CATALOG: MCPCatalogItem[] = [
+  {
+    id: "filesystem-tools",
+    slug: "filesystem-tools",
+    name: "Filesystem Tools",
+    summary: "Remote-installable starter MCP for local document and code operations.",
+    description: "Mock remote item used to validate login, entitlements, and remote MCP installation flow.",
+    author: {
+      id: "mellowcat",
+      name: "MellowCat",
+      verified: true
+    },
+    distribution: {
+      type: "paid",
+      priceText: "$5",
+      currency: "USD",
+      amount: 5
+    },
+    commerce: {
+      checkoutUrl: "https://app.mellowcat.com/checkout/filesystem-tools",
+      productUrl: "https://app.mellowcat.com/store/filesystem-tools",
+      ctaLabel: "Buy"
+    },
+    latestVersion: "0.1.0",
+    compatibility: {
+      launcherMinVersion: "0.2.1",
+      os: ["win32", "darwin", "linux"]
+    },
+    visibility: "public",
+    tags: ["files", "starter", "official"],
+    publishedAt: "2026-03-27T00:00:00.000Z",
+    updatedAt: "2026-03-27T00:00:00.000Z",
+    package: {
+      source: "remote",
+      remote: {
+        manifestUrl: "mock://manifest/filesystem-tools/0.1.0",
+        downloadUrl: "mock://package/filesystem-tools/0.1.0",
+        checksumSha256: "mock-filesystem-tools-010",
+        requiresAuth: true
+      }
+    },
+    availability: {
+      state: "installable"
+    },
+    workflow: {
+      ids: []
+    },
+    entitlement: {
+      status: "owned",
+      source: "remote",
+      checkedAt: "2026-03-27T09:05:00.000Z"
+    }
+  },
+  {
+    id: "youtube-publish-mcp",
+    slug: "youtube-publish-mcp",
+    name: "YouTube Publisher",
+    summary: "Paid delivery module that opens a checkout flow when not owned.",
+    description: "Mock remote item used to validate Buy/Unlock CTA handling before the real backend is live.",
+    author: {
+      id: "mellowcat",
+      name: "MellowCat",
+      verified: true
+    },
+    distribution: {
+      type: "paid",
+      priceText: "$19",
+      currency: "USD",
+      amount: 19
+    },
+    commerce: {
+      checkoutUrl: "https://app.mellowcat.com/checkout/youtube-publish-mcp",
+      productUrl: "https://app.mellowcat.com/store/youtube-publish-mcp",
+      ctaLabel: "Buy"
+    },
+    latestVersion: "1.0.0",
+    compatibility: {
+      launcherMinVersion: "0.2.1",
+      os: ["win32", "darwin", "linux"]
+    },
+    visibility: "public",
+    tags: ["youtube", "delivery", "publisher"],
+    publishedAt: "2026-03-27T00:00:00.000Z",
+    updatedAt: "2026-03-27T00:00:00.000Z",
+    package: {
+      source: "remote",
+      remote: {
+        manifestUrl: "mock://manifest/youtube-publish-mcp/1.0.0",
+        downloadUrl: "mock://package/youtube-publish-mcp/1.0.0",
+        checksumSha256: "mock-youtube-publish-100",
+        requiresAuth: true
+      }
+    },
+    availability: {
+      state: "installable"
+    },
+    workflow: {
+      ids: ["shortform-automation-stack", "shortform-telegram-youtube"]
+    },
+    entitlement: {
+      status: "not_owned",
+      source: "remote",
+      checkedAt: "2026-03-27T09:05:00.000Z"
+    }
+  }
+];
+
 export class MellowCatApiClient {
   private accessToken?: string;
+  private baseUrl?: string;
 
-  constructor(private readonly baseUrl?: string) {}
+  constructor(baseUrl?: string) {
+    this.baseUrl = baseUrl;
+  }
 
   isConfigured(): boolean {
     return Boolean(this.baseUrl);
+  }
+
+  setBaseUrl(baseUrl?: string): void {
+    this.baseUrl = baseUrl?.trim() || undefined;
+  }
+
+  isMockMode(): boolean {
+    return this.baseUrl?.trim().toLowerCase() === "mock://remote";
   }
 
   setAccessToken(accessToken?: string): void {
@@ -55,6 +195,10 @@ export class MellowCatApiClient {
       throw new Error("MellowCat API base URL is not configured");
     }
 
+    if (this.isMockMode()) {
+      return this.handleMockRequest<T>(pathname);
+    }
+
     const response = await fetch(new URL(pathname, this.baseUrl), {
       headers: {
         Accept: "application/json",
@@ -69,6 +213,51 @@ export class MellowCatApiClient {
     }
 
     return (await response.json()) as T;
+  }
+
+  private handleMockRequest<T>(pathname: string): T {
+    if (!this.accessToken?.trim()) {
+      throw new Error("Mock remote mode requires a session token.");
+    }
+
+    if (pathname === "/catalog") {
+      return { items: MOCK_CATALOG } as T;
+    }
+
+    if (pathname === "/auth/entitlements") {
+      return { items: MOCK_ENTITLEMENTS } as T;
+    }
+
+    if (pathname === "/auth/session") {
+      return {
+        ...MOCK_SESSION,
+        lastSyncedAt: new Date().toISOString()
+      } as T;
+    }
+
+    const downloadTicketMatch = pathname.match(
+      /^\/mcp\/([^/]+)\/download-ticket\?version=(.+)$/
+    );
+    if (downloadTicketMatch) {
+      const [, encodedId, encodedVersion] = downloadTicketMatch;
+      const mcpId = decodeURIComponent(encodedId);
+      const version = decodeURIComponent(encodedVersion);
+      const catalogItem = MOCK_CATALOG.find((item) => item.id === mcpId);
+      const remote = catalogItem?.package?.remote;
+      if (!catalogItem || !remote?.manifestUrl || !remote.downloadUrl) {
+        throw new Error(`Mock download ticket missing for ${mcpId}@${version}`);
+      }
+
+      return {
+        mcpId,
+        version,
+        manifestUrl: remote.manifestUrl,
+        downloadUrl: remote.downloadUrl,
+        checksumSha256: remote.checksumSha256
+      } as T;
+    }
+
+    throw new Error(`Unhandled mock API request: ${pathname}`);
   }
 
   private extractItems<T>(response: T[] | RemoteListEnvelope<T>): T[] {
