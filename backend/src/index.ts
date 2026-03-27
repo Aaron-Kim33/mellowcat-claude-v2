@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
 import { URL } from "url";
 import { getLemonSqueezyConfig } from "./config";
@@ -9,8 +9,8 @@ import {
   isLemonSqueezyConfigured,
   verifyLemonSqueezySignature
 } from "./lemonsqueezy";
-
-type EntitlementStatus = "free" | "owned" | "trial" | "not_owned" | "unknown";
+import { createRepositories } from "./repositories";
+import type { EntitlementStatus, PaymentRecord, UserRecord } from "./repositories/types";
 
 interface CatalogItem {
   id: string;
@@ -50,116 +50,37 @@ interface CatalogItem {
   };
 }
 
-interface DevUser {
-  id: string;
-  email: string;
-  displayName: string;
-  launcherToken: string;
-}
-
-interface PaymentHandoffRecord {
-  id: string;
-  tokenHash: string;
-  userId: string;
-  productId: string;
-  source: string;
-  expiresAt: string;
-  usedAt?: string;
-}
-
-interface PaymentRecord {
-  id: string;
-  userId: string;
-  productId: string;
-  provider: string;
-  status: "pending" | "paid" | "failed" | "canceled" | "refunded";
-  providerCheckoutId?: string;
-  providerSessionId?: string;
-  paidAt?: string;
-  createdAt: string;
-}
-
-interface EntitlementRecord {
-  id: string;
-  userId: string;
-  mcpId: string;
-  status: "owned" | "trial" | "revoked";
-  source: "purchase" | "grant" | "admin";
-  grantedAt: string;
-  expiresAt?: string;
-}
-
-interface DatabaseShape {
-  users: DevUser[];
-  handoffs: PaymentHandoffRecord[];
-  payments: PaymentRecord[];
-  entitlements: EntitlementRecord[];
-}
-
-const PORT = Number(process.env.MELLOWCAT_API_PORT ?? "8787");
+const PORT = Number(process.env.PORT ?? process.env.MELLOWCAT_API_PORT ?? "8787");
 const HOST = process.env.MELLOWCAT_API_HOST ?? "127.0.0.1";
 const PAYMENT_BASE_URL = process.env.MELLOWCAT_PAYMENT_BASE_URL ?? "https://mellowcat.xyz/payment";
 const PAYMENT_SUCCESS_URL =
   process.env.MELLOWCAT_PAYMENT_SUCCESS_URL ?? `${PAYMENT_BASE_URL}?status=success`;
 const APP_BASE_URL = process.env.MELLOWCAT_APP_BASE_URL ?? `http://${HOST}:${PORT}`;
 const ROOT_DIR = path.resolve(__dirname, "../..");
-const DATA_DIR = path.resolve(ROOT_DIR, "backend", "data");
-const DB_PATH = path.resolve(DATA_DIR, "db.json");
 const CATALOG_PATH = path.resolve(ROOT_DIR, "resources", "bundled", "catalog.json");
 const LEMON_SQUEEZY = getLemonSqueezyConfig();
+const repositories = createRepositories();
 
-function ensureDataDir(): void {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
+const DEV_LAUNCHER_USERS = [
+  {
+    id: "user_01",
+    email: "creator@mellowcat.dev",
+    displayName: "MellowCat Creator",
+    token: "dev-launcher-token"
+  },
+  {
+    id: "user_02",
+    email: "creator2@mellowcat.dev",
+    displayName: "MellowCat Creator 2",
+    token: "dev-launcher-token-2"
+  },
+  {
+    id: "user_03",
+    email: "creator3@mellowcat.dev",
+    displayName: "MellowCat Creator 3",
+    token: "dev-launcher-token-3"
   }
-}
-
-function seedDatabase(): DatabaseShape {
-  return {
-    users: [
-      {
-        id: "user_01",
-        email: "creator@mellowcat.dev",
-        displayName: "MellowCat Creator",
-        launcherToken: "dev-launcher-token"
-      },
-      {
-        id: "user_02",
-        email: "creator2@mellowcat.dev",
-        displayName: "MellowCat Creator 2",
-        launcherToken: "dev-launcher-token-2"
-      }
-    ],
-    handoffs: [],
-    payments: [],
-    entitlements: [
-      {
-        id: "ent_fs_01",
-        userId: "user_01",
-        mcpId: "filesystem-tools",
-        status: "owned",
-        source: "grant",
-        grantedAt: new Date().toISOString()
-      }
-    ]
-  };
-}
-
-function loadDb(): DatabaseShape {
-  ensureDataDir();
-  if (!existsSync(DB_PATH)) {
-    const seeded = seedDatabase();
-    writeFileSync(DB_PATH, JSON.stringify(seeded, null, 2), "utf8");
-    return seeded;
-  }
-
-  return JSON.parse(readFileSync(DB_PATH, "utf8")) as DatabaseShape;
-}
-
-function saveDb(db: DatabaseShape): void {
-  ensureDataDir();
-  writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
-}
+] as const;
 
 function loadCatalog(): CatalogItem[] {
   const raw = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as CatalogItem[];
@@ -278,6 +199,29 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+async function ensureDevLauncherUsers(): Promise<void> {
+  for (const devUser of DEV_LAUNCHER_USERS) {
+    let user = await repositories.auth.findUserByEmail(devUser.email);
+    if (!user) {
+      user = await repositories.auth.createUser({
+        id: devUser.id,
+        email: devUser.email,
+        displayName: devUser.displayName
+      });
+    }
+
+    const existingSession = await repositories.auth.findUserByLauncherToken(devUser.token);
+    if (!existingSession) {
+      await repositories.auth.createLauncherSession({
+        userId: user.id,
+        tokenHash: sha256(devUser.token),
+        source: "launcher",
+        expiresAt: `dev-token:${devUser.token}`
+      });
+    }
+  }
+}
+
 function getBearerToken(req: IncomingMessage): string | undefined {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
@@ -287,22 +231,20 @@ function getBearerToken(req: IncomingMessage): string | undefined {
   return header.slice("Bearer ".length).trim();
 }
 
-function findUserByToken(db: DatabaseShape, token?: string): DevUser | undefined {
+async function findUserByToken(token?: string): Promise<UserRecord | undefined> {
   if (!token) {
     return undefined;
   }
 
-  return db.users.find((user) => user.launcherToken === token);
+  return repositories.auth.findUserByLauncherToken(token);
 }
 
-function getUserEntitlements(db: DatabaseShape, userId: string): EntitlementRecord[] {
-  return db.entitlements.filter((entry) => entry.userId === userId && entry.status !== "revoked");
+async function getUserEntitlements(userId: string) {
+  return repositories.entitlements.listEntitlementsForUser(userId);
 }
 
-function getEntitlementStatus(db: DatabaseShape, userId: string, mcpId: string): EntitlementStatus {
-  const record = db.entitlements.find(
-    (entry) => entry.userId === userId && entry.mcpId === mcpId && entry.status !== "revoked"
-  );
+async function getEntitlementStatus(userId: string, mcpId: string): Promise<EntitlementStatus> {
+  const record = await repositories.entitlements.findEntitlement(userId, mcpId);
   if (!record) {
     return "not_owned";
   }
@@ -310,14 +252,14 @@ function getEntitlementStatus(db: DatabaseShape, userId: string, mcpId: string):
   return record.status === "trial" ? "trial" : "owned";
 }
 
-function catalogForUser(db: DatabaseShape, userId?: string): CatalogItem[] {
+async function catalogForUser(userId?: string): Promise<CatalogItem[]> {
   const catalog = loadCatalog();
-  return catalog.map((item) => {
+  return Promise.all(catalog.map(async (item) => {
     const status =
       item.distribution.type === "free" || item.distribution.type === "bundled"
         ? "free"
         : userId
-          ? getEntitlementStatus(db, userId, item.id)
+          ? await getEntitlementStatus(userId, item.id)
           : "not_owned";
 
     return {
@@ -328,7 +270,7 @@ function catalogForUser(db: DatabaseShape, userId?: string): CatalogItem[] {
         checkedAt: new Date().toISOString()
       }
     };
-  });
+  }));
 }
 
 function createError(code: string, message: string): { ok: false; code: string; message: string } {
@@ -341,25 +283,8 @@ function createPaymentUrl(handoffToken: string): string {
   return url.toString();
 }
 
-function upsertEntitlement(db: DatabaseShape, userId: string, mcpId: string): EntitlementRecord {
-  const existing = db.entitlements.find((entry) => entry.userId === userId && entry.mcpId === mcpId);
-  if (existing) {
-    existing.status = "owned";
-    existing.source = "purchase";
-    existing.grantedAt = new Date().toISOString();
-    return existing;
-  }
-
-  const created: EntitlementRecord = {
-    id: `ent_${randomBytes(6).toString("hex")}`,
-    userId,
-    mcpId,
-    status: "owned",
-    source: "purchase",
-    grantedAt: new Date().toISOString()
-  };
-  db.entitlements.push(created);
-  return created;
+async function upsertEntitlement(userId: string, mcpId: string) {
+  return repositories.entitlements.upsertOwnedEntitlement(userId, mcpId);
 }
 
 const server = createServer(async (req, res) => {
@@ -375,8 +300,7 @@ const server = createServer(async (req, res) => {
 
   const url = new URL(req.url, APP_BASE_URL);
   const pathname = url.pathname;
-  const db = loadDb();
-  const user = findUserByToken(db, getBearerToken(req));
+  const user = await findUserByToken(getBearerToken(req));
 
   try {
     if (req.method === "GET" && pathname === "/health") {
@@ -385,7 +309,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/catalog") {
-      json(res, 200, { items: catalogForUser(db, user?.id) });
+      json(res, 200, { items: await catalogForUser(user?.id) });
       return;
     }
 
@@ -412,8 +336,8 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const items = getUserEntitlements(db, user.id).map((entry) => ({
-        mcpId: entry.mcpId,
+      const items = (await getUserEntitlements(user.id)).map((entry) => ({
+        mcpId: entry.productId,
         status: entry.status === "trial" ? "trial" : "owned",
         checkedAt: new Date().toISOString()
       }));
@@ -435,7 +359,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const item = catalogForUser(db, user.id).find((entry) => entry.id === mcpId);
+      const item = (await catalogForUser(user.id)).find((entry) => entry.id === mcpId);
       if (!item) {
         json(res, 404, createError("PRODUCT_NOT_FOUND", "This MCP does not exist."));
         return;
@@ -473,7 +397,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const product = catalogForUser(db, user.id).find((entry) => entry.id === productId);
+      const product = (await catalogForUser(user.id)).find((entry) => entry.id === productId);
       if (!product || product.visibility === "hidden") {
         json(res, 404, createError("PRODUCT_NOT_FOUND", "This product is no longer available."));
         return;
@@ -486,15 +410,14 @@ const server = createServer(async (req, res) => {
 
       const rawToken = `handoff_${randomBytes(16).toString("hex")}`;
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-      db.handoffs.push({
-        id: `ph_${randomBytes(8).toString("hex")}`,
+      await repositories.payments.createPaymentHandoff({
         tokenHash: sha256(rawToken),
         userId: user.id,
         productId,
         source: body.source?.trim() || "launcher",
-        expiresAt
+        expiresAt,
+        createdAt: new Date().toISOString()
       });
-      saveDb(db);
 
       json(res, 200, {
         ok: true,
@@ -513,7 +436,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const handoff = db.handoffs.find((entry) => entry.tokenHash === sha256(handoffToken));
+      const handoff = await repositories.payments.findPaymentHandoffByTokenHash(sha256(handoffToken));
       if (!handoff) {
         json(res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
         return;
@@ -529,8 +452,8 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const handoffUser = db.users.find((entry) => entry.id === handoff.userId);
-      const product = catalogForUser(db, handoff.userId).find((entry) => entry.id === handoff.productId);
+      const handoffUser = await repositories.auth.findUserById(handoff.userId);
+      const product = (await catalogForUser(handoff.userId)).find((entry) => entry.id === handoff.productId);
       if (!handoffUser || !product) {
         json(res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
         return;
@@ -563,7 +486,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const handoff = db.handoffs.find((entry) => entry.tokenHash === sha256(handoffToken));
+      const handoff = await repositories.payments.findPaymentHandoffByTokenHash(sha256(handoffToken));
       if (!handoff) {
         json(res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
         return;
@@ -574,7 +497,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const product = catalogForUser(db, handoff.userId).find((entry) => entry.id === handoff.productId);
+      const product = (await catalogForUser(handoff.userId)).find((entry) => entry.id === handoff.productId);
       if (!product) {
         json(res, 404, createError("PRODUCT_NOT_FOUND", "This product is no longer available."));
         return;
@@ -600,7 +523,7 @@ const server = createServer(async (req, res) => {
       let providerSessionId: string | undefined;
 
       if (isLemonSqueezyConfigured(LEMON_SQUEEZY)) {
-        const handoffUser = db.users.find((entry) => entry.id === handoff.userId);
+        const handoffUser = await repositories.auth.findUserById(handoff.userId);
         const lemonResult = await createLemonSqueezyCheckout(LEMON_SQUEEZY, {
           productId: handoff.productId,
           productName: product.name,
@@ -622,13 +545,12 @@ const server = createServer(async (req, res) => {
         providerSessionId = checkoutId;
       }
 
-      db.payments.push({
+      await repositories.payments.createPayment({
         ...paymentBase,
         providerCheckoutId,
         providerSessionId
       });
-      handoff.usedAt = new Date().toISOString();
-      saveDb(db);
+      await repositories.payments.markPaymentHandoffUsed(handoff.id);
 
       json(res, 200, {
         ok: true,
@@ -673,20 +595,16 @@ const server = createServer(async (req, res) => {
           custom?.user_id &&
           custom?.product_id
         ) {
-          const payment = db.payments.find(
-            (entry) =>
-              entry.userId === custom.user_id &&
-              entry.productId === custom.product_id &&
-              entry.status !== "paid"
+          const payment = await repositories.payments.findPendingPaymentByUserAndProduct(
+            custom.user_id,
+            custom.product_id
           );
 
           if (payment) {
-            payment.status = "paid";
-            payment.paidAt = new Date().toISOString();
-            payment.providerSessionId =
-              body.data?.attributes?.identifier ?? payment.providerSessionId;
-            upsertEntitlement(db, payment.userId, payment.productId);
-            saveDb(db);
+            await repositories.payments.markPaymentPaid(payment.id, {
+              providerSessionId: body.data?.attributes?.identifier ?? payment.providerSessionId
+            });
+            await upsertEntitlement(payment.userId, payment.productId);
           }
         }
       } else {
@@ -700,17 +618,15 @@ const server = createServer(async (req, res) => {
           return;
         }
 
-        const payment = db.payments.find((entry) => entry.id === paymentId);
+        const payment = await repositories.payments.findPaymentById(paymentId);
         if (!payment) {
           json(res, 404, createError("PAYMENT_NOT_FOUND", "Payment was not found."));
           return;
         }
 
         if (body.status === "paid") {
-          payment.status = "paid";
-          payment.paidAt = new Date().toISOString();
-          upsertEntitlement(db, payment.userId, payment.productId);
-          saveDb(db);
+          await repositories.payments.markPaymentPaid(payment.id);
+          await upsertEntitlement(payment.userId, payment.productId);
         }
       }
 
@@ -721,7 +637,7 @@ const server = createServer(async (req, res) => {
     const paymentStatusMatch = pathname.match(/^\/api\/payment\/status\/([^/]+)$/);
     if (req.method === "GET" && paymentStatusMatch) {
       const paymentId = decodeURIComponent(paymentStatusMatch[1]);
-      const payment = db.payments.find((entry) => entry.id === paymentId);
+      const payment = await repositories.payments.findPaymentById(paymentId);
       if (!payment) {
         json(res, 404, createError("PAYMENT_NOT_FOUND", "Payment was not found."));
         return;
@@ -742,6 +658,13 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`MellowCat backend listening on http://${HOST}:${PORT}`);
-});
+void ensureDevLauncherUsers()
+  .then(() => {
+    server.listen(PORT, HOST, () => {
+      console.log(`MellowCat backend listening on http://${HOST}:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to seed dev launcher users:", error);
+    process.exit(1);
+  });

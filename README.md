@@ -53,3 +53,4 @@ Remote catalog, entitlement, and payment flow planning is documented in:
 - [docs/frontend-payment-flow.md](./docs/frontend-payment-flow.md)
 - [docs/lemonsqueezy-backend-setup.md](./docs/lemonsqueezy-backend-setup.md)
 - [docs/railway-backend-deploy.md](./docs/railway-backend-deploy.md)
+- [docs/supabase-backend-plan.md](./docs/supabase-backend-plan.md)
