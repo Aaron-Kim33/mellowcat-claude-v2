@@ -22,15 +22,17 @@ export class AuthService {
   async getSession(): Promise<AuthSession> {
     if (this.apiClient.isConfigured() && this.session.accessToken) {
       try {
+        const remoteSession = await this.apiClient.getSession();
         this.session = {
-          ...(await this.apiClient.getSession()),
+          ...remoteSession,
           accessToken: this.session.accessToken,
           source: "remote",
           lastSyncedAt: new Date().toISOString()
         };
         this.persist();
         return this.session;
-      } catch (_error) {
+      } catch (error) {
+        console.warn("[AuthService] getSession failed", error);
         return this.session;
       }
     }
@@ -79,7 +81,23 @@ export class AuthService {
     this.persist();
 
     if (this.apiClient.isConfigured()) {
-      return this.getSession();
+      const remoteSession = await this.apiClient.getSession();
+      if (!remoteSession.loggedIn || !remoteSession.userId) {
+        this.session = { loggedIn: false };
+        this.apiClient.setAccessToken(undefined);
+        this.secretsStore.delete("authAccessToken");
+        this.persist();
+        throw new Error("Token sign-in failed. The server did not return a valid session.");
+      }
+
+      this.session = {
+        ...remoteSession,
+        accessToken: normalizedToken,
+        source: "remote",
+        lastSyncedAt: new Date().toISOString()
+      };
+      this.persist();
+      return this.session;
     }
 
     return this.session;
