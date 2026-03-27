@@ -199,6 +199,14 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function shortTokenHash(token?: string): string {
+  if (!token) {
+    return "missing";
+  }
+
+  return sha256(token).slice(0, 12);
+}
+
 async function ensureDevLauncherUsers(): Promise<void> {
   for (const devUser of DEV_LAUNCHER_USERS) {
     let user = await repositories.auth.findUserByEmail(devUser.email);
@@ -314,6 +322,9 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && pathname === "/auth/session") {
       if (!user) {
+        console.warn("[auth/session] user lookup failed", {
+          tokenHash: shortTokenHash(getBearerToken(req))
+        });
         json(res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
         return;
       }
@@ -325,6 +336,10 @@ const server = createServer(async (req, res) => {
         displayName: user.displayName,
         source: "remote",
         lastSyncedAt: new Date().toISOString()
+      });
+      console.log("[auth/session] resolved", {
+        userId: user.id,
+        email: user.email
       });
       return;
     }
