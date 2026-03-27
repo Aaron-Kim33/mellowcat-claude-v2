@@ -39,6 +39,14 @@
       "productId": "youtube-publish-mcp",
       "source": "launcher",
       "expiresAt": "2026-03-27T14:18:23.990Z"
+    },
+    {
+      "id": "ph_87da742fef428543",
+      "tokenHash": "c05dee08b62fd4251d215f890fc4ff4add08e5b32e2339fe5a3b37eee20b2299",
+      "userId": "user_01",
+      "productId": "youtube-publish-mcp",
+      "source": "launcher",
+      "expiresAt": "2026-03-27T15:23:14.634Z"
     }
   ],
   "payments": [],
