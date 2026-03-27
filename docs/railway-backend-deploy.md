@@ -59,6 +59,7 @@ Minimum:
 - `MELLOWCAT_API_PORT=8787`
 - `MELLOWCAT_APP_BASE_URL=https://api.mellowcat.xyz`
 - `MELLOWCAT_PAYMENT_BASE_URL=https://mellowcat.xyz/payment`
+- `MELLOWCAT_PAYMENT_SUCCESS_URL=https://mellowcat.xyz/payment?status=success`
 
 For real Lemon Squeezy checkout:
 

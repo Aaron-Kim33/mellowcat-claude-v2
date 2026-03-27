@@ -13,6 +13,7 @@ Set these before starting the backend:
 Optional:
 
 - `MELLOWCAT_PAYMENT_BASE_URL`
+- `MELLOWCAT_PAYMENT_SUCCESS_URL`
 - `MELLOWCAT_API_HOST`
 - `MELLOWCAT_API_PORT`
 

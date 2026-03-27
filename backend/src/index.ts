@@ -99,6 +99,8 @@ interface DatabaseShape {
 const PORT = Number(process.env.MELLOWCAT_API_PORT ?? "8787");
 const HOST = process.env.MELLOWCAT_API_HOST ?? "127.0.0.1";
 const PAYMENT_BASE_URL = process.env.MELLOWCAT_PAYMENT_BASE_URL ?? "https://mellowcat.xyz/payment";
+const PAYMENT_SUCCESS_URL =
+  process.env.MELLOWCAT_PAYMENT_SUCCESS_URL ?? `${PAYMENT_BASE_URL}?status=success`;
 const APP_BASE_URL = process.env.MELLOWCAT_APP_BASE_URL ?? `http://${HOST}:${PORT}`;
 const ROOT_DIR = path.resolve(__dirname, "../..");
 const DATA_DIR = path.resolve(ROOT_DIR, "backend", "data");
@@ -602,7 +604,7 @@ const server = createServer(async (req, res) => {
           displayName: handoffUser?.displayName,
           handoffToken,
           source: handoff.source,
-          redirectUrl: PAYMENT_BASE_URL
+          redirectUrl: PAYMENT_SUCCESS_URL
         });
         checkoutUrl = lemonResult.checkoutUrl;
         providerCheckoutId = lemonResult.providerCheckoutId;
