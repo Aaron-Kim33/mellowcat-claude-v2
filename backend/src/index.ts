@@ -122,6 +122,12 @@ function seedDatabase(): DatabaseShape {
         email: "creator@mellowcat.dev",
         displayName: "MellowCat Creator",
         launcherToken: "dev-launcher-token"
+      },
+      {
+        id: "user_02",
+        email: "creator2@mellowcat.dev",
+        displayName: "MellowCat Creator 2",
+        launcherToken: "dev-launcher-token-2"
       }
     ],
     handoffs: [],
