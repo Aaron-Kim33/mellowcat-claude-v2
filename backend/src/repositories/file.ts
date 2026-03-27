@@ -95,6 +95,7 @@ export function createFileRepositories(): BackendRepositories {
       async createUser(user) {
         const db = loadDb();
         const created: UserRecord = {
+          id: user.id ?? `user_${randomBytes(6).toString("hex")}`,
           ...user,
           createdAt: new Date().toISOString()
         };

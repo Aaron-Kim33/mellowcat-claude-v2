@@ -8,6 +8,12 @@ export interface UserRecord {
   createdAt?: string;
 }
 
+export interface CreateUserInput {
+  id?: string;
+  email: string;
+  displayName?: string;
+}
+
 export interface PaymentHandoffRecord {
   id: string;
   tokenHash: string;
@@ -47,7 +53,7 @@ export interface AuthRepository {
   findUserByLauncherToken(token: string): Promise<UserRecord | undefined>;
   findUserById(userId: string): Promise<UserRecord | undefined>;
   findUserByEmail(email: string): Promise<UserRecord | undefined>;
-  createUser(user: Omit<UserRecord, "createdAt">): Promise<UserRecord>;
+  createUser(user: CreateUserInput): Promise<UserRecord>;
   createLauncherSession(input: {
     userId: string;
     tokenHash: string;

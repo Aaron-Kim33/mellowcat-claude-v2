@@ -204,7 +204,6 @@ async function ensureDevLauncherUsers(): Promise<void> {
     let user = await repositories.auth.findUserByEmail(devUser.email);
     if (!user) {
       user = await repositories.auth.createUser({
-        id: devUser.id,
         email: devUser.email,
         displayName: devUser.displayName
       });

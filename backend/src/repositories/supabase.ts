@@ -143,7 +143,7 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
         const rows = await client.request<Json[]>("app_users", {
           method: "POST",
           body: JSON.stringify({
-            id: user.id,
+            ...(user.id ? { id: user.id } : {}),
             email: user.email,
             display_name: user.displayName ?? null
           })
