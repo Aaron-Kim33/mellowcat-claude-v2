@@ -11,6 +11,13 @@
       "email": "creator2@mellowcat.dev",
       "displayName": "MellowCat Creator 2",
       "launcherToken": "dev-launcher-token-2"
+    },
+    {
+      "id": "user_83719904773b",
+      "email": "creator3@mellowcat.dev",
+      "displayName": "MellowCat Creator 3",
+      "createdAt": "2026-03-27T19:15:03.373Z",
+      "launcherToken": "dev-launcher-token-3"
     }
   ],
   "handoffs": [

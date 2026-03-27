@@ -115,15 +115,24 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
   return {
     auth: {
       async findUserByLauncherToken(token: string) {
-        const rows = await client.request<Json[]>("launcher_sessions", {
+        const sessionRows = await client.request<Json[]>("launcher_sessions", {
           query: [
-            "select=app_users(*)",
-            `token_hash=eq.${encodeURIComponent(sha256(token))}`
+            "select=user_id",
+            `token_hash=eq.${encodeURIComponent(sha256(token))}`,
+            "limit=1"
           ].join("&")
         });
-        const joined = first(rows);
-        const user = joined?.app_users;
-        return user && typeof user === "object" ? mapUser(user as Json) : undefined;
+        const session = first(sessionRows);
+        const userId = typeof session?.user_id === "string" ? session.user_id : undefined;
+        if (!userId) {
+          return undefined;
+        }
+
+        const userRows = await client.request<Json[]>("app_users", {
+          query: `select=*&id=eq.${encodeURIComponent(userId)}&limit=1`
+        });
+        const user = first(userRows);
+        return user ? mapUser(user) : undefined;
       },
       async findUserById(userId: string) {
         const rows = await client.request<Json[]>("app_users", {
