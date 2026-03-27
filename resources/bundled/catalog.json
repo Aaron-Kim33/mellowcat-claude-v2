@@ -15,8 +15,8 @@
       "priceText": "Built-in"
     },
     "commerce": {
-      "productUrl": "https://app.mellowcat.com/store/trend-discovery-mcp",
-      "checkoutUrl": "https://app.mellowcat.com/checkout/trend-discovery-mcp",
+      "productUrl": "https://mellowcat.xyz/payment",
+      "checkoutUrl": "https://mellowcat.xyz/payment",
       "ctaLabel": "Unlock"
     },
     "latestVersion": "0.2.0",
@@ -52,8 +52,8 @@
       "priceText": "Built-in"
     },
     "commerce": {
-      "productUrl": "https://app.mellowcat.com/store/telegram-control-mcp",
-      "checkoutUrl": "https://app.mellowcat.com/checkout/telegram-control-mcp",
+      "productUrl": "https://mellowcat.xyz/payment",
+      "checkoutUrl": "https://mellowcat.xyz/payment",
       "ctaLabel": "Unlock"
     },
     "latestVersion": "0.2.0",
@@ -89,8 +89,8 @@
       "priceText": "Built-in"
     },
     "commerce": {
-      "productUrl": "https://app.mellowcat.com/store/shortform-script-mcp",
-      "checkoutUrl": "https://app.mellowcat.com/checkout/shortform-script-mcp",
+      "productUrl": "https://mellowcat.xyz/payment",
+      "checkoutUrl": "https://mellowcat.xyz/payment",
       "ctaLabel": "Unlock"
     },
     "latestVersion": "0.2.0",
@@ -126,8 +126,8 @@
       "priceText": "Built-in"
     },
     "commerce": {
-      "productUrl": "https://app.mellowcat.com/store/asset-packager-mcp",
-      "checkoutUrl": "https://app.mellowcat.com/checkout/asset-packager-mcp",
+      "productUrl": "https://mellowcat.xyz/payment",
+      "checkoutUrl": "https://mellowcat.xyz/payment",
       "ctaLabel": "Unlock"
     },
     "latestVersion": "0.2.0",
@@ -163,8 +163,8 @@
       "priceText": "Built-in"
     },
     "commerce": {
-      "productUrl": "https://app.mellowcat.com/store/youtube-publish-mcp",
-      "checkoutUrl": "https://app.mellowcat.com/checkout/youtube-publish-mcp",
+      "productUrl": "https://mellowcat.xyz/payment",
+      "checkoutUrl": "https://mellowcat.xyz/payment",
       "ctaLabel": "Unlock"
     },
     "latestVersion": "0.2.0",
@@ -200,7 +200,7 @@
       "priceText": "Free"
     },
     "commerce": {
-      "productUrl": "https://app.mellowcat.com/store/filesystem-tools"
+      "productUrl": "https://mellowcat.xyz/payment"
     },
     "latestVersion": "0.1.0",
     "compatibility": {

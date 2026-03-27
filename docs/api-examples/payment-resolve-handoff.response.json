@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "user": {
+    "id": "user_123",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator"
+  },
+  "product": {
+    "id": "youtube-publish-mcp",
+    "name": "YouTube Publisher",
+    "summary": "Connect OAuth and upload approved production packages to YouTube.",
+    "priceAmount": 19,
+    "priceCurrency": "USD"
+  },
+  "source": "launcher"
+}

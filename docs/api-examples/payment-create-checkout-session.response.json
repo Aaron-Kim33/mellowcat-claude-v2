@@ -1,0 +1,6 @@
+{
+  "ok": true,
+  "provider": "stripe",
+  "checkoutUrl": "https://checkout.stripe.com/pay/cs_test_123",
+  "paymentId": "pay_123"
+}

@@ -1,4 +1,4 @@
-import type { AuthSession } from "../../../common/types/auth";
+import type { AuthSession, PaymentHandoffResponse } from "../../../common/types/auth";
 import { MellowCatApiClient } from "../../api/mellowcat-api-client";
 import { FileService } from "../system/file-service";
 import { PathService } from "../system/path-service";
@@ -83,6 +83,27 @@ export class AuthService {
     }
 
     return this.session;
+  }
+
+  async createPaymentHandoff(
+    productId: string,
+    source = "launcher"
+  ): Promise<PaymentHandoffResponse> {
+    const normalizedProductId = productId.trim();
+
+    if (!normalizedProductId) {
+      throw new Error("Product id is required.");
+    }
+
+    if (!this.apiClient.isConfigured()) {
+      throw new Error("API base URL is not configured.");
+    }
+
+    if (!this.session.accessToken) {
+      throw new Error("Sign in again before starting checkout.");
+    }
+
+    return this.apiClient.createPaymentHandoff(normalizedProductId, source);
   }
 
   logout(): void {

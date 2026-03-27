@@ -45,3 +45,11 @@ Composable MCP compatibility and dependency rules are documented in [docs/mcp-co
 Multi-provider script generation planning is documented in [docs/script-provider-architecture.md](./docs/script-provider-architecture.md).
 
 Trend shortlist discovery planning is documented in [docs/trend-discovery-mcp.md](./docs/trend-discovery-mcp.md).
+
+Remote catalog, entitlement, and payment flow planning is documented in:
+
+- [docs/remote-api-contracts.md](./docs/remote-api-contracts.md)
+- [docs/payment-api-spec.md](./docs/payment-api-spec.md)
+- [docs/frontend-payment-flow.md](./docs/frontend-payment-flow.md)
+- [docs/lemonsqueezy-backend-setup.md](./docs/lemonsqueezy-backend-setup.md)
+- [docs/railway-backend-deploy.md](./docs/railway-backend-deploy.md)

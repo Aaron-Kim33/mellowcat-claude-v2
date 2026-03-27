@@ -64,6 +64,7 @@ interface AppState {
   refreshStoreAccess: () => Promise<void>;
   login: () => Promise<void>;
   loginWithToken: (token: string) => Promise<void>;
+  createPaymentHandoff: (productId: string, source?: string) => Promise<string>;
   logout: () => Promise<void>;
 }
 
@@ -395,6 +396,10 @@ export const useAppStore = create<AppState>((set) => ({
     const authSession = await window.mellowcat.auth.loginWithToken(token);
     const catalog = await window.mellowcat.mcp.listCatalog();
     set({ authSession, catalog });
+  },
+  createPaymentHandoff: async (productId: string, source = "launcher") => {
+    const response = await window.mellowcat.auth.createPaymentHandoff(productId, source);
+    return response.paymentUrl;
   },
   logout: async () => {
     await window.mellowcat.auth.logout();

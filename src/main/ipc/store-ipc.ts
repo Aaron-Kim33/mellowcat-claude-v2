@@ -7,5 +7,8 @@ export function registerAuthIpc(authService: AuthService): void {
   ipcMain.handle("auth:loginWithToken", (_event, token: string) =>
     authService.loginWithToken(token)
   );
+  ipcMain.handle("auth:createPaymentHandoff", (_event, productId: string, source?: string) =>
+    authService.createPaymentHandoff(productId, source)
+  );
   ipcMain.handle("auth:logout", () => authService.logout());
 }

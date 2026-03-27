@@ -10,6 +10,7 @@ interface MCPCardProps {
   onInstall?: (id: string) => void;
   onUpdate?: (id: string) => void;
   onPurchase?: (item: MCPCatalogItem) => void;
+  purchasePending?: boolean;
 }
 
 export function MCPCard({
@@ -18,10 +19,12 @@ export function MCPCard({
   installed,
   onInstall,
   onUpdate,
-  onPurchase
+  onPurchase,
+  purchasePending = false
 }: MCPCardProps) {
   const isInstalled = Boolean(installed);
   const isRunning = installed?.runtime.status === "running";
+  const installState = installed?.installState;
   const hasUpdate = installed ? installed.version !== item.latestVersion : false;
   const isInstallable = item.availability?.state !== "coming_soon";
   const entitlementStatus = item.entitlement?.status ?? installed?.entitlement.status ?? "unknown";
@@ -41,6 +44,13 @@ export function MCPCard({
   ];
   const composition = evaluateMcpComposition(selectedIds);
   const itemIssues = composition.issues.filter((issue) => issue.mcpId === item.id);
+  const installStateLabelMap: Record<InstalledMCPRecord["installState"], string> = {
+    not_installed: "Not installed",
+    downloading: "Installing...",
+    installed: isRunning ? "Running" : "Installed",
+    updating: "Updating...",
+    error: "Install error"
+  };
   const entitlementLabelMap: Record<typeof entitlementStatus, string> = {
     free: "free",
     owned: "owned",
@@ -53,6 +63,10 @@ export function MCPCard({
     : entitlementStatus === "trial"
       ? "Start Trial"
       : "Install";
+  const isBusy =
+    purchasePending ||
+    installState === "downloading" ||
+    installState === "updating";
 
   return (
     <article className={`${isInstalled ? "card card-installed" : "card"} compact-card platform-card ${platformTone}`}>
@@ -75,9 +89,7 @@ export function MCPCard({
           <span>Status</span>
           <strong>
             {isInstalled
-              ? isRunning
-                ? "Running"
-                : "Installed"
+              ? installStateLabelMap[installState ?? "installed"]
               : isInstallable
                 ? "Not installed"
                 : "Coming soon"}
@@ -115,6 +127,28 @@ export function MCPCard({
           </span>
         </div>
       )}
+      {purchasePending && (
+        <div className="manual-install-box">
+          <strong>Waiting for purchase</strong>
+          <span className="subtle">
+            Complete checkout in the browser, then return here. MellowCat will refresh your access automatically.
+          </span>
+        </div>
+      )}
+      {!isInstalled && entitlementStatus === "owned" && (
+        <div className="manual-install-box">
+          <strong>Ready to install</strong>
+          <span className="subtle">
+            This product is already in your account. Install it here to add it to your local workflow.
+          </span>
+        </div>
+      )}
+      {installState === "error" && installed?.lastError && (
+        <div className="manual-install-box">
+          <strong>Install failed</strong>
+          <span className="subtle">{installed.lastError}</span>
+        </div>
+      )}
       <div className="card-row">
         <div className="tag-row">
           {isInstalled && <span className="tag">{installed?.enabled ? "enabled" : "disabled"}</span>}
@@ -148,22 +182,31 @@ export function MCPCard({
             type="button"
             className={`primary-button ${platformTone}`}
             onClick={() => onPurchase?.(item)}
-            disabled={!hasCheckout}
+            disabled={!hasCheckout || isBusy}
             title={
               hasCheckout
                 ? "Open product details and purchase options"
                 : "Purchase flow is not connected for this item yet"
             }
           >
-            {hasCheckout ? actionLabel : "Purchase Unavailable"}
+            {hasCheckout
+              ? purchasePending
+                ? "Waiting for Purchase"
+                : actionLabel
+              : "Purchase Unavailable"}
           </button>
         ) : (
           <button
             type="button"
             className={`primary-button ${platformTone}`}
             onClick={() => canInstall && onInstall?.(item.id)}
+            disabled={isBusy}
           >
-            {actionLabel}
+            {installState === "downloading"
+              ? "Installing..."
+              : installState === "updating"
+                ? "Updating..."
+                : actionLabel}
           </button>
         )}
       </div>

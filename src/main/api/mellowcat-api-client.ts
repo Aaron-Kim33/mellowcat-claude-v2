@@ -1,4 +1,4 @@
-import type { AuthSession } from "../../common/types/auth";
+import type { AuthSession, PaymentHandoffResponse } from "../../common/types/auth";
 import type { MCPCatalogItem, MCPEntitlementRecord } from "../../common/types/mcp";
 
 export interface MCPRemoteDownloadTicket {
@@ -54,8 +54,8 @@ const MOCK_CATALOG: MCPCatalogItem[] = [
       amount: 5
     },
     commerce: {
-      checkoutUrl: "https://app.mellowcat.com/checkout/filesystem-tools",
-      productUrl: "https://app.mellowcat.com/store/filesystem-tools",
+      checkoutUrl: "https://mellowcat.xyz/payment",
+      productUrl: "https://mellowcat.xyz/payment",
       ctaLabel: "Buy"
     },
     latestVersion: "0.1.0",
@@ -106,8 +106,8 @@ const MOCK_CATALOG: MCPCatalogItem[] = [
       amount: 19
     },
     commerce: {
-      checkoutUrl: "https://app.mellowcat.com/checkout/youtube-publish-mcp",
-      productUrl: "https://app.mellowcat.com/store/youtube-publish-mcp",
+      checkoutUrl: "https://mellowcat.xyz/payment",
+      productUrl: "https://mellowcat.xyz/payment",
       ctaLabel: "Buy"
     },
     latestVersion: "1.0.0",
@@ -190,22 +190,44 @@ export class MellowCatApiClient {
     );
   }
 
-  private async request<T>(pathname: string): Promise<T> {
+  async createPaymentHandoff(
+    productId: string,
+    source = "launcher"
+  ): Promise<PaymentHandoffResponse> {
+    return this.request<PaymentHandoffResponse>("/api/payment/handoff", {
+      method: "POST",
+      body: {
+        productId,
+        source
+      }
+    });
+  }
+
+  private async request<T>(
+    pathname: string,
+    init?: {
+      method?: "GET" | "POST";
+      body?: unknown;
+    }
+  ): Promise<T> {
     if (!this.baseUrl) {
       throw new Error("MellowCat API base URL is not configured");
     }
 
     if (this.isMockMode()) {
-      return this.handleMockRequest<T>(pathname);
+      return this.handleMockRequest<T>(pathname, init);
     }
 
     const response = await fetch(new URL(pathname, this.baseUrl), {
+      method: init?.method ?? "GET",
       headers: {
         Accept: "application/json",
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...(this.accessToken
           ? { Authorization: `Bearer ${this.accessToken}` }
           : {})
-      }
+      },
+      ...(init?.body ? { body: JSON.stringify(init.body) } : {})
     });
 
     if (!response.ok) {
@@ -215,7 +237,13 @@ export class MellowCatApiClient {
     return (await response.json()) as T;
   }
 
-  private handleMockRequest<T>(pathname: string): T {
+  private handleMockRequest<T>(
+    pathname: string,
+    init?: {
+      method?: "GET" | "POST";
+      body?: unknown;
+    }
+  ): T {
     if (!this.accessToken?.trim()) {
       throw new Error("Mock remote mode requires a session token.");
     }
@@ -232,6 +260,23 @@ export class MellowCatApiClient {
       return {
         ...MOCK_SESSION,
         lastSyncedAt: new Date().toISOString()
+      } as T;
+    }
+
+    if (pathname === "/payment/handoff" && init?.method === "POST") {
+      const body = (init.body ?? {}) as { productId?: string };
+      const productId = body.productId?.trim();
+      if (!productId) {
+        throw new Error("Mock payment handoff requires a productId.");
+      }
+
+      return {
+        ok: true,
+        handoffToken: `mock_handoff_${productId}`,
+        paymentUrl: `https://mellowcat.xyz/payment?handoff=${encodeURIComponent(
+          `mock_handoff_${productId}`
+        )}`,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
       } as T;
     }
 

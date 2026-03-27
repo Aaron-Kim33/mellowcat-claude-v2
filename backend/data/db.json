@@ -1,0 +1,55 @@
+{
+  "users": [
+    {
+      "id": "user_01",
+      "email": "creator@mellowcat.dev",
+      "displayName": "MellowCat Creator",
+      "launcherToken": "dev-launcher-token"
+    }
+  ],
+  "handoffs": [
+    {
+      "id": "ph_9513c2eaedc78863",
+      "tokenHash": "1ce52a7a8d03417333c33080aaf05d15cec709230132aae5c713bc1e8d07f518",
+      "userId": "user_01",
+      "productId": "youtube-publish-mcp",
+      "source": "launcher",
+      "expiresAt": "2026-03-27T13:57:50.617Z"
+    },
+    {
+      "id": "ph_f72dace42ce7fb7f",
+      "tokenHash": "4dc8ea7837623ec2eba289745f1dd6bb6cd6f547fce38c81927f428cced4e7a2",
+      "userId": "user_01",
+      "productId": "youtube-publish-mcp",
+      "source": "launcher",
+      "expiresAt": "2026-03-27T14:05:53.698Z"
+    },
+    {
+      "id": "ph_814444561711efff",
+      "tokenHash": "56611abf10d280a6a85e91d64e50f9ef7f98243e2c29563a0c51389146052a1b",
+      "userId": "user_01",
+      "productId": "youtube-publish-mcp",
+      "source": "launcher",
+      "expiresAt": "2026-03-27T14:09:07.328Z"
+    },
+    {
+      "id": "ph_ab81b7e14b658cbe",
+      "tokenHash": "78858470b04c4446e3a9d9b51bebc53bcc9c2b9d047be18a411c1085ea4e8152",
+      "userId": "user_01",
+      "productId": "youtube-publish-mcp",
+      "source": "launcher",
+      "expiresAt": "2026-03-27T14:18:23.990Z"
+    }
+  ],
+  "payments": [],
+  "entitlements": [
+    {
+      "id": "ent_fs_01",
+      "userId": "user_01",
+      "mcpId": "filesystem-tools",
+      "status": "owned",
+      "source": "grant",
+      "grantedAt": "2026-03-27T13:49:59.884Z"
+    }
+  ]
+}

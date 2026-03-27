@@ -7,3 +7,10 @@ export interface AuthSession {
   lastSyncedAt?: string;
   loggedIn: boolean;
 }
+
+export interface PaymentHandoffResponse {
+  ok: boolean;
+  handoffToken: string;
+  paymentUrl: string;
+  expiresAt: string;
+}

@@ -10,11 +10,21 @@ import {
 } from "../../lib/store-platform";
 
 export function StorePage() {
-  const { catalog, installed, installMcp, updateMcp, refreshStoreAccess, settings } = useAppStore();
+  const {
+    catalog,
+    installed,
+    installMcp,
+    updateMcp,
+    refreshStoreAccess,
+    settings,
+    authSession,
+    createPaymentHandoff
+  } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.store;
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<StorePlatform>("all");
   const [purchasePending, setPurchasePending] = useState(false);
+  const [purchasePendingId, setPurchasePendingId] = useState<string>();
   const [purchaseMessage, setPurchaseMessage] = useState("");
   const installedCount = installed.length;
   const runningCount = installed.filter((item) => item.runtime.status === "running").length;
@@ -67,6 +77,7 @@ export function StorePage() {
         })
         .finally(() => {
           setPurchasePending(false);
+          setPurchasePendingId(undefined);
           window.setTimeout(() => setPurchaseMessage(""), 2500);
         });
     };
@@ -75,16 +86,29 @@ export function StorePage() {
     return () => window.removeEventListener("focus", handleFocus);
   }, [purchasePending, refreshStoreAccess]);
 
-  const handlePurchase = (item: (typeof catalog)[number]) => {
+  const handlePurchase = async (item: (typeof catalog)[number]) => {
     const baseUrl = item.commerce?.checkoutUrl ?? item.commerce?.productUrl;
-    const targetUrl = baseUrl
-      ? buildPurchaseUrl(baseUrl, item.id)
-      : undefined;
+    let targetUrl: string | undefined;
+
+    if (authSession?.loggedIn && settings?.apiBaseUrl?.trim()) {
+      try {
+        targetUrl = await createPaymentHandoff(item.id, "launcher");
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Checkout could not be started.";
+        window.alert(message);
+        return;
+      }
+    } else {
+      targetUrl = baseUrl ? buildPurchaseUrl(baseUrl, item.id) : undefined;
+    }
+
     if (!targetUrl) {
       window.alert("This item is not owned yet, but its checkout flow is not connected yet.");
       return;
     }
     setPurchasePending(true);
+    setPurchasePendingId(item.id);
     setPurchaseMessage("Complete checkout, then return to MellowCat. We will refresh access automatically.");
     void window.mellowcat.app.openExternal(targetUrl);
   };
@@ -131,6 +155,7 @@ export function StorePage() {
                   onInstall={(id) => void installMcp(id)}
                   onUpdate={(id) => void updateMcp(id)}
                   onPurchase={handlePurchase}
+                  purchasePending={purchasePendingId === item.id}
                 />
               ))}
             </div>
@@ -194,6 +219,7 @@ export function StorePage() {
                 onInstall={(id) => void installMcp(id)}
                 onUpdate={(id) => void updateMcp(id)}
                 onPurchase={handlePurchase}
+                purchasePending={purchasePendingId === item.id}
               />
             ))}
           </div>
@@ -211,12 +237,6 @@ export function StorePage() {
 }
 
 function buildPurchaseUrl(baseUrl: string, productId: string): string {
-  if (baseUrl.includes("#payment")) {
-    const [originPart, hashPart = "payment"] = baseUrl.split("#");
-    const hashQuerySeparator = hashPart.includes("?") ? "&" : "?";
-    return `${originPart}#${hashPart}${hashQuerySeparator}productId=${encodeURIComponent(productId)}&source=launcher`;
-  }
-
   try {
     const url = new URL(baseUrl);
     url.searchParams.set("productId", productId);

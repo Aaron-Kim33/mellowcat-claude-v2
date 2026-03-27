@@ -4,7 +4,7 @@
 
 The launcher opens the web checkout flow at:
 
-- [mellowcat.xyz/#payment](https://mellowcat.xyz/#payment)
+- [mellowcat.xyz/payment](https://mellowcat.xyz/payment)
 
 The launcher should append:
 
@@ -14,13 +14,13 @@ The launcher should append:
 Example:
 
 ```text
-https://mellowcat.xyz/#payment?productId=youtube-publish-mcp&source=launcher
+https://mellowcat.xyz/payment?productId=youtube-publish-mcp&source=launcher
 ```
 
 ## Expected web flow
 
 1. launcher user clicks `Buy`
-2. browser opens `mellowcat.xyz/#payment`
+2. browser opens `mellowcat.xyz/payment`
 3. payment page reads `productId`
 4. payment page confirms the user is logged in
 5. payment provider checkout runs
@@ -84,7 +84,10 @@ The launcher already expects:
 - `GET /auth/entitlements`
 - `GET /catalog`
 - `GET /mcp/:mcpId/download-ticket?version=:version`
+- `POST /api/payment/handoff`
 
 These are described in:
 
 - [remote-api-contracts.md](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/remote-api-contracts.md)
+- [payment-api-spec.md](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/payment-api-spec.md)
+- [frontend-payment-flow.md](/C:/Users/User/Desktop/MCP/mellowcat-claude-v2/docs/frontend-payment-flow.md)
