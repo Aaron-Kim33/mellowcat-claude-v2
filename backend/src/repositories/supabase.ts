@@ -203,6 +203,38 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
           passwordHash: credential.password_hash
         };
       },
+      async findUserByIdentity(provider, providerUserId) {
+        const identityRows = await client.request<Json[]>("auth_identities", {
+          query: [
+            "select=user_id",
+            `provider=eq.${encodeURIComponent(provider)}`,
+            `provider_user_id=eq.${encodeURIComponent(providerUserId)}`,
+            "limit=1"
+          ].join("&")
+        });
+        const identity = first(identityRows);
+        const userId = typeof identity?.user_id === "string" ? identity.user_id : undefined;
+        if (!userId) {
+          return undefined;
+        }
+        return this.findUserById(userId);
+      },
+      async upsertAuthIdentity(input) {
+        await client.request<Json[]>("auth_identities", {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates,return=representation"
+          },
+          query: "on_conflict=provider,provider_user_id",
+          body: JSON.stringify({
+            user_id: input.userId,
+            provider: input.provider,
+            provider_user_id: input.providerUserId,
+            email: input.email ?? null,
+            updated_at: new Date().toISOString()
+          })
+        });
+      },
       async createLauncherSession(input) {
         await client.request<Json[]>("launcher_sessions", {
           method: "POST",
@@ -216,6 +248,12 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
               : null
         })
       });
+      },
+      async deleteLauncherSession(tokenHash) {
+        await client.request<Json[]>("launcher_sessions", {
+          method: "DELETE",
+          query: `token_hash=eq.${encodeURIComponent(tokenHash)}`
+        });
       },
       async createWebSession(input) {
         await client.request<Json[]>("web_sessions", {

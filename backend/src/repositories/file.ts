@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { createHash, randomBytes } from "crypto";
 import type {
+  AuthIdentityRecord,
   BackendRepositories,
   EntitlementRecord,
   LauncherAuthRequestRecord,
@@ -14,6 +15,7 @@ import type {
 
 interface FileDatabaseShape {
   users: UserRecord[];
+  authIdentities: AuthIdentityRecord[];
   passwordCredentials: PasswordCredentialRecord[];
   webSessions: WebSessionRecord[];
   launcherAuthRequests: LauncherAuthRequestRecord[];
@@ -48,6 +50,7 @@ function seedDatabase(): FileDatabaseShape {
         launcherToken: "dev-launcher-token-2"
       }
     ],
+    authIdentities: [],
     passwordCredentials: [],
     webSessions: [],
     launcherAuthRequests: [],
@@ -141,6 +144,41 @@ export function createFileRepositories(): BackendRepositories {
         }
         return { user, passwordHash: credential.passwordHash };
       },
+      async findUserByIdentity(provider, providerUserId) {
+        const db = loadDb();
+        const identity = db.authIdentities.find(
+          (entry) => entry.provider === provider && entry.providerUserId === providerUserId
+        );
+        if (!identity) {
+          return undefined;
+        }
+        return db.users.find((entry) => entry.id === identity.userId);
+      },
+      async upsertAuthIdentity(input) {
+        const db = loadDb();
+        const existing = db.authIdentities.find(
+          (entry) =>
+            entry.provider === input.provider && entry.providerUserId === input.providerUserId
+        );
+        if (existing) {
+          existing.userId = input.userId;
+          existing.email = input.email;
+          existing.updatedAt = new Date().toISOString();
+          saveDb(db);
+          return;
+        }
+
+        db.authIdentities.push({
+          id: `ident_${randomBytes(8).toString("hex")}`,
+          userId: input.userId,
+          provider: input.provider,
+          providerUserId: input.providerUserId,
+          email: input.email,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        saveDb(db);
+      },
       async createLauncherSession(input) {
         const db = loadDb();
         const user = db.users.find((entry) => entry.id === input.userId);
@@ -152,6 +190,16 @@ export function createFileRepositories(): BackendRepositories {
           user.launcherToken = input.expiresAt.slice("dev-token:".length);
         } else {
           user.launcherToken = `session:${sha256(input.tokenHash)}:${input.source}`;
+        }
+        saveDb(db);
+      },
+      async deleteLauncherSession(tokenHash) {
+        const db = loadDb();
+        const sessionToken = `session:${sha256(tokenHash)}:launcher-browser`;
+        for (const user of db.users) {
+          if (user.launcherToken === sessionToken) {
+            delete user.launcherToken;
+          }
         }
         saveDb(db);
       },

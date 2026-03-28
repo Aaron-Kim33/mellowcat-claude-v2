@@ -142,7 +142,15 @@ export class AuthService {
     return this.apiClient.createPaymentHandoff(normalizedProductId, source);
   }
 
-  logout(): void {
+  async logout(): Promise<void> {
+    if (this.apiClient.isConfigured() && this.session.accessToken) {
+      try {
+        await this.apiClient.logoutLauncher();
+      } catch (error) {
+        console.warn("[AuthService] logout failed", error);
+      }
+    }
+
     this.session = { loggedIn: false };
     this.apiClient.setAccessToken(undefined);
     this.secretsStore.delete("authAccessToken");

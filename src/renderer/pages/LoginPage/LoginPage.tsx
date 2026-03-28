@@ -15,6 +15,10 @@ export function LoginPage() {
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.account;
   const [sessionToken, setSessionToken] = useState("");
   const isKorean = settings?.launcherLanguage === "ko";
+  const isDeveloperMode =
+    settings?.apiBaseUrl?.startsWith("http://127.0.0.1") ||
+    settings?.apiBaseUrl?.startsWith("http://localhost") ||
+    settings?.apiBaseUrl === "mock://remote";
   const signInWithBrowserLabel = isKorean ? "브라우저로 로그인" : "Sign in with browser";
   const developerAccessLabel = isKorean ? "개발자 접근" : "Developer access";
   const developerHint = isKorean
@@ -98,32 +102,34 @@ export function LoginPage() {
             {copy.logout}
           </button>
         </div>
-        <details>
-          <summary>{developerAccessLabel}</summary>
-          <div style={{ marginTop: 12 }}>
-            <label className="field">
-              <span>{sessionTokenLabel}</span>
-              <input
-                className="text-input"
-                type="password"
-                value={sessionToken}
-                onChange={(event) => setSessionToken(event.target.value)}
-                placeholder={sessionTokenPlaceholder}
-              />
-              <span className="subtle">{developerHint}</span>
-            </label>
-            <div className="button-row">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void handleTokenLogin()}
-                disabled={!sessionToken.trim() || authBusy}
-              >
-                {useSessionTokenLabel}
-              </button>
+        {isDeveloperMode && (
+          <details>
+            <summary>{developerAccessLabel}</summary>
+            <div style={{ marginTop: 12 }}>
+              <label className="field">
+                <span>{sessionTokenLabel}</span>
+                <input
+                  className="text-input"
+                  type="password"
+                  value={sessionToken}
+                  onChange={(event) => setSessionToken(event.target.value)}
+                  placeholder={sessionTokenPlaceholder}
+                />
+                <span className="subtle">{developerHint}</span>
+              </label>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleTokenLogin()}
+                  disabled={!sessionToken.trim() || authBusy}
+                >
+                  {useSessionTokenLabel}
+                </button>
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
+        )}
       </div>
     </section>
   );

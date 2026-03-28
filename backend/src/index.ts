@@ -1,4 +1,10 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual
+} from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { readFileSync } from "fs";
 import path from "path";
@@ -55,6 +61,25 @@ interface CatalogItem {
   };
 }
 
+interface GoogleStatePayload {
+  exp: number;
+  nonce: string;
+  source?: string;
+  launcherRequest?: string;
+}
+
+interface GoogleTokenResponse {
+  access_token?: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface GoogleUserInfoResponse {
+  sub?: string;
+  email?: string;
+  name?: string;
+}
+
 const PORT = Number(process.env.PORT ?? process.env.MELLOWCAT_API_PORT ?? "8787");
 const HOST = process.env.MELLOWCAT_API_HOST ?? "127.0.0.1";
 const PAYMENT_BASE_URL = process.env.MELLOWCAT_PAYMENT_BASE_URL ?? "https://mellowcat.xyz/payment";
@@ -62,6 +87,15 @@ const PAYMENT_SUCCESS_URL =
   process.env.MELLOWCAT_PAYMENT_SUCCESS_URL ?? `${PAYMENT_BASE_URL}?status=success`;
 const APP_BASE_URL = process.env.MELLOWCAT_APP_BASE_URL ?? `http://${HOST}:${PORT}`;
 const WEB_BASE_URL = process.env.MELLOWCAT_WEB_BASE_URL ?? "https://mellowcat.xyz";
+const GOOGLE_CLIENT_ID = process.env.MELLOWCAT_GOOGLE_CLIENT_ID?.trim();
+const GOOGLE_CLIENT_SECRET = process.env.MELLOWCAT_GOOGLE_CLIENT_SECRET?.trim();
+const GOOGLE_REDIRECT_URI =
+  process.env.MELLOWCAT_GOOGLE_REDIRECT_URI?.trim() ??
+  `${APP_BASE_URL}/api/auth/oauth/google/callback`;
+const AUTH_STATE_SECRET =
+  process.env.MELLOWCAT_AUTH_STATE_SECRET?.trim() ??
+  GOOGLE_CLIENT_SECRET ??
+  "mellowcat-dev-auth-state";
 const ROOT_DIR = path.resolve(__dirname, "../..");
 const CATALOG_PATH = path.resolve(ROOT_DIR, "resources", "bundled", "catalog.json");
 const LEMON_SQUEEZY = getLemonSqueezyConfig();
@@ -322,6 +356,11 @@ function createError(code: string, message: string): { ok: false; code: string; 
   return { ok: false, code, message };
 }
 
+function redirect(res: ServerResponse, location: string): void {
+  res.writeHead(302, { Location: location });
+  res.end();
+}
+
 function createPaymentUrl(handoffToken: string): string {
   const url = new URL(PAYMENT_BASE_URL);
   url.searchParams.set("handoff", handoffToken);
@@ -342,6 +381,111 @@ function verifyPassword(password: string, storedHash: string): boolean {
 
   const derived = scryptSync(password, salt, 64).toString("hex");
   return timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(digest, "hex"));
+}
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string): string {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+  return Buffer.from(normalized + padding, "base64").toString("utf8");
+}
+
+function signGoogleState(payload: GoogleStatePayload): string {
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = createHmac("sha256", AUTH_STATE_SECRET)
+    .update(encodedPayload)
+    .digest("base64url");
+  return `${encodedPayload}.${signature}`;
+}
+
+function verifyGoogleState(state: string): GoogleStatePayload | undefined {
+  const [encodedPayload, signature] = state.split(".");
+  if (!encodedPayload || !signature) {
+    return undefined;
+  }
+
+  const expectedSignature = createHmac("sha256", AUTH_STATE_SECRET)
+    .update(encodedPayload)
+    .digest("base64url");
+  if (signature !== expectedSignature) {
+    return undefined;
+  }
+
+  const payload = JSON.parse(base64UrlDecode(encodedPayload)) as GoogleStatePayload;
+  if (!payload.exp || payload.exp < Date.now()) {
+    return undefined;
+  }
+
+  return payload;
+}
+
+function getGoogleAuthStartUrl(state: string): string {
+  const oauthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  oauthUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID ?? "");
+  oauthUrl.searchParams.set("redirect_uri", GOOGLE_REDIRECT_URI);
+  oauthUrl.searchParams.set("response_type", "code");
+  oauthUrl.searchParams.set("scope", "openid email profile");
+  oauthUrl.searchParams.set("state", state);
+  oauthUrl.searchParams.set("access_type", "offline");
+  oauthUrl.searchParams.set("prompt", "consent");
+  return oauthUrl.toString();
+}
+
+async function exchangeGoogleCode(code: string): Promise<GoogleTokenResponse> {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID ?? "",
+      client_secret: GOOGLE_CLIENT_SECRET ?? "",
+      redirect_uri: GOOGLE_REDIRECT_URI,
+      grant_type: "authorization_code"
+    })
+  });
+
+  const json = (await response.json()) as GoogleTokenResponse;
+  if (!response.ok || !json.access_token) {
+    throw new Error(
+      `Google token exchange failed: ${json.error ?? response.status} ${json.error_description ?? ""}`.trim()
+    );
+  }
+
+  return json;
+}
+
+async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUserInfoResponse> {
+  const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const json = (await response.json()) as GoogleUserInfoResponse;
+  if (!response.ok || !json.sub || !json.email) {
+    throw new Error("Google user info fetch failed.");
+  }
+
+  return json;
+}
+
+function buildWebRedirect(pathname: string, search?: Record<string, string | undefined>): string {
+  const targetUrl = new URL(pathname, WEB_BASE_URL);
+  for (const [key, value] of Object.entries(search ?? {})) {
+    if (value) {
+      targetUrl.searchParams.set(key, value);
+    }
+  }
+  return targetUrl.toString();
 }
 
 function parseCookies(req: IncomingMessage): Record<string, string> {
@@ -406,7 +550,8 @@ const server = createServer(async (req, res) => {
 
   const url = new URL(req.url, APP_BASE_URL);
   const pathname = url.pathname;
-  const user = await findUserByToken(getBearerToken(req));
+  const bearerToken = getBearerToken(req);
+  const user = await findUserByToken(bearerToken);
 
   try {
     if (req.method === "GET" && pathname === "/health") {
@@ -562,6 +707,17 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/auth/launcher/logout") {
+      if (!bearerToken) {
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
+        return;
+      }
+
+      await repositories.auth.deleteLauncherSession(sha256(bearerToken));
+      json(req, res, 200, { ok: true });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/auth/me") {
       const webUser = await findUserByWebCookie(req);
       if (!webUser) {
@@ -577,6 +733,114 @@ const server = createServer(async (req, res) => {
           displayName: webUser.displayName
         }
       });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/oauth/google/start") {
+      if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+        json(req, res, 500, createError("OAUTH_NOT_CONFIGURED", "Google OAuth is not configured."));
+        return;
+      }
+
+      const state = signGoogleState({
+        exp: Date.now() + 10 * 60 * 1000,
+        nonce: randomBytes(8).toString("hex"),
+        source: url.searchParams.get("source") ?? undefined,
+        launcherRequest: url.searchParams.get("launcherRequest") ?? undefined
+      });
+
+      redirect(res, getGoogleAuthStartUrl(state));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/oauth/google/callback") {
+      const oauthError = url.searchParams.get("error")?.trim();
+      if (oauthError) {
+        redirect(
+          res,
+          buildWebRedirect("/login", {
+            oauth: "error",
+            message: oauthError
+          })
+        );
+        return;
+      }
+
+      const code = url.searchParams.get("code")?.trim();
+      const state = url.searchParams.get("state")?.trim();
+      if (!code || !state) {
+        redirect(
+          res,
+          buildWebRedirect("/login", {
+            oauth: "error",
+            message: "missing_code"
+          })
+        );
+        return;
+      }
+
+      const verifiedState = verifyGoogleState(state);
+      if (!verifiedState) {
+        redirect(
+          res,
+          buildWebRedirect("/login", {
+            oauth: "error",
+            message: "invalid_state"
+          })
+        );
+        return;
+      }
+
+      const tokenResponse = await exchangeGoogleCode(code);
+      const googleUser = await fetchGoogleUserInfo(tokenResponse.access_token as string);
+
+      let oauthUser =
+        (await repositories.auth.findUserByIdentity("google", googleUser.sub as string)) ??
+        (await repositories.auth.findUserByEmail(googleUser.email as string));
+
+      if (!oauthUser) {
+        oauthUser = await repositories.auth.createUser({
+          email: googleUser.email as string,
+          displayName: googleUser.name ?? googleUser.email
+        });
+      }
+
+      await repositories.auth.upsertAuthIdentity({
+        userId: oauthUser.id,
+        provider: "google",
+        providerUserId: googleUser.sub as string,
+        email: googleUser.email
+      });
+
+      const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
+      await repositories.auth.createWebSession({
+        userId: oauthUser.id,
+        tokenHash: sha256(rawWebToken),
+        source: "google-oauth"
+      });
+      setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
+
+      if (verifiedState.launcherRequest) {
+        await repositories.auth.resolveLauncherAuthRequest(
+          sha256(verifiedState.launcherRequest),
+          oauthUser.id
+        );
+        redirect(
+          res,
+          buildWebRedirect("/launcher-auth", {
+            requestId: verifiedState.launcherRequest
+          })
+        );
+        return;
+      }
+
+      redirect(
+        res,
+        buildWebRedirect("/account", {
+          login: "success",
+          provider: "google"
+        })
+      );
       return;
     }
 

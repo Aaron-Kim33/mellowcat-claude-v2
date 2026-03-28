@@ -49,6 +49,9 @@ Email/password:
 Google:
 
 - button opens `GET /api/auth/oauth/google/start`
+- preserve launcher context query params when present:
+  - `source=launcher`
+  - `launcherRequest=...`
 
 If `source=launcher` or `launcherRequest` is present in query params:
 
@@ -69,6 +72,11 @@ Purpose:
   - `You can return to MellowCat now.`
 
 The launcher itself will resolve the request through backend API.
+
+Google OAuth callback behavior from backend:
+
+- launcher context present -> backend redirects to `/launcher-auth?requestId=...`
+- normal web login -> backend redirects to `/account?login=success&provider=google`
 
 ### 4. Account page
 
@@ -139,6 +147,7 @@ Suggested copy:
 - `POST /api/auth/forgot-password`
 - `POST /api/auth/reset-password`
 - `GET /api/auth/oauth/google/start`
+- `GET /api/auth/oauth/google/callback`
 
 ### Launcher
 

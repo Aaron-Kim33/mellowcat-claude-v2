@@ -257,11 +257,36 @@ Launcher frontend should later support:
 - start browser login -> `POST /api/auth/launcher/start`
 - poll resolve -> `POST /api/auth/launcher/resolve`
 
-## OAuth status
+## Google OAuth endpoints
 
-Google OAuth is not implemented yet in this backend.
+### `GET /api/auth/oauth/google/start`
 
-Next recommended endpoints:
+Query params:
 
-- `GET /api/auth/oauth/google/start`
-- `GET /api/auth/oauth/google/callback`
+- `source=launcher` optional
+- `launcherRequest=authreq_123` optional
+
+Behavior:
+
+- signs a short-lived OAuth state payload
+- redirects to Google OAuth consent
+
+### `GET /api/auth/oauth/google/callback`
+
+Behavior:
+
+- validates signed state
+- exchanges `code` for Google tokens
+- fetches Google user profile
+- finds or creates local `app_users`
+- upserts `auth_identities(provider=google)`
+- creates `mellowcat_web_session` cookie
+- if launcher context exists, redirects to:
+  - `/launcher-auth?requestId=...`
+- otherwise redirects to:
+  - `/account?login=success&provider=google`
+
+Error redirect examples:
+
+- `/login?oauth=error&message=access_denied`
+- `/login?oauth=error&message=invalid_state`

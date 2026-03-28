@@ -21,6 +21,16 @@ export interface PasswordCredentialRecord {
   updatedAt?: string;
 }
 
+export interface AuthIdentityRecord {
+  id: string;
+  userId: string;
+  provider: string;
+  providerUserId: string;
+  email?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface WebSessionRecord {
   id: string;
   userId: string;
@@ -97,12 +107,23 @@ export interface AuthRepository {
   findPasswordCredentialByEmail(
     email: string
   ): Promise<{ user: UserRecord; passwordHash: string } | undefined>;
+  findUserByIdentity(
+    provider: string,
+    providerUserId: string
+  ): Promise<UserRecord | undefined>;
+  upsertAuthIdentity(input: {
+    userId: string;
+    provider: string;
+    providerUserId: string;
+    email?: string;
+  }): Promise<void>;
   createLauncherSession(input: {
     userId: string;
     tokenHash: string;
     source: string;
     expiresAt?: string;
   }): Promise<void>;
+  deleteLauncherSession(tokenHash: string): Promise<void>;
   createWebSession(input: {
     userId: string;
     tokenHash: string;

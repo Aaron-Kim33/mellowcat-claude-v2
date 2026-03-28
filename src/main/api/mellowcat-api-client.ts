@@ -223,6 +223,12 @@ export class MellowCatApiClient {
     });
   }
 
+  async logoutLauncher(): Promise<void> {
+    await this.request<{ ok: boolean }>("/api/auth/launcher/logout", {
+      method: "POST"
+    });
+  }
+
   private async request<T>(
     pathname: string,
     init?: {
