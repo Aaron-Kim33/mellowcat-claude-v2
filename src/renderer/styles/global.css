@@ -526,6 +526,51 @@ select {
   gap: 8px;
 }
 
+.account-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.account-pill-live {
+  background: linear-gradient(135deg, rgba(123, 241, 200, 0.2), rgba(105, 212, 255, 0.2));
+}
+
+.account-library-list {
+  display: grid;
+  gap: 12px;
+}
+
+.account-library-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.account-library-item p {
+  margin-bottom: 0;
+}
+
+.developer-access-box {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.developer-access-box summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.developer-access-content {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 select.text-input option {
   color: #111827;
   background: #ffffff;

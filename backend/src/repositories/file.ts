@@ -6,6 +6,7 @@ import type {
   BackendRepositories,
   EntitlementRecord,
   LauncherAuthRequestRecord,
+  PasswordResetRequestRecord,
   PasswordCredentialRecord,
   PaymentHandoffRecord,
   PaymentRecord,
@@ -17,6 +18,7 @@ interface FileDatabaseShape {
   users: UserRecord[];
   authIdentities: AuthIdentityRecord[];
   passwordCredentials: PasswordCredentialRecord[];
+  passwordResetRequests: PasswordResetRequestRecord[];
   webSessions: WebSessionRecord[];
   launcherAuthRequests: LauncherAuthRequestRecord[];
   handoffs: PaymentHandoffRecord[];
@@ -52,6 +54,7 @@ function seedDatabase(): FileDatabaseShape {
     ],
     authIdentities: [],
     passwordCredentials: [],
+    passwordResetRequests: [],
     webSessions: [],
     launcherAuthRequests: [],
     handoffs: [],
@@ -116,6 +119,23 @@ export function createFileRepositories(): BackendRepositories {
         return created;
       },
       async createPasswordCredential(input) {
+        const db = loadDb();
+        const existing = db.passwordCredentials.find((entry) => entry.userId === input.userId);
+        if (existing) {
+          existing.passwordHash = input.passwordHash;
+          existing.updatedAt = new Date().toISOString();
+          saveDb(db);
+          return;
+        }
+
+        db.passwordCredentials.push({
+          ...input,
+          createdAt: input.createdAt ?? new Date().toISOString(),
+          updatedAt: input.updatedAt ?? new Date().toISOString()
+        });
+        saveDb(db);
+      },
+      async updatePasswordCredential(input) {
         const db = loadDb();
         const existing = db.passwordCredentials.find((entry) => entry.userId === input.userId);
         if (existing) {
@@ -254,6 +274,32 @@ export function createFileRepositories(): BackendRepositories {
         }
         request.userId = userId;
         request.resolvedAt = new Date().toISOString();
+        saveDb(db);
+      },
+      async createPasswordResetRequest(input) {
+        const db = loadDb();
+        const created: PasswordResetRequestRecord = {
+          id: `reset_${randomBytes(8).toString("hex")}`,
+          userId: input.userId,
+          tokenHash: input.tokenHash,
+          expiresAt: input.expiresAt,
+          createdAt: new Date().toISOString()
+        };
+        db.passwordResetRequests.push(created);
+        saveDb(db);
+        return created;
+      },
+      async findPasswordResetRequestByTokenHash(tokenHash) {
+        const db = loadDb();
+        return db.passwordResetRequests.find((entry) => entry.tokenHash === tokenHash);
+      },
+      async markPasswordResetRequestUsed(id) {
+        const db = loadDb();
+        const request = db.passwordResetRequests.find((entry) => entry.id === id);
+        if (!request) {
+          return;
+        }
+        request.usedAt = new Date().toISOString();
         saveDb(db);
       }
     },

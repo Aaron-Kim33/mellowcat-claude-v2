@@ -87,6 +87,8 @@ const PAYMENT_SUCCESS_URL =
   process.env.MELLOWCAT_PAYMENT_SUCCESS_URL ?? `${PAYMENT_BASE_URL}?status=success`;
 const APP_BASE_URL = process.env.MELLOWCAT_APP_BASE_URL ?? `http://${HOST}:${PORT}`;
 const WEB_BASE_URL = process.env.MELLOWCAT_WEB_BASE_URL ?? "https://mellowcat.xyz";
+const PASSWORD_RESET_BASE_URL =
+  process.env.MELLOWCAT_PASSWORD_RESET_BASE_URL ?? `${WEB_BASE_URL}/reset-password`;
 const GOOGLE_CLIENT_ID = process.env.MELLOWCAT_GOOGLE_CLIENT_ID?.trim();
 const GOOGLE_CLIENT_SECRET = process.env.MELLOWCAT_GOOGLE_CLIENT_SECRET?.trim();
 const GOOGLE_REDIRECT_URI =
@@ -692,6 +694,107 @@ const server = createServer(async (req, res) => {
           displayName: credential.user.displayName
         },
         launcherRequestResolved: Boolean(body.launcherRequest?.trim())
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/forgot-password") {
+      const body = await readJson<{ email?: string }>(req);
+      const email = body.email?.trim().toLowerCase();
+      if (!email) {
+        json(req, res, 400, createError("BAD_REQUEST", "email is required."));
+        return;
+      }
+
+      const credential = await repositories.auth.findPasswordCredentialByEmail(email);
+      if (!credential) {
+        json(req, res, 200, {
+          ok: true,
+          resetRequested: true
+        });
+        return;
+      }
+
+      const rawResetToken = `reset_${randomBytes(18).toString("hex")}`;
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      await repositories.auth.createPasswordResetRequest({
+        userId: credential.user.id,
+        tokenHash: sha256(rawResetToken),
+        expiresAt
+      });
+
+      const resetUrl = new URL(PASSWORD_RESET_BASE_URL);
+      resetUrl.searchParams.set("token", rawResetToken);
+
+      json(req, res, 200, {
+        ok: true,
+        resetRequested: true,
+        expiresAt,
+        resetUrl: resetUrl.toString()
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/reset-password") {
+      const body = await readJson<{ token?: string; password?: string }>(req);
+      const token = body.token?.trim();
+      const password = body.password?.trim();
+
+      if (!token || !password) {
+        json(req, res, 400, createError("BAD_REQUEST", "token and password are required."));
+        return;
+      }
+
+      if (password.length < 8) {
+        json(req, res, 400, createError("WEAK_PASSWORD", "Password must be at least 8 characters."));
+        return;
+      }
+
+      const requestRecord = await repositories.auth.findPasswordResetRequestByTokenHash(
+        sha256(token)
+      );
+      if (!requestRecord) {
+        json(req, res, 404, createError("RESET_NOT_FOUND", "Password reset request was not found."));
+        return;
+      }
+
+      if (requestRecord.usedAt) {
+        json(req, res, 409, createError("RESET_USED", "Password reset link has already been used."));
+        return;
+      }
+
+      if (new Date(requestRecord.expiresAt).getTime() < Date.now()) {
+        json(req, res, 410, createError("RESET_EXPIRED", "Password reset link expired."));
+        return;
+      }
+
+      const resetUser = await repositories.auth.findUserById(requestRecord.userId);
+      if (!resetUser) {
+        json(req, res, 404, createError("USER_NOT_FOUND", "Password reset user could not be found."));
+        return;
+      }
+
+      await repositories.auth.updatePasswordCredential({
+        userId: resetUser.id,
+        passwordHash: hashPassword(password)
+      });
+      await repositories.auth.markPasswordResetRequestUsed(requestRecord.id);
+
+      const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
+      await repositories.auth.createWebSession({
+        userId: resetUser.id,
+        tokenHash: sha256(rawWebToken),
+        source: "password-reset"
+      });
+      setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
+
+      json(req, res, 200, {
+        ok: true,
+        user: {
+          id: resetUser.id,
+          email: resetUser.email,
+          displayName: resetUser.displayName
+        }
       });
       return;
     }

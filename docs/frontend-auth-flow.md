@@ -8,7 +8,6 @@ Recommended pages:
 
 - `/login`
 - `/signup`
-- `/verify-email`
 - `/forgot-password`
 - `/reset-password`
 - `/account`
@@ -30,7 +29,7 @@ Submit to:
 
 States to support:
 
-- success: verification email sent
+- success: account created
 - email already exists
 - weak password
 - generic server error
@@ -41,6 +40,7 @@ Support:
 
 - email/password login
 - Google login
+- forgot password entry point
 
 Email/password:
 
@@ -93,6 +93,48 @@ Actions:
 - change password later
 - connect Google later if account started as password-only
 
+### 5. Forgot password page
+
+Collect:
+
+- email
+
+Submit to:
+
+- `POST /api/auth/forgot-password`
+
+Current backend behavior:
+
+- always returns `ok: true`
+- if the account exists and supports password login, backend also returns:
+  - `resetUrl`
+  - `expiresAt`
+
+Recommended frontend behavior for now:
+
+- show generic success state
+- if `resetUrl` exists, immediately route user to it or expose a temporary `Continue to reset password` action
+
+### 6. Reset password page
+
+Read:
+
+- `token` from query string
+
+Collect:
+
+- new password
+
+Submit to:
+
+- `POST /api/auth/reset-password`
+
+Success behavior:
+
+- backend updates password
+- backend creates a fresh web session cookie
+- frontend can redirect straight to `/account?passwordReset=success`
+
 ## Launcher frontend responsibilities
 
 ### 1. Replace manual token entry as the main path
@@ -143,7 +185,6 @@ Suggested copy:
 - `POST /api/auth/signup`
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
-- `POST /api/auth/verify-email`
 - `POST /api/auth/forgot-password`
 - `POST /api/auth/reset-password`
 - `GET /api/auth/oauth/google/start`
@@ -173,8 +214,8 @@ The web frontend should show friendly messages for:
 - invalid email
 - wrong password
 - account not found
-- email not verified
-- expired verification link
+- expired password reset link
+- already used password reset link
 - expired launcher auth request
 - OAuth canceled
 

@@ -2,15 +2,15 @@
 
 ## Scope
 
-This is the first real account/auth API layer for:
+This auth API layer now covers:
 
 - email/password sign-up
 - email/password login
 - logout
+- password reset
 - current web user lookup
 - launcher browser-auth handoff
-
-Google OAuth is still the next phase.
+- Google OAuth
 
 ## Website auth endpoints
 
@@ -91,6 +91,78 @@ Errors:
 
 - `BAD_REQUEST`
 - `INVALID_CREDENTIALS`
+
+### `POST /api/auth/forgot-password`
+
+Request:
+
+```json
+{
+  "email": "creator@example.com"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "resetRequested": true,
+  "expiresAt": "2026-03-28T12:00:00.000Z",
+  "resetUrl": "https://mellowcat.xyz/reset-password?token=reset_xxx"
+}
+```
+
+Behavior:
+
+- accepts an email address
+- if a password-based account exists, creates a short-lived password reset request
+- currently returns a frontend-ready `resetUrl` directly so the web app can continue without email infrastructure
+- still returns `ok: true` when the account is missing
+
+Errors:
+
+- `BAD_REQUEST`
+
+### `POST /api/auth/reset-password`
+
+Request:
+
+```json
+{
+  "token": "reset_xxx",
+  "password": "new-supersecret123"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "user": {
+    "id": "uuid-user-id",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator"
+  }
+}
+```
+
+Behavior:
+
+- validates reset token
+- updates `password_credentials`
+- marks reset request as used
+- creates a fresh `web_sessions` cookie
+
+Errors:
+
+- `BAD_REQUEST`
+- `WEAK_PASSWORD`
+- `RESET_NOT_FOUND`
+- `RESET_USED`
+- `RESET_EXPIRED`
+- `USER_NOT_FOUND`
 
 ### `POST /api/auth/logout`
 
@@ -242,21 +314,6 @@ Errors:
 - `REQUEST_EXPIRED`
 - `USER_NOT_FOUND`
 
-## Notes for frontend
-
-Website frontend should now support:
-
-- signup form -> `POST /api/auth/signup`
-- login form -> `POST /api/auth/login`
-- account bootstrap -> `GET /api/auth/me`
-- logout button -> `POST /api/auth/logout`
-- browser launcher handoff completion -> `POST /api/auth/launcher/complete`
-
-Launcher frontend should later support:
-
-- start browser login -> `POST /api/auth/launcher/start`
-- poll resolve -> `POST /api/auth/launcher/resolve`
-
 ## Google OAuth endpoints
 
 ### `GET /api/auth/oauth/google/start`
@@ -290,3 +347,22 @@ Error redirect examples:
 
 - `/login?oauth=error&message=access_denied`
 - `/login?oauth=error&message=invalid_state`
+- `/login?oauth=error&message=missing_code`
+
+## Notes for frontend
+
+Website frontend should now support:
+
+- signup form -> `POST /api/auth/signup`
+- login form -> `POST /api/auth/login`
+- forgot password form -> `POST /api/auth/forgot-password`
+- reset password form -> `POST /api/auth/reset-password`
+- account bootstrap -> `GET /api/auth/me`
+- logout button -> `POST /api/auth/logout`
+- browser launcher handoff completion -> `POST /api/auth/launcher/complete`
+
+Launcher frontend should support:
+
+- start browser login -> `POST /api/auth/launcher/start`
+- poll resolve -> `POST /api/auth/launcher/resolve`
+- logout launcher session -> `POST /api/auth/launcher/logout`

@@ -51,6 +51,15 @@ export interface LauncherAuthRequestRecord {
   createdAt?: string;
 }
 
+export interface PasswordResetRequestRecord {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  usedAt?: string;
+  createdAt?: string;
+}
+
 export interface PaymentHandoffRecord {
   id: string;
   tokenHash: string;
@@ -107,6 +116,7 @@ export interface AuthRepository {
   findPasswordCredentialByEmail(
     email: string
   ): Promise<{ user: UserRecord; passwordHash: string } | undefined>;
+  updatePasswordCredential(input: PasswordCredentialRecord): Promise<void>;
   findUserByIdentity(
     provider: string,
     providerUserId: string
@@ -142,6 +152,15 @@ export interface AuthRepository {
     tokenHash: string
   ): Promise<LauncherAuthRequestRecord | undefined>;
   resolveLauncherAuthRequest(tokenHash: string, userId: string): Promise<void>;
+  createPasswordResetRequest(input: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: string;
+  }): Promise<PasswordResetRequestRecord>;
+  findPasswordResetRequestByTokenHash(
+    tokenHash: string
+  ): Promise<PasswordResetRequestRecord | undefined>;
+  markPasswordResetRequestUsed(id: string): Promise<void>;
 }
 
 export interface PaymentRepository {

@@ -68,6 +68,18 @@ create table if not exists launcher_auth_requests (
 create index if not exists launcher_auth_requests_user_id_idx
   on launcher_auth_requests(user_id);
 
+create table if not exists password_reset_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists password_reset_requests_user_id_idx
+  on password_reset_requests(user_id);
+
 create table if not exists products (
   id text primary key,
   slug text not null unique,

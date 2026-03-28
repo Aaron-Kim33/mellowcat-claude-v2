@@ -3,6 +3,7 @@ import type {
   BackendRepositories,
   EntitlementRecord,
   LauncherAuthRequestRecord,
+  PasswordResetRequestRecord,
   PaymentHandoffRecord,
   PaymentRecord,
   UserRecord
@@ -118,6 +119,17 @@ function mapLauncherAuthRequest(row: Json): LauncherAuthRequestRecord {
   };
 }
 
+function mapPasswordResetRequest(row: Json): PasswordResetRequestRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    tokenHash: String(row.token_hash),
+    expiresAt: String(row.expires_at),
+    usedAt: typeof row.used_at === "string" ? row.used_at : undefined,
+    createdAt: typeof row.created_at === "string" ? row.created_at : undefined
+  };
+}
+
 function first<T>(items: T[] | null | undefined): T | undefined {
   return Array.isArray(items) && items.length > 0 ? items[0] : undefined;
 }
@@ -202,6 +214,20 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
           user,
           passwordHash: credential.password_hash
         };
+      },
+      async updatePasswordCredential(input) {
+        await client.request<Json[]>("password_credentials", {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates,return=representation"
+          },
+          query: "on_conflict=user_id",
+          body: JSON.stringify({
+            user_id: input.userId,
+            password_hash: input.passwordHash,
+            updated_at: new Date().toISOString()
+          })
+        });
       },
       async findUserByIdentity(provider, providerUserId) {
         const identityRows = await client.request<Json[]>("auth_identities", {
@@ -313,6 +339,33 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
           body: JSON.stringify({
             user_id: userId,
             resolved_at: new Date().toISOString()
+          })
+        });
+      },
+      async createPasswordResetRequest(input) {
+        const rows = await client.request<Json[]>("password_reset_requests", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: input.userId,
+            token_hash: input.tokenHash,
+            expires_at: input.expiresAt
+          })
+        });
+        return mapPasswordResetRequest(rows[0]);
+      },
+      async findPasswordResetRequestByTokenHash(tokenHash) {
+        const rows = await client.request<Json[]>("password_reset_requests", {
+          query: `select=*&token_hash=eq.${encodeURIComponent(tokenHash)}&limit=1`
+        });
+        const row = first(rows);
+        return row ? mapPasswordResetRequest(row) : undefined;
+      },
+      async markPasswordResetRequestUsed(id) {
+        await client.request<Json[]>("password_reset_requests", {
+          method: "PATCH",
+          query: `id=eq.${encodeURIComponent(id)}`,
+          body: JSON.stringify({
+            used_at: new Date().toISOString()
           })
         });
       }
