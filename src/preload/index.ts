@@ -66,6 +66,7 @@ const settingsBridge: MellowCatAPI["settings"] = {
 const authBridge: MellowCatAPI["auth"] = {
   getSession: () => ipcRenderer.invoke("auth:getSession"),
   loginWithBrowser: () => ipcRenderer.invoke("auth:login"),
+  cancelBrowserLogin: () => ipcRenderer.invoke("auth:cancelLogin"),
   loginWithToken: (token: string) => ipcRenderer.invoke("auth:loginWithToken", token),
   createPaymentHandoff: (productId: string, source?: string) =>
     ipcRenderer.invoke("auth:createPaymentHandoff", productId, source),

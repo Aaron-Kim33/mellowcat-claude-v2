@@ -65,6 +65,7 @@ interface AppState {
   saveWorkflowConfig: (patch: Partial<ShortformWorkflowConfig>) => Promise<void>;
   refreshStoreAccess: () => Promise<void>;
   login: () => Promise<void>;
+  cancelLogin: () => Promise<void>;
   loginWithToken: (token: string) => Promise<void>;
   createPaymentHandoff: (productId: string, source?: string) => Promise<string>;
   logout: () => Promise<void>;
@@ -408,6 +409,13 @@ export const useAppStore = create<AppState>((set) => ({
       });
       throw error;
     }
+  },
+  cancelLogin: async () => {
+    await window.mellowcat.auth.cancelBrowserLogin();
+    set({
+      authBusy: false,
+      authStatusMessage: undefined
+    });
   },
   loginWithToken: async (token: string) => {
     set({ authBusy: true, authStatusMessage: "Finalizing your launcher session..." });

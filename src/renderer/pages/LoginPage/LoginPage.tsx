@@ -12,6 +12,7 @@ export function LoginPage() {
     installed,
     settings,
     login,
+    cancelLogin,
     loginWithToken,
     logout,
     refreshStoreAccess
@@ -48,6 +49,7 @@ export function LoginPage() {
   }).length;
 
   const signInWithBrowserLabel = isKorean ? "브라우저로 로그인" : "Sign in with browser";
+  const cancelBrowserLoginLabel = isKorean ? "대기 취소" : "Cancel waiting";
   const refreshAccessLabel = isKorean ? "접근 상태 새로고침" : "Refresh access";
   const accountOverviewLabel = isKorean ? "계정 개요" : "Account overview";
   const accountLibraryLabel = isKorean ? "내 라이브러리" : "Your library";
@@ -73,12 +75,25 @@ export function LoginPage() {
   const emptyLibraryBody = isKorean
     ? "Marketplace에서 상품을 구매하면 여기에서 바로 설치 가능 여부를 확인할 수 있습니다."
     : "Buy products in Marketplace and they will show up here as soon as access refreshes.";
+  const accountStatusLabel = isKorean ? "계정 상태" : "Account status";
+  const cancelLoginErrorLabel = isKorean
+    ? "브라우저 로그인 대기를 취소하지 못했습니다."
+    : "Browser login could not be canceled.";
 
   const handleBrowserLogin = async () => {
     try {
       await login();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed.";
+      window.alert(message);
+    }
+  };
+
+  const handleCancelLogin = async () => {
+    try {
+      await cancelLogin();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : cancelLoginErrorLabel;
       window.alert(message);
     }
   };
@@ -163,7 +178,7 @@ export function LoginPage() {
           <p className="subtle">{accountHint}</p>
           {authStatusMessage && (
             <div className="manual-install-box">
-              <strong>{isKorean ? "계정 상태" : "Account status"}</strong>
+              <strong>{accountStatusLabel}</strong>
               <span className="subtle">{authStatusMessage}</span>
             </div>
           )}
@@ -176,6 +191,15 @@ export function LoginPage() {
             >
               {authBusy ? authStatusMessage ?? signInWithBrowserLabel : signInWithBrowserLabel}
             </button>
+            {authBusy && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleCancelLogin()}
+              >
+                {cancelBrowserLoginLabel}
+              </button>
+            )}
             <button
               type="button"
               className="secondary-button"

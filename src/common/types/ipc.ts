@@ -51,6 +51,7 @@ export interface MellowCatAPI {
   auth: {
     getSession: () => Promise<AuthSession>;
     loginWithBrowser: () => Promise<AuthSession>;
+    cancelBrowserLogin: () => Promise<void>;
     loginWithToken: (token: string) => Promise<AuthSession>;
     createPaymentHandoff: (
       productId: string,

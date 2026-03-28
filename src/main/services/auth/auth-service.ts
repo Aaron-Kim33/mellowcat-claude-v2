@@ -12,6 +12,7 @@ import { SecretsStore } from "../storage/secrets-store";
 export class AuthService {
   private static readonly AUTH_POLL_INTERVAL_MS = 1500;
   private static readonly AUTH_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+  private browserLoginAttempt = 0;
 
   constructor(
     private readonly apiClient: MellowCatApiClient,
@@ -54,10 +55,15 @@ export class AuthService {
         return this.getSession();
       }
 
+      const attemptId = ++this.browserLoginAttempt;
       const authStart = await this.apiClient.startLauncherAuth();
       await shell.openExternal(authStart.loginUrl);
 
-      const resolved = await this.pollForLauncherAuth(authStart.requestId, authStart.expiresAt);
+      const resolved = await this.pollForLauncherAuth(
+        authStart.requestId,
+        authStart.expiresAt,
+        attemptId
+      );
       this.session = {
         ...resolved.session,
         accessToken: resolved.accessToken,
@@ -79,6 +85,10 @@ export class AuthService {
     };
     this.persist();
     return this.session;
+  }
+
+  async cancelBrowserLogin(): Promise<void> {
+    this.browserLoginAttempt += 1;
   }
 
   async loginWithToken(accessToken: string): Promise<AuthSession> {
@@ -197,7 +207,8 @@ export class AuthService {
 
   private async pollForLauncherAuth(
     requestId: string,
-    expiresAt: string
+    expiresAt: string,
+    attemptId: number
   ): Promise<Extract<LauncherAuthResolveResponse, { status: "resolved" }>> {
     const timeoutAt = Math.min(
       new Date(expiresAt).getTime(),
@@ -205,6 +216,10 @@ export class AuthService {
     );
 
     while (Date.now() < timeoutAt) {
+      if (attemptId !== this.browserLoginAttempt) {
+        throw new Error("Browser sign-in canceled.");
+      }
+
       const response = await this.apiClient.resolveLauncherAuth(requestId);
       if (response.status === "resolved") {
         return response;
