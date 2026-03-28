@@ -38,6 +38,18 @@ export interface PaymentRecord {
   updatedAt?: string;
 }
 
+export interface CreatePaymentInput {
+  id?: string;
+  userId: string;
+  productId: string;
+  provider: string;
+  status: PaymentRecord["status"];
+  providerCheckoutId?: string;
+  providerSessionId?: string;
+  paidAt?: string;
+  createdAt: string;
+}
+
 export interface EntitlementRecord {
   id: string;
   userId: string;
@@ -66,7 +78,7 @@ export interface PaymentRepository {
   createPaymentHandoff(record: Omit<PaymentHandoffRecord, "id">): Promise<PaymentHandoffRecord>;
   findPaymentHandoffByTokenHash(tokenHash: string): Promise<PaymentHandoffRecord | undefined>;
   markPaymentHandoffUsed(id: string): Promise<void>;
-  createPayment(record: Omit<PaymentRecord, "updatedAt">): Promise<PaymentRecord>;
+  createPayment(record: CreatePaymentInput): Promise<PaymentRecord>;
   findPendingPaymentByUserAndProduct(
     userId: string,
     productId: string

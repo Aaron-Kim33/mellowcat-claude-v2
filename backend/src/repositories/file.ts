@@ -147,6 +147,7 @@ export function createFileRepositories(): BackendRepositories {
       async createPayment(record) {
         const db = loadDb();
         const created: PaymentRecord = {
+          id: record.id ?? `pay_${randomBytes(8).toString("hex")}`,
           ...record,
           updatedAt: new Date().toISOString()
         };

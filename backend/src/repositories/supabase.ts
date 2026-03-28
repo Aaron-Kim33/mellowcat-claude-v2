@@ -210,7 +210,6 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
         const rows = await client.request<Json[]>("payments", {
           method: "POST",
           body: JSON.stringify({
-            id: record.id,
             user_id: record.userId,
             product_id: record.productId,
             provider: record.provider,

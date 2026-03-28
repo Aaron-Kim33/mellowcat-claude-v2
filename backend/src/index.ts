@@ -10,7 +10,12 @@ import {
   verifyLemonSqueezySignature
 } from "./lemonsqueezy";
 import { createRepositories } from "./repositories";
-import type { EntitlementStatus, PaymentRecord, UserRecord } from "./repositories/types";
+import type {
+  CreatePaymentInput,
+  EntitlementStatus,
+  PaymentRecord,
+  UserRecord
+} from "./repositories/types";
 
 interface CatalogItem {
   id: string;
@@ -522,9 +527,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const paymentId = `pay_${randomBytes(8).toString("hex")}`;
-      const paymentBase: PaymentRecord = {
-        id: paymentId,
+      const paymentBase: CreatePaymentInput = {
         userId: handoff.userId,
         productId: handoff.productId,
         provider: isLemonSqueezyConfigured(LEMON_SQUEEZY) ? "lemonsqueezy" : "manual",
@@ -554,12 +557,14 @@ const server = createServer(async (req, res) => {
         providerSessionId = lemonResult.providerSessionId;
       } else {
         const checkoutId = `checkout_${randomBytes(8).toString("hex")}`;
-        checkoutUrl = `${PAYMENT_BASE_URL}/checkout?paymentId=${encodeURIComponent(paymentId)}`;
+        const fallbackPaymentId = `pay_${randomBytes(8).toString("hex")}`;
+        paymentBase.id = fallbackPaymentId;
+        checkoutUrl = `${PAYMENT_BASE_URL}/checkout?paymentId=${encodeURIComponent(fallbackPaymentId)}`;
         providerCheckoutId = checkoutId;
         providerSessionId = checkoutId;
       }
 
-      await repositories.payments.createPayment({
+      const createdPayment = await repositories.payments.createPayment({
         ...paymentBase,
         providerCheckoutId,
         providerSessionId
@@ -570,7 +575,7 @@ const server = createServer(async (req, res) => {
         ok: true,
         provider: paymentBase.provider,
         checkoutUrl,
-        paymentId
+        paymentId: createdPayment.id
       });
       return;
     }
