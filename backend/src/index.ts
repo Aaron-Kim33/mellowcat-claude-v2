@@ -668,17 +668,18 @@ const server = createServer(async (req, res) => {
     json(res, 404, createError("NOT_FOUND", "Endpoint not found."));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown server error.";
+    console.error("[backend] request failed", {
+      method: req.method,
+      pathname,
+      message
+    });
     json(res, 500, createError("INTERNAL_ERROR", message));
   }
 });
 
-void ensureDevLauncherUsers()
-  .then(() => {
-    server.listen(PORT, HOST, () => {
-      console.log(`MellowCat backend listening on http://${HOST}:${PORT}`);
-    });
-  })
-  .catch((error) => {
+server.listen(PORT, HOST, () => {
+  console.log(`MellowCat backend listening on http://${HOST}:${PORT}`);
+  void ensureDevLauncherUsers().catch((error) => {
     console.error("Failed to seed dev launcher users:", error);
-    process.exit(1);
   });
+});

@@ -231,7 +231,11 @@ export class MellowCatApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      const responseText = await response.text().catch(() => "");
+      const detail = responseText.trim()
+        ? ` ${responseText.trim().slice(0, 400)}`
+        : "";
+      throw new Error(`API request failed: ${response.status} ${response.statusText}${detail}`);
     }
 
     return (await response.json()) as T;
