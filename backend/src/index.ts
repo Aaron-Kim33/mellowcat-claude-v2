@@ -359,7 +359,13 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
 }
 
 function setCookie(res: ServerResponse, name: string, value: string, maxAgeSeconds?: number): void {
-  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    "Path=/",
+    "HttpOnly",
+    "Secure",
+    "SameSite=None"
+  ];
   if (maxAgeSeconds) {
     parts.push(`Max-Age=${maxAgeSeconds}`);
   }
@@ -367,7 +373,10 @@ function setCookie(res: ServerResponse, name: string, value: string, maxAgeSecon
 }
 
 function clearCookie(res: ServerResponse, name: string): void {
-  res.setHeader("Set-Cookie", `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  res.setHeader(
+    "Set-Cookie",
+    `${name}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`
+  );
 }
 
 async function findUserByWebCookie(req: IncomingMessage): Promise<UserRecord | undefined> {
