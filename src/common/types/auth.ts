@@ -14,3 +14,26 @@ export interface PaymentHandoffResponse {
   paymentUrl: string;
   expiresAt: string;
 }
+
+export interface LauncherAuthStartResponse {
+  ok: boolean;
+  requestId: string;
+  loginUrl: string;
+  expiresAt: string;
+}
+
+export interface LauncherAuthPendingResponse {
+  ok: true;
+  status: "pending";
+}
+
+export interface LauncherAuthResolvedResponse {
+  ok: true;
+  status: "resolved";
+  accessToken: string;
+  session: AuthSession;
+}
+
+export type LauncherAuthResolveResponse =
+  | LauncherAuthPendingResponse
+  | LauncherAuthResolvedResponse;

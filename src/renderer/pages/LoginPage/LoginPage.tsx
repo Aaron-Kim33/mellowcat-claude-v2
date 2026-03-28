@@ -3,9 +3,28 @@ import { useAppStore } from "../../store/app-store";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 
 export function LoginPage() {
-  const { authSession, login, loginWithToken, logout, settings } = useAppStore();
+  const {
+    authSession,
+    authBusy,
+    authStatusMessage,
+    login,
+    loginWithToken,
+    logout,
+    settings
+  } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.account;
   const [sessionToken, setSessionToken] = useState("");
+  const isKorean = settings?.launcherLanguage === "ko";
+  const signInWithBrowserLabel = isKorean ? "브라우저로 로그인" : "Sign in with browser";
+  const developerAccessLabel = isKorean ? "개발자 접근" : "Developer access";
+  const developerHint = isKorean
+    ? "로컬 테스트나 백엔드 디버깅에서만 세션 토큰을 사용하세요."
+    : "Use a raw session token only for local testing or backend debugging.";
+  const sessionTokenLabel = isKorean ? "세션 토큰" : "Session Token";
+  const sessionTokenPlaceholder = isKorean
+    ? "서버에서 발급된 세션 토큰을 붙여넣으세요"
+    : "Paste a server-issued session token";
+  const useSessionTokenLabel = isKorean ? "세션 토큰 사용" : "Use Session Token";
 
   const handleBrowserLogin = async () => {
     try {
@@ -60,33 +79,51 @@ export function LoginPage() {
             <strong>{authSession.email}</strong>
           </div>
         )}
-        <label className="field">
-          <span>Session Token</span>
-          <input
-            className="text-input"
-            type="password"
-            value={sessionToken}
-            onChange={(event) => setSessionToken(event.target.value)}
-            placeholder="Paste a server-issued session token"
-          />
-          <span className="subtle">For local preview, set API Base URL to `mock://remote` and use any non-empty token.</span>
-        </label>
+        {authStatusMessage && <p className="subtle">{authStatusMessage}</p>}
         <div className="button-row">
-          <button type="button" className="primary-button" onClick={() => void handleBrowserLogin()}>
-            {copy.login}
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void handleBrowserLogin()}
+            disabled={authBusy}
+          >
+            {authBusy ? authStatusMessage ?? signInWithBrowserLabel : signInWithBrowserLabel}
           </button>
           <button
             type="button"
             className="secondary-button"
-            onClick={() => void handleTokenLogin()}
-            disabled={!sessionToken.trim()}
+            onClick={() => void handleLogout()}
+            disabled={authBusy}
           >
-            Use Session Token
-          </button>
-          <button type="button" className="secondary-button" onClick={() => void handleLogout()}>
             {copy.logout}
           </button>
         </div>
+        <details>
+          <summary>{developerAccessLabel}</summary>
+          <div style={{ marginTop: 12 }}>
+            <label className="field">
+              <span>{sessionTokenLabel}</span>
+              <input
+                className="text-input"
+                type="password"
+                value={sessionToken}
+                onChange={(event) => setSessionToken(event.target.value)}
+                placeholder={sessionTokenPlaceholder}
+              />
+              <span className="subtle">{developerHint}</span>
+            </label>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleTokenLogin()}
+                disabled={!sessionToken.trim() || authBusy}
+              >
+                {useSessionTokenLabel}
+              </button>
+            </div>
+          </div>
+        </details>
       </div>
     </section>
   );

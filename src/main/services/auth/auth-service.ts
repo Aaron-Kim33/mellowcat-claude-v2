@@ -1,10 +1,18 @@
-import type { AuthSession, PaymentHandoffResponse } from "../../../common/types/auth";
+import { shell } from "electron";
+import type {
+  AuthSession,
+  LauncherAuthResolveResponse,
+  PaymentHandoffResponse
+} from "../../../common/types/auth";
 import { MellowCatApiClient } from "../../api/mellowcat-api-client";
 import { FileService } from "../system/file-service";
 import { PathService } from "../system/path-service";
 import { SecretsStore } from "../storage/secrets-store";
 
 export class AuthService {
+  private static readonly AUTH_POLL_INTERVAL_MS = 1500;
+  private static readonly AUTH_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
   constructor(
     private readonly apiClient: MellowCatApiClient,
     private readonly pathService: PathService,
@@ -46,9 +54,19 @@ export class AuthService {
         return this.getSession();
       }
 
-      throw new Error(
-        "Server-backed browser login is not connected yet. Use token sign-in for now."
-      );
+      const authStart = await this.apiClient.startLauncherAuth();
+      await shell.openExternal(authStart.loginUrl);
+
+      const resolved = await this.pollForLauncherAuth(authStart.requestId, authStart.expiresAt);
+      this.session = {
+        ...resolved.session,
+        accessToken: resolved.accessToken,
+        source: "remote",
+        lastSyncedAt: new Date().toISOString()
+      };
+      this.apiClient.setAccessToken(resolved.accessToken);
+      this.persist();
+      return this.session;
     }
 
     this.session = {
@@ -167,5 +185,30 @@ export class AuthService {
       source: this.session.source,
       lastSyncedAt: this.session.lastSyncedAt
     });
+  }
+
+  private async pollForLauncherAuth(
+    requestId: string,
+    expiresAt: string
+  ): Promise<Extract<LauncherAuthResolveResponse, { status: "resolved" }>> {
+    const timeoutAt = Math.min(
+      new Date(expiresAt).getTime(),
+      Date.now() + AuthService.AUTH_POLL_TIMEOUT_MS
+    );
+
+    while (Date.now() < timeoutAt) {
+      const response = await this.apiClient.resolveLauncherAuth(requestId);
+      if (response.status === "resolved") {
+        return response;
+      }
+
+      await this.delay(AuthService.AUTH_POLL_INTERVAL_MS);
+    }
+
+    throw new Error("Browser sign-in timed out. Finish login in the browser and try again.");
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

@@ -66,6 +66,24 @@ const ROOT_DIR = path.resolve(__dirname, "../..");
 const CATALOG_PATH = path.resolve(ROOT_DIR, "resources", "bundled", "catalog.json");
 const LEMON_SQUEEZY = getLemonSqueezyConfig();
 const repositories = createRepositories();
+const ALLOWED_WEB_ORIGINS = new Set(
+  [
+    WEB_BASE_URL,
+    APP_BASE_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+  ]
+    .map((value) => {
+      try {
+        return new URL(value).origin;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value): value is string => Boolean(value))
+);
 
 const DEV_LAUNCHER_USERS = [
   {
@@ -173,12 +191,26 @@ function loadCatalog(): CatalogItem[] {
   });
 }
 
-function json(res: ServerResponse, statusCode: number, body: unknown): void {
+function getCorsHeaders(req: IncomingMessage): Record<string, string> {
+  const origin = req.headers.origin;
+  const allowOrigin =
+    origin && ALLOWED_WEB_ORIGINS.has(origin)
+      ? origin
+      : "*";
+
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Credentials": "true",
+    Vary: "Origin"
+  };
+}
+
+function json(req: IncomingMessage, res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+    ...getCorsHeaders(req)
   });
   res.end(JSON.stringify(body));
 }
@@ -353,13 +385,13 @@ async function upsertEntitlement(userId: string, mcpId: string) {
 }
 
 const server = createServer(async (req, res) => {
-  if (!req.url) {
-    json(res, 400, createError("BAD_REQUEST", "Missing URL."));
+    if (!req.url) {
+    json(req, res, 400, createError("BAD_REQUEST", "Missing URL."));
     return;
   }
 
   if (req.method === "OPTIONS") {
-    json(res, 200, { ok: true });
+    json(req, res, 200, { ok: true });
     return;
   }
 
@@ -369,12 +401,12 @@ const server = createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && pathname === "/health") {
-      json(res, 200, { ok: true, service: "mellowcat-backend", now: new Date().toISOString() });
+      json(req, res, 200, { ok: true, service: "mellowcat-backend", now: new Date().toISOString() });
       return;
     }
 
     if (req.method === "GET" && pathname === "/catalog") {
-      json(res, 200, { items: await catalogForUser(user?.id) });
+      json(req, res, 200, { items: await catalogForUser(user?.id) });
       return;
     }
 
@@ -383,11 +415,11 @@ const server = createServer(async (req, res) => {
         console.warn("[auth/session] user lookup failed", {
           tokenHash: shortTokenHash(getBearerToken(req))
         });
-        json(res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
         return;
       }
 
-      json(res, 200, {
+      json(req, res, 200, {
         loggedIn: true,
         userId: user.id,
         email: user.email,
@@ -404,7 +436,7 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && pathname === "/auth/entitlements") {
       if (!user) {
-        json(res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
         return;
       }
 
@@ -413,7 +445,7 @@ const server = createServer(async (req, res) => {
         status: entry.status === "trial" ? "trial" : "owned",
         checkedAt: new Date().toISOString()
       }));
-      json(res, 200, { items });
+      json(req, res, 200, { items });
       return;
     }
 
@@ -424,18 +456,18 @@ const server = createServer(async (req, res) => {
       const displayName = body.displayName?.trim();
 
       if (!email || !password) {
-        json(res, 400, createError("BAD_REQUEST", "email and password are required."));
+        json(req, res, 400, createError("BAD_REQUEST", "email and password are required."));
         return;
       }
 
       if (password.length < 8) {
-        json(res, 400, createError("WEAK_PASSWORD", "Password must be at least 8 characters."));
+        json(req, res, 400, createError("WEAK_PASSWORD", "Password must be at least 8 characters."));
         return;
       }
 
       const existing = await repositories.auth.findUserByEmail(email);
       if (existing) {
-        json(res, 409, createError("EMAIL_EXISTS", "An account with this email already exists."));
+        json(req, res, 409, createError("EMAIL_EXISTS", "An account with this email already exists."));
         return;
       }
 
@@ -456,7 +488,7 @@ const server = createServer(async (req, res) => {
       });
       setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         user: {
           id: createdUser.id,
@@ -473,13 +505,13 @@ const server = createServer(async (req, res) => {
       const password = body.password?.trim();
 
       if (!email || !password) {
-        json(res, 400, createError("BAD_REQUEST", "email and password are required."));
+        json(req, res, 400, createError("BAD_REQUEST", "email and password are required."));
         return;
       }
 
       const credential = await repositories.auth.findPasswordCredentialByEmail(email);
       if (!credential || !verifyPassword(password, credential.passwordHash)) {
-        json(res, 401, createError("INVALID_CREDENTIALS", "Email or password is incorrect."));
+        json(req, res, 401, createError("INVALID_CREDENTIALS", "Email or password is incorrect."));
         return;
       }
 
@@ -498,7 +530,7 @@ const server = createServer(async (req, res) => {
         );
       }
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         user: {
           id: credential.user.id,
@@ -517,18 +549,18 @@ const server = createServer(async (req, res) => {
         await repositories.auth.deleteWebSession(sha256(token));
       }
       clearCookie(res, "mellowcat_web_session");
-      json(res, 200, { ok: true });
+      json(req, res, 200, { ok: true });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/auth/me") {
       const webUser = await findUserByWebCookie(req);
       if (!webUser) {
-        json(res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
         return;
       }
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         user: {
           id: webUser.id,
@@ -552,7 +584,7 @@ const server = createServer(async (req, res) => {
       loginUrl.searchParams.set("source", "launcher");
       loginUrl.searchParams.set("launcherRequest", rawRequestToken);
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         requestId: rawRequestToken,
         loginUrl: loginUrl.toString(),
@@ -564,14 +596,14 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && pathname === "/api/auth/launcher/complete") {
       const webUser = await findUserByWebCookie(req);
       if (!webUser) {
-        json(res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
         return;
       }
 
       const body = await readJson<{ requestId?: string }>(req);
       const requestId = body.requestId?.trim();
       if (!requestId) {
-        json(res, 400, createError("BAD_REQUEST", "requestId is required."));
+        json(req, res, 400, createError("BAD_REQUEST", "requestId is required."));
         return;
       }
 
@@ -579,17 +611,17 @@ const server = createServer(async (req, res) => {
         sha256(requestId)
       );
       if (!requestRecord) {
-        json(res, 404, createError("REQUEST_NOT_FOUND", "Launcher auth request was not found."));
+        json(req, res, 404, createError("REQUEST_NOT_FOUND", "Launcher auth request was not found."));
         return;
       }
 
       if (new Date(requestRecord.expiresAt).getTime() < Date.now()) {
-        json(res, 410, createError("REQUEST_EXPIRED", "Launcher auth request expired."));
+        json(req, res, 410, createError("REQUEST_EXPIRED", "Launcher auth request expired."));
         return;
       }
 
       await repositories.auth.resolveLauncherAuthRequest(sha256(requestId), webUser.id);
-      json(res, 200, { ok: true });
+      json(req, res, 200, { ok: true });
       return;
     }
 
@@ -597,7 +629,7 @@ const server = createServer(async (req, res) => {
       const body = await readJson<{ requestId?: string }>(req);
       const requestId = body.requestId?.trim();
       if (!requestId) {
-        json(res, 400, createError("BAD_REQUEST", "requestId is required."));
+        json(req, res, 400, createError("BAD_REQUEST", "requestId is required."));
         return;
       }
 
@@ -605,17 +637,17 @@ const server = createServer(async (req, res) => {
         sha256(requestId)
       );
       if (!requestRecord) {
-        json(res, 404, createError("REQUEST_NOT_FOUND", "Launcher auth request was not found."));
+        json(req, res, 404, createError("REQUEST_NOT_FOUND", "Launcher auth request was not found."));
         return;
       }
 
       if (new Date(requestRecord.expiresAt).getTime() < Date.now()) {
-        json(res, 410, createError("REQUEST_EXPIRED", "Launcher auth request expired."));
+        json(req, res, 410, createError("REQUEST_EXPIRED", "Launcher auth request expired."));
         return;
       }
 
       if (!requestRecord.resolvedAt || !requestRecord.userId) {
-        json(res, 202, {
+        json(req, res, 202, {
           ok: true,
           status: "pending"
         });
@@ -624,7 +656,7 @@ const server = createServer(async (req, res) => {
 
       const resolvedUser = await repositories.auth.findUserById(requestRecord.userId);
       if (!resolvedUser) {
-        json(res, 404, createError("USER_NOT_FOUND", "Resolved launcher user could not be found."));
+        json(req, res, 404, createError("USER_NOT_FOUND", "Resolved launcher user could not be found."));
         return;
       }
 
@@ -635,7 +667,7 @@ const server = createServer(async (req, res) => {
         source: "launcher-browser"
       });
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         status: "resolved",
         accessToken: rawLauncherToken,
@@ -654,29 +686,29 @@ const server = createServer(async (req, res) => {
     const downloadTicketMatch = pathname.match(/^\/mcp\/([^/]+)\/download-ticket$/);
     if (req.method === "GET" && downloadTicketMatch) {
       if (!user) {
-        json(res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in again to continue."));
         return;
       }
 
       const mcpId = decodeURIComponent(downloadTicketMatch[1]);
       const version = url.searchParams.get("version");
       if (!version) {
-        json(res, 400, createError("BAD_REQUEST", "version is required."));
+        json(req, res, 400, createError("BAD_REQUEST", "version is required."));
         return;
       }
 
       const item = (await catalogForUser(user.id)).find((entry) => entry.id === mcpId);
       if (!item) {
-        json(res, 404, createError("PRODUCT_NOT_FOUND", "This MCP does not exist."));
+        json(req, res, 404, createError("PRODUCT_NOT_FOUND", "This MCP does not exist."));
         return;
       }
 
       if (item.distribution.type === "paid" && item.entitlement?.status !== "owned") {
-        json(res, 403, createError("NOT_ENTITLED", "You do not own this MCP yet."));
+        json(req, res, 403, createError("NOT_ENTITLED", "You do not own this MCP yet."));
         return;
       }
 
-      json(res, 200, {
+      json(req, res, 200, {
         mcpId,
         version,
         manifestUrl:
@@ -692,25 +724,25 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/payment/handoff") {
       if (!user) {
-        json(res, 401, createError("UNAUTHENTICATED", "You need to sign in again before starting checkout."));
+        json(req, res, 401, createError("UNAUTHENTICATED", "You need to sign in again before starting checkout."));
         return;
       }
 
       const body = await readJson<{ productId?: string; source?: string }>(req);
       const productId = body.productId?.trim();
       if (!productId) {
-        json(res, 400, createError("BAD_REQUEST", "productId is required."));
+        json(req, res, 400, createError("BAD_REQUEST", "productId is required."));
         return;
       }
 
       const product = (await catalogForUser(user.id)).find((entry) => entry.id === productId);
       if (!product || product.visibility === "hidden") {
-        json(res, 404, createError("PRODUCT_NOT_FOUND", "This product is no longer available."));
+        json(req, res, 404, createError("PRODUCT_NOT_FOUND", "This product is no longer available."));
         return;
       }
 
       if (product.distribution.type === "paid" && product.entitlement?.status === "owned") {
-        json(res, 409, createError("ALREADY_OWNED", "You already own this product."));
+        json(req, res, 409, createError("ALREADY_OWNED", "You already own this product."));
         return;
       }
 
@@ -725,7 +757,7 @@ const server = createServer(async (req, res) => {
         createdAt: new Date().toISOString()
       });
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         handoffToken: rawToken,
         paymentUrl: createPaymentUrl(rawToken),
@@ -738,34 +770,34 @@ const server = createServer(async (req, res) => {
       const body = await readJson<{ handoffToken?: string }>(req);
       const handoffToken = body.handoffToken?.trim();
       if (!handoffToken) {
-        json(res, 400, createError("BAD_REQUEST", "handoffToken is required."));
+        json(req, res, 400, createError("BAD_REQUEST", "handoffToken is required."));
         return;
       }
 
       const handoff = await repositories.payments.findPaymentHandoffByTokenHash(sha256(handoffToken));
       if (!handoff) {
-        json(res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
+        json(req, res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
         return;
       }
 
       if (handoff.usedAt) {
-        json(res, 409, createError("HANDOFF_USED", "This checkout link has already been used."));
+        json(req, res, 409, createError("HANDOFF_USED", "This checkout link has already been used."));
         return;
       }
 
       if (new Date(handoff.expiresAt).getTime() < Date.now()) {
-        json(res, 410, createError("HANDOFF_EXPIRED", "This checkout link expired. Return to the launcher and try again."));
+        json(req, res, 410, createError("HANDOFF_EXPIRED", "This checkout link expired. Return to the launcher and try again."));
         return;
       }
 
       const handoffUser = await repositories.auth.findUserById(handoff.userId);
       const product = (await catalogForUser(handoff.userId)).find((entry) => entry.id === handoff.productId);
       if (!handoffUser || !product) {
-        json(res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
+        json(req, res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
         return;
       }
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         user: {
           id: handoffUser.id,
@@ -788,29 +820,29 @@ const server = createServer(async (req, res) => {
       const body = await readJson<{ handoffToken?: string }>(req);
       const handoffToken = body.handoffToken?.trim();
       if (!handoffToken) {
-        json(res, 400, createError("BAD_REQUEST", "handoffToken is required."));
+        json(req, res, 400, createError("BAD_REQUEST", "handoffToken is required."));
         return;
       }
 
       const handoff = await repositories.payments.findPaymentHandoffByTokenHash(sha256(handoffToken));
       if (!handoff) {
-        json(res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
+        json(req, res, 404, createError("HANDOFF_INVALID", "This checkout link is invalid."));
         return;
       }
 
       if (new Date(handoff.expiresAt).getTime() < Date.now()) {
-        json(res, 410, createError("HANDOFF_EXPIRED", "This checkout link expired. Return to the launcher and try again."));
+        json(req, res, 410, createError("HANDOFF_EXPIRED", "This checkout link expired. Return to the launcher and try again."));
         return;
       }
 
       const product = (await catalogForUser(handoff.userId)).find((entry) => entry.id === handoff.productId);
       if (!product) {
-        json(res, 404, createError("PRODUCT_NOT_FOUND", "This product is no longer available."));
+        json(req, res, 404, createError("PRODUCT_NOT_FOUND", "This product is no longer available."));
         return;
       }
 
       if (product.entitlement?.status === "owned") {
-        json(res, 409, createError("ALREADY_OWNED", "You already own this product."));
+        json(req, res, 409, createError("ALREADY_OWNED", "You already own this product."));
         return;
       }
 
@@ -858,7 +890,7 @@ const server = createServer(async (req, res) => {
       });
       await repositories.payments.markPaymentHandoffUsed(handoff.id);
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         provider: paymentBase.provider,
         checkoutUrl,
@@ -874,7 +906,7 @@ const server = createServer(async (req, res) => {
 
       if (isLemonSqueezyConfigured(LEMON_SQUEEZY)) {
         if (!verifyLemonSqueezySignature(rawBody, signatureHeader, LEMON_SQUEEZY.webhookSecret)) {
-          json(res, 401, createError("INVALID_SIGNATURE", "Webhook signature is invalid."));
+          json(req, res, 401, createError("INVALID_SIGNATURE", "Webhook signature is invalid."));
           return;
         }
 
@@ -920,13 +952,13 @@ const server = createServer(async (req, res) => {
         };
         const paymentId = body.paymentId?.trim();
         if (!paymentId) {
-          json(res, 400, createError("BAD_REQUEST", "paymentId is required."));
+          json(req, res, 400, createError("BAD_REQUEST", "paymentId is required."));
           return;
         }
 
         const payment = await repositories.payments.findPaymentById(paymentId);
         if (!payment) {
-          json(res, 404, createError("PAYMENT_NOT_FOUND", "Payment was not found."));
+          json(req, res, 404, createError("PAYMENT_NOT_FOUND", "Payment was not found."));
           return;
         }
 
@@ -936,7 +968,7 @@ const server = createServer(async (req, res) => {
         }
       }
 
-      json(res, 200, { ok: true });
+      json(req, res, 200, { ok: true });
       return;
     }
 
@@ -945,11 +977,11 @@ const server = createServer(async (req, res) => {
       const paymentId = decodeURIComponent(paymentStatusMatch[1]);
       const payment = await repositories.payments.findPaymentById(paymentId);
       if (!payment) {
-        json(res, 404, createError("PAYMENT_NOT_FOUND", "Payment was not found."));
+        json(req, res, 404, createError("PAYMENT_NOT_FOUND", "Payment was not found."));
         return;
       }
 
-      json(res, 200, {
+      json(req, res, 200, {
         ok: true,
         status: payment.status,
         entitlementGranted: payment.status === "paid"
@@ -957,7 +989,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    json(res, 404, createError("NOT_FOUND", "Endpoint not found."));
+    json(req, res, 404, createError("NOT_FOUND", "Endpoint not found."));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown server error.";
     console.error("[backend] request failed", {
@@ -965,7 +997,7 @@ const server = createServer(async (req, res) => {
       pathname,
       message
     });
-    json(res, 500, createError("INTERNAL_ERROR", message));
+    json(req, res, 500, createError("INTERNAL_ERROR", message));
   }
 });
 

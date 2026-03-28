@@ -27,6 +27,8 @@ interface AppState {
   youTubeUploadRequest?: YouTubeUploadRequest;
   lastYouTubeUploadResult?: YouTubeUploadResult;
   authSession?: AuthSession;
+  authBusy: boolean;
+  authStatusMessage?: string;
   claudeSession?: ClaudeSession;
   claudeInstallation?: ClaudeInstallationStatus;
   claudeDetectionMessage?: string;
@@ -78,6 +80,7 @@ export const useAppStore = create<AppState>((set) => ({
   installed: [],
   claudeOutput: "",
   mcpOutputById: {},
+  authBusy: false,
   hydrate: async () => {
     const [catalog, installed, appMeta, settings, workflowConfig, authSession, claudeInstallation, appUpdateStatus, telegramStatus, youTubeAuthStatus] =
       await Promise.all([
@@ -388,14 +391,42 @@ export const useAppStore = create<AppState>((set) => ({
     set({ authSession, catalog, installed });
   },
   login: async () => {
-    const authSession = await window.mellowcat.auth.loginWithBrowser();
-    const catalog = await window.mellowcat.mcp.listCatalog();
-    set({ authSession, catalog });
+    set({ authBusy: true, authStatusMessage: "Waiting for browser sign-in..." });
+    try {
+      const authSession = await window.mellowcat.auth.loginWithBrowser();
+      const catalog = await window.mellowcat.mcp.listCatalog();
+      set({
+        authSession,
+        catalog,
+        authBusy: false,
+        authStatusMessage: undefined
+      });
+    } catch (error) {
+      set({
+        authBusy: false,
+        authStatusMessage: undefined
+      });
+      throw error;
+    }
   },
   loginWithToken: async (token: string) => {
-    const authSession = await window.mellowcat.auth.loginWithToken(token);
-    const catalog = await window.mellowcat.mcp.listCatalog();
-    set({ authSession, catalog });
+    set({ authBusy: true, authStatusMessage: "Finalizing your launcher session..." });
+    try {
+      const authSession = await window.mellowcat.auth.loginWithToken(token);
+      const catalog = await window.mellowcat.mcp.listCatalog();
+      set({
+        authSession,
+        catalog,
+        authBusy: false,
+        authStatusMessage: undefined
+      });
+    } catch (error) {
+      set({
+        authBusy: false,
+        authStatusMessage: undefined
+      });
+      throw error;
+    }
   },
   createPaymentHandoff: async (productId: string, source = "launcher") => {
     const response = await window.mellowcat.auth.createPaymentHandoff(productId, source);
@@ -407,6 +438,11 @@ export const useAppStore = create<AppState>((set) => ({
       window.mellowcat.auth.getSession(),
       window.mellowcat.mcp.listCatalog()
     ]);
-    set({ authSession, catalog });
+    set({
+      authSession,
+      catalog,
+      authBusy: false,
+      authStatusMessage: undefined
+    });
   }
 }));

@@ -1,4 +1,9 @@
-import type { AuthSession, PaymentHandoffResponse } from "../../common/types/auth";
+import type {
+  AuthSession,
+  LauncherAuthResolveResponse,
+  LauncherAuthStartResponse,
+  PaymentHandoffResponse
+} from "../../common/types/auth";
 import type { MCPCatalogItem, MCPEntitlementRecord } from "../../common/types/mcp";
 
 export interface MCPRemoteDownloadTicket {
@@ -199,6 +204,21 @@ export class MellowCatApiClient {
       body: {
         productId,
         source
+      }
+    });
+  }
+
+  async startLauncherAuth(): Promise<LauncherAuthStartResponse> {
+    return this.request<LauncherAuthStartResponse>("/api/auth/launcher/start", {
+      method: "POST"
+    });
+  }
+
+  async resolveLauncherAuth(requestId: string): Promise<LauncherAuthResolveResponse> {
+    return this.request<LauncherAuthResolveResponse>("/api/auth/launcher/resolve", {
+      method: "POST",
+      body: {
+        requestId
       }
     });
   }
