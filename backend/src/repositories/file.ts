@@ -4,13 +4,19 @@ import { createHash, randomBytes } from "crypto";
 import type {
   BackendRepositories,
   EntitlementRecord,
+  LauncherAuthRequestRecord,
+  PasswordCredentialRecord,
   PaymentHandoffRecord,
   PaymentRecord,
-  UserRecord
+  UserRecord,
+  WebSessionRecord
 } from "./types";
 
 interface FileDatabaseShape {
   users: UserRecord[];
+  passwordCredentials: PasswordCredentialRecord[];
+  webSessions: WebSessionRecord[];
+  launcherAuthRequests: LauncherAuthRequestRecord[];
   handoffs: PaymentHandoffRecord[];
   payments: PaymentRecord[];
   entitlements: EntitlementRecord[];
@@ -42,6 +48,9 @@ function seedDatabase(): FileDatabaseShape {
         launcherToken: "dev-launcher-token-2"
       }
     ],
+    passwordCredentials: [],
+    webSessions: [],
+    launcherAuthRequests: [],
     handoffs: [],
     payments: [],
     entitlements: [
@@ -103,6 +112,35 @@ export function createFileRepositories(): BackendRepositories {
         saveDb(db);
         return created;
       },
+      async createPasswordCredential(input) {
+        const db = loadDb();
+        const existing = db.passwordCredentials.find((entry) => entry.userId === input.userId);
+        if (existing) {
+          existing.passwordHash = input.passwordHash;
+          existing.updatedAt = new Date().toISOString();
+          saveDb(db);
+          return;
+        }
+
+        db.passwordCredentials.push({
+          ...input,
+          createdAt: input.createdAt ?? new Date().toISOString(),
+          updatedAt: input.updatedAt ?? new Date().toISOString()
+        });
+        saveDb(db);
+      },
+      async findPasswordCredentialByEmail(email) {
+        const db = loadDb();
+        const user = db.users.find((entry) => entry.email.toLowerCase() === email.toLowerCase());
+        if (!user) {
+          return undefined;
+        }
+        const credential = db.passwordCredentials.find((entry) => entry.userId === user.id);
+        if (!credential) {
+          return undefined;
+        }
+        return { user, passwordHash: credential.passwordHash };
+      },
       async createLauncherSession(input) {
         const db = loadDb();
         const user = db.users.find((entry) => entry.id === input.userId);
@@ -115,6 +153,59 @@ export function createFileRepositories(): BackendRepositories {
         } else {
           user.launcherToken = `session:${sha256(input.tokenHash)}:${input.source}`;
         }
+        saveDb(db);
+      },
+      async createWebSession(input) {
+        const db = loadDb();
+        db.webSessions.push({
+          id: `web_${randomBytes(8).toString("hex")}`,
+          userId: input.userId,
+          tokenHash: input.tokenHash,
+          source: input.source,
+          expiresAt: input.expiresAt,
+          createdAt: new Date().toISOString()
+        });
+        saveDb(db);
+      },
+      async findUserByWebSessionToken(token) {
+        const db = loadDb();
+        const session = db.webSessions.find((entry) => entry.tokenHash === sha256(token));
+        if (!session) {
+          return undefined;
+        }
+        return db.users.find((entry) => entry.id === session.userId);
+      },
+      async deleteWebSession(tokenHash) {
+        const db = loadDb();
+        db.webSessions = db.webSessions.filter((entry) => entry.tokenHash !== tokenHash);
+        saveDb(db);
+      },
+      async createLauncherAuthRequest(input) {
+        const db = loadDb();
+        const created: LauncherAuthRequestRecord = {
+          id: `authreq_${randomBytes(8).toString("hex")}`,
+          requestTokenHash: input.requestTokenHash,
+          userId: input.userId,
+          source: input.source,
+          expiresAt: input.expiresAt,
+          createdAt: new Date().toISOString()
+        };
+        db.launcherAuthRequests.push(created);
+        saveDb(db);
+        return created;
+      },
+      async findLauncherAuthRequestByTokenHash(tokenHash) {
+        const db = loadDb();
+        return db.launcherAuthRequests.find((entry) => entry.requestTokenHash === tokenHash);
+      },
+      async resolveLauncherAuthRequest(tokenHash, userId) {
+        const db = loadDb();
+        const request = db.launcherAuthRequests.find((entry) => entry.requestTokenHash === tokenHash);
+        if (!request) {
+          return;
+        }
+        request.userId = userId;
+        request.resolvedAt = new Date().toISOString();
         saveDb(db);
       }
     },

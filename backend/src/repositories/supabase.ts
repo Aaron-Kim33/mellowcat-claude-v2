@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import type {
   BackendRepositories,
   EntitlementRecord,
+  LauncherAuthRequestRecord,
   PaymentHandoffRecord,
   PaymentRecord,
   UserRecord
@@ -105,6 +106,18 @@ function mapHandoff(row: Json): PaymentHandoffRecord {
   };
 }
 
+function mapLauncherAuthRequest(row: Json): LauncherAuthRequestRecord {
+  return {
+    id: String(row.id),
+    requestTokenHash: String(row.request_token_hash),
+    userId: typeof row.user_id === "string" ? row.user_id : undefined,
+    source: String(row.source),
+    expiresAt: String(row.expires_at),
+    resolvedAt: typeof row.resolved_at === "string" ? row.resolved_at : undefined,
+    createdAt: typeof row.created_at === "string" ? row.created_at : undefined
+  };
+}
+
 function first<T>(items: T[] | null | undefined): T | undefined {
   return Array.isArray(items) && items.length > 0 ? items[0] : undefined;
 }
@@ -159,6 +172,37 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
         });
         return mapUser(rows[0]);
       },
+      async createPasswordCredential(input) {
+        await client.request<Json[]>("password_credentials", {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates,return=representation"
+          },
+          query: "on_conflict=user_id",
+          body: JSON.stringify({
+            user_id: input.userId,
+            password_hash: input.passwordHash,
+            updated_at: new Date().toISOString()
+          })
+        });
+      },
+      async findPasswordCredentialByEmail(email) {
+        const user = await this.findUserByEmail(email);
+        if (!user) {
+          return undefined;
+        }
+        const rows = await client.request<Json[]>("password_credentials", {
+          query: `select=*&user_id=eq.${encodeURIComponent(user.id)}&limit=1`
+        });
+        const credential = first(rows);
+        if (!credential || typeof credential.password_hash !== "string") {
+          return undefined;
+        }
+        return {
+          user,
+          passwordHash: credential.password_hash
+        };
+      },
       async createLauncherSession(input) {
         await client.request<Json[]>("launcher_sessions", {
           method: "POST",
@@ -172,7 +216,68 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
               : null
         })
       });
-    }
+      },
+      async createWebSession(input) {
+        await client.request<Json[]>("web_sessions", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: input.userId,
+            token_hash: input.tokenHash,
+            source: input.source,
+            expires_at: input.expiresAt ?? null
+          })
+        });
+      },
+      async findUserByWebSessionToken(token) {
+        const sessionRows = await client.request<Json[]>("web_sessions", {
+          query: [
+            "select=user_id",
+            `token_hash=eq.${encodeURIComponent(sha256(token))}`,
+            "limit=1"
+          ].join("&")
+        });
+        const session = first(sessionRows);
+        const userId = typeof session?.user_id === "string" ? session.user_id : undefined;
+        if (!userId) {
+          return undefined;
+        }
+        return this.findUserById(userId);
+      },
+      async deleteWebSession(tokenHash) {
+        await client.request<Json[]>("web_sessions", {
+          method: "DELETE",
+          query: `token_hash=eq.${encodeURIComponent(tokenHash)}`
+        });
+      },
+      async createLauncherAuthRequest(input) {
+        const rows = await client.request<Json[]>("launcher_auth_requests", {
+          method: "POST",
+          body: JSON.stringify({
+            request_token_hash: input.requestTokenHash,
+            user_id: input.userId ?? null,
+            source: input.source,
+            expires_at: input.expiresAt
+          })
+        });
+        return mapLauncherAuthRequest(rows[0]);
+      },
+      async findLauncherAuthRequestByTokenHash(tokenHash) {
+        const rows = await client.request<Json[]>("launcher_auth_requests", {
+          query: `select=*&request_token_hash=eq.${encodeURIComponent(tokenHash)}&limit=1`
+        });
+        const row = first(rows);
+        return row ? mapLauncherAuthRequest(row) : undefined;
+      },
+      async resolveLauncherAuthRequest(tokenHash, userId) {
+        await client.request<Json[]>("launcher_auth_requests", {
+          method: "PATCH",
+          query: `request_token_hash=eq.${encodeURIComponent(tokenHash)}`,
+          body: JSON.stringify({
+            user_id: userId,
+            resolved_at: new Date().toISOString()
+          })
+        });
+      }
     },
     payments: {
       async createPaymentHandoff(record) {

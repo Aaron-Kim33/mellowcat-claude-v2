@@ -1,0 +1,267 @@
+# Auth API Spec
+
+## Scope
+
+This is the first real account/auth API layer for:
+
+- email/password sign-up
+- email/password login
+- logout
+- current web user lookup
+- launcher browser-auth handoff
+
+Google OAuth is still the next phase.
+
+## Website auth endpoints
+
+### `POST /api/auth/signup`
+
+Request:
+
+```json
+{
+  "email": "creator@example.com",
+  "password": "supersecret123",
+  "displayName": "MellowCat Creator"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "user": {
+    "id": "uuid-user-id",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator"
+  }
+}
+```
+
+Behavior:
+
+- creates `app_users`
+- creates `password_credentials`
+- creates `web_sessions`
+- sets `mellowcat_web_session` cookie
+
+Errors:
+
+- `BAD_REQUEST`
+- `WEAK_PASSWORD`
+- `EMAIL_EXISTS`
+
+### `POST /api/auth/login`
+
+Request:
+
+```json
+{
+  "email": "creator@example.com",
+  "password": "supersecret123",
+  "launcherRequest": "authreq_123"
+}
+```
+
+`launcherRequest` is optional.
+
+Success:
+
+```json
+{
+  "ok": true,
+  "user": {
+    "id": "uuid-user-id",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator"
+  },
+  "launcherRequestResolved": true
+}
+```
+
+Behavior:
+
+- verifies password
+- creates `web_sessions`
+- sets `mellowcat_web_session` cookie
+- if `launcherRequest` exists, resolves the launcher auth request for that user
+
+Errors:
+
+- `BAD_REQUEST`
+- `INVALID_CREDENTIALS`
+
+### `POST /api/auth/logout`
+
+Success:
+
+```json
+{
+  "ok": true
+}
+```
+
+Behavior:
+
+- deletes current `web_sessions` row if cookie exists
+- clears `mellowcat_web_session`
+
+### `GET /api/auth/me`
+
+Success:
+
+```json
+{
+  "ok": true,
+  "user": {
+    "id": "uuid-user-id",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator"
+  }
+}
+```
+
+Errors:
+
+- `UNAUTHENTICATED`
+
+## Launcher auth handoff endpoints
+
+### `POST /api/auth/launcher/start`
+
+Request:
+
+```json
+{
+  "source": "launcher"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "requestId": "authreq_123",
+  "loginUrl": "https://mellowcat.xyz/login?source=launcher&launcherRequest=authreq_123",
+  "expiresAt": "2026-03-28T10:10:00.000Z"
+}
+```
+
+Behavior:
+
+- creates a short-lived launcher auth request
+- returns login URL for browser flow
+
+### `POST /api/auth/launcher/complete`
+
+Used by web frontend after user finishes login in browser.
+
+Authentication:
+
+- requires `mellowcat_web_session` cookie
+
+Request:
+
+```json
+{
+  "requestId": "authreq_123"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true
+}
+```
+
+Behavior:
+
+- binds authenticated web user to launcher auth request
+- marks request as resolved
+
+Errors:
+
+- `UNAUTHENTICATED`
+- `BAD_REQUEST`
+- `REQUEST_NOT_FOUND`
+- `REQUEST_EXPIRED`
+
+### `POST /api/auth/launcher/resolve`
+
+Used by launcher after browser login completes.
+
+Request:
+
+```json
+{
+  "requestId": "authreq_123"
+}
+```
+
+Pending response:
+
+```json
+{
+  "ok": true,
+  "status": "pending"
+}
+```
+
+Resolved response:
+
+```json
+{
+  "ok": true,
+  "status": "resolved",
+  "accessToken": "launcher_xxx",
+  "session": {
+    "loggedIn": true,
+    "userId": "uuid-user-id",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator",
+    "source": "remote",
+    "lastSyncedAt": "2026-03-28T10:12:00.000Z"
+  }
+}
+```
+
+Behavior:
+
+- checks if launcher auth request has been resolved by browser login
+- if yes, creates a real `launcher_sessions` token
+- returns launcher session payload
+
+Errors:
+
+- `BAD_REQUEST`
+- `REQUEST_NOT_FOUND`
+- `REQUEST_EXPIRED`
+- `USER_NOT_FOUND`
+
+## Notes for frontend
+
+Website frontend should now support:
+
+- signup form -> `POST /api/auth/signup`
+- login form -> `POST /api/auth/login`
+- account bootstrap -> `GET /api/auth/me`
+- logout button -> `POST /api/auth/logout`
+- browser launcher handoff completion -> `POST /api/auth/launcher/complete`
+
+Launcher frontend should later support:
+
+- start browser login -> `POST /api/auth/launcher/start`
+- poll resolve -> `POST /api/auth/launcher/resolve`
+
+## OAuth status
+
+Google OAuth is not implemented yet in this backend.
+
+Next recommended endpoints:
+
+- `GET /api/auth/oauth/google/start`
+- `GET /api/auth/oauth/google/callback`

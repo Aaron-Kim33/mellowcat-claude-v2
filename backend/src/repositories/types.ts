@@ -14,6 +14,33 @@ export interface CreateUserInput {
   displayName?: string;
 }
 
+export interface PasswordCredentialRecord {
+  userId: string;
+  passwordHash: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface WebSessionRecord {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  source: string;
+  expiresAt?: string;
+  createdAt?: string;
+  lastUsedAt?: string;
+}
+
+export interface LauncherAuthRequestRecord {
+  id: string;
+  requestTokenHash: string;
+  userId?: string;
+  source: string;
+  expiresAt: string;
+  resolvedAt?: string;
+  createdAt?: string;
+}
+
 export interface PaymentHandoffRecord {
   id: string;
   tokenHash: string;
@@ -66,12 +93,34 @@ export interface AuthRepository {
   findUserById(userId: string): Promise<UserRecord | undefined>;
   findUserByEmail(email: string): Promise<UserRecord | undefined>;
   createUser(user: CreateUserInput): Promise<UserRecord>;
+  createPasswordCredential(input: PasswordCredentialRecord): Promise<void>;
+  findPasswordCredentialByEmail(
+    email: string
+  ): Promise<{ user: UserRecord; passwordHash: string } | undefined>;
   createLauncherSession(input: {
     userId: string;
     tokenHash: string;
     source: string;
     expiresAt?: string;
   }): Promise<void>;
+  createWebSession(input: {
+    userId: string;
+    tokenHash: string;
+    source: string;
+    expiresAt?: string;
+  }): Promise<void>;
+  findUserByWebSessionToken(token: string): Promise<UserRecord | undefined>;
+  deleteWebSession(tokenHash: string): Promise<void>;
+  createLauncherAuthRequest(input: {
+    requestTokenHash: string;
+    source: string;
+    expiresAt: string;
+    userId?: string;
+  }): Promise<LauncherAuthRequestRecord>;
+  findLauncherAuthRequestByTokenHash(
+    tokenHash: string
+  ): Promise<LauncherAuthRequestRecord | undefined>;
+  resolveLauncherAuthRequest(tokenHash: string, userId: string): Promise<void>;
 }
 
 export interface PaymentRepository {

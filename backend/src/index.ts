@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { readFileSync } from "fs";
 import path from "path";
@@ -61,6 +61,7 @@ const PAYMENT_BASE_URL = process.env.MELLOWCAT_PAYMENT_BASE_URL ?? "https://mell
 const PAYMENT_SUCCESS_URL =
   process.env.MELLOWCAT_PAYMENT_SUCCESS_URL ?? `${PAYMENT_BASE_URL}?status=success`;
 const APP_BASE_URL = process.env.MELLOWCAT_APP_BASE_URL ?? `http://${HOST}:${PORT}`;
+const WEB_BASE_URL = process.env.MELLOWCAT_WEB_BASE_URL ?? "https://mellowcat.xyz";
 const ROOT_DIR = path.resolve(__dirname, "../..");
 const CATALOG_PATH = path.resolve(ROOT_DIR, "resources", "bundled", "catalog.json");
 const LEMON_SQUEEZY = getLemonSqueezyConfig();
@@ -295,6 +296,58 @@ function createPaymentUrl(handoffToken: string): string {
   return url.toString();
 }
 
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const derived = scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  const [salt, digest] = storedHash.split(":");
+  if (!salt || !digest) {
+    return false;
+  }
+
+  const derived = scryptSync(password, salt, 64).toString("hex");
+  return timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(digest, "hex"));
+}
+
+function parseCookies(req: IncomingMessage): Record<string, string> {
+  const header = req.headers.cookie;
+  if (!header) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    header.split(";").map((pair) => {
+      const [name, ...rest] = pair.trim().split("=");
+      return [name, decodeURIComponent(rest.join("="))];
+    })
+  );
+}
+
+function setCookie(res: ServerResponse, name: string, value: string, maxAgeSeconds?: number): void {
+  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
+  if (maxAgeSeconds) {
+    parts.push(`Max-Age=${maxAgeSeconds}`);
+  }
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function clearCookie(res: ServerResponse, name: string): void {
+  res.setHeader("Set-Cookie", `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+async function findUserByWebCookie(req: IncomingMessage): Promise<UserRecord | undefined> {
+  const cookies = parseCookies(req);
+  const token = cookies["mellowcat_web_session"];
+  if (!token) {
+    return undefined;
+  }
+
+  return repositories.auth.findUserByWebSessionToken(token);
+}
+
 async function upsertEntitlement(userId: string, mcpId: string) {
   return repositories.entitlements.upsertOwnedEntitlement(userId, mcpId);
 }
@@ -361,6 +414,240 @@ const server = createServer(async (req, res) => {
         checkedAt: new Date().toISOString()
       }));
       json(res, 200, { items });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/signup") {
+      const body = await readJson<{ email?: string; password?: string; displayName?: string }>(req);
+      const email = body.email?.trim().toLowerCase();
+      const password = body.password?.trim();
+      const displayName = body.displayName?.trim();
+
+      if (!email || !password) {
+        json(res, 400, createError("BAD_REQUEST", "email and password are required."));
+        return;
+      }
+
+      if (password.length < 8) {
+        json(res, 400, createError("WEAK_PASSWORD", "Password must be at least 8 characters."));
+        return;
+      }
+
+      const existing = await repositories.auth.findUserByEmail(email);
+      if (existing) {
+        json(res, 409, createError("EMAIL_EXISTS", "An account with this email already exists."));
+        return;
+      }
+
+      const createdUser = await repositories.auth.createUser({
+        email,
+        displayName
+      });
+      await repositories.auth.createPasswordCredential({
+        userId: createdUser.id,
+        passwordHash: hashPassword(password)
+      });
+
+      const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
+      await repositories.auth.createWebSession({
+        userId: createdUser.id,
+        tokenHash: sha256(rawWebToken),
+        source: "signup"
+      });
+      setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
+
+      json(res, 200, {
+        ok: true,
+        user: {
+          id: createdUser.id,
+          email: createdUser.email,
+          displayName: createdUser.displayName
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/login") {
+      const body = await readJson<{ email?: string; password?: string; launcherRequest?: string }>(req);
+      const email = body.email?.trim().toLowerCase();
+      const password = body.password?.trim();
+
+      if (!email || !password) {
+        json(res, 400, createError("BAD_REQUEST", "email and password are required."));
+        return;
+      }
+
+      const credential = await repositories.auth.findPasswordCredentialByEmail(email);
+      if (!credential || !verifyPassword(password, credential.passwordHash)) {
+        json(res, 401, createError("INVALID_CREDENTIALS", "Email or password is incorrect."));
+        return;
+      }
+
+      const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
+      await repositories.auth.createWebSession({
+        userId: credential.user.id,
+        tokenHash: sha256(rawWebToken),
+        source: "login"
+      });
+      setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
+
+      if (body.launcherRequest?.trim()) {
+        await repositories.auth.resolveLauncherAuthRequest(
+          sha256(body.launcherRequest.trim()),
+          credential.user.id
+        );
+      }
+
+      json(res, 200, {
+        ok: true,
+        user: {
+          id: credential.user.id,
+          email: credential.user.email,
+          displayName: credential.user.displayName
+        },
+        launcherRequestResolved: Boolean(body.launcherRequest?.trim())
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/logout") {
+      const cookies = parseCookies(req);
+      const token = cookies["mellowcat_web_session"];
+      if (token) {
+        await repositories.auth.deleteWebSession(sha256(token));
+      }
+      clearCookie(res, "mellowcat_web_session");
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/me") {
+      const webUser = await findUserByWebCookie(req);
+      if (!webUser) {
+        json(res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        return;
+      }
+
+      json(res, 200, {
+        ok: true,
+        user: {
+          id: webUser.id,
+          email: webUser.email,
+          displayName: webUser.displayName
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/launcher/start") {
+      const rawRequestToken = `authreq_${randomBytes(16).toString("hex")}`;
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      await repositories.auth.createLauncherAuthRequest({
+        requestTokenHash: sha256(rawRequestToken),
+        source: "launcher",
+        expiresAt
+      });
+
+      const loginUrl = new URL("/login", WEB_BASE_URL);
+      loginUrl.searchParams.set("source", "launcher");
+      loginUrl.searchParams.set("launcherRequest", rawRequestToken);
+
+      json(res, 200, {
+        ok: true,
+        requestId: rawRequestToken,
+        loginUrl: loginUrl.toString(),
+        expiresAt
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/launcher/complete") {
+      const webUser = await findUserByWebCookie(req);
+      if (!webUser) {
+        json(res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        return;
+      }
+
+      const body = await readJson<{ requestId?: string }>(req);
+      const requestId = body.requestId?.trim();
+      if (!requestId) {
+        json(res, 400, createError("BAD_REQUEST", "requestId is required."));
+        return;
+      }
+
+      const requestRecord = await repositories.auth.findLauncherAuthRequestByTokenHash(
+        sha256(requestId)
+      );
+      if (!requestRecord) {
+        json(res, 404, createError("REQUEST_NOT_FOUND", "Launcher auth request was not found."));
+        return;
+      }
+
+      if (new Date(requestRecord.expiresAt).getTime() < Date.now()) {
+        json(res, 410, createError("REQUEST_EXPIRED", "Launcher auth request expired."));
+        return;
+      }
+
+      await repositories.auth.resolveLauncherAuthRequest(sha256(requestId), webUser.id);
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/launcher/resolve") {
+      const body = await readJson<{ requestId?: string }>(req);
+      const requestId = body.requestId?.trim();
+      if (!requestId) {
+        json(res, 400, createError("BAD_REQUEST", "requestId is required."));
+        return;
+      }
+
+      const requestRecord = await repositories.auth.findLauncherAuthRequestByTokenHash(
+        sha256(requestId)
+      );
+      if (!requestRecord) {
+        json(res, 404, createError("REQUEST_NOT_FOUND", "Launcher auth request was not found."));
+        return;
+      }
+
+      if (new Date(requestRecord.expiresAt).getTime() < Date.now()) {
+        json(res, 410, createError("REQUEST_EXPIRED", "Launcher auth request expired."));
+        return;
+      }
+
+      if (!requestRecord.resolvedAt || !requestRecord.userId) {
+        json(res, 202, {
+          ok: true,
+          status: "pending"
+        });
+        return;
+      }
+
+      const resolvedUser = await repositories.auth.findUserById(requestRecord.userId);
+      if (!resolvedUser) {
+        json(res, 404, createError("USER_NOT_FOUND", "Resolved launcher user could not be found."));
+        return;
+      }
+
+      const rawLauncherToken = `launcher_${randomBytes(20).toString("hex")}`;
+      await repositories.auth.createLauncherSession({
+        userId: resolvedUser.id,
+        tokenHash: sha256(rawLauncherToken),
+        source: "launcher-browser"
+      });
+
+      json(res, 200, {
+        ok: true,
+        status: "resolved",
+        accessToken: rawLauncherToken,
+        session: {
+          loggedIn: true,
+          userId: resolvedUser.id,
+          email: resolvedUser.email,
+          displayName: resolvedUser.displayName,
+          source: "remote",
+          lastSyncedAt: new Date().toISOString()
+        }
+      });
       return;
     }
 

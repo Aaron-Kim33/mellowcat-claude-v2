@@ -21,6 +21,53 @@ create table if not exists launcher_sessions (
 create index if not exists launcher_sessions_user_id_idx
   on launcher_sessions(user_id);
 
+create table if not exists web_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  token_hash text not null unique,
+  source text not null default 'web',
+  expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz
+);
+
+create index if not exists web_sessions_user_id_idx
+  on web_sessions(user_id);
+
+create table if not exists password_credentials (
+  user_id uuid primary key references app_users(id) on delete cascade,
+  password_hash text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists auth_identities (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  provider text not null,
+  provider_user_id text not null,
+  email text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (provider, provider_user_id)
+);
+
+create index if not exists auth_identities_user_id_idx
+  on auth_identities(user_id);
+
+create table if not exists launcher_auth_requests (
+  id uuid primary key default gen_random_uuid(),
+  request_token_hash text not null unique,
+  user_id uuid references app_users(id) on delete cascade,
+  source text not null default 'launcher',
+  expires_at timestamptz not null,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists launcher_auth_requests_user_id_idx
+  on launcher_auth_requests(user_id);
+
 create table if not exists products (
   id text primary key,
   slug text not null unique,
