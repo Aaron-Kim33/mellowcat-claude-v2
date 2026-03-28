@@ -736,7 +736,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/auth/reset-password") {
-      const body = await readJson<{ token?: string; password?: string }>(req);
+      const body = await readJson<{ token?: string; password?: string; launcherRequest?: string }>(req);
       const token = body.token?.trim();
       const password = body.password?.trim();
 
@@ -788,13 +788,21 @@ const server = createServer(async (req, res) => {
       });
       setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
 
+      if (body.launcherRequest?.trim()) {
+        await repositories.auth.resolveLauncherAuthRequest(
+          sha256(body.launcherRequest.trim()),
+          resetUser.id
+        );
+      }
+
       json(req, res, 200, {
         ok: true,
         user: {
           id: resetUser.id,
           email: resetUser.email,
           displayName: resetUser.displayName
-        }
+        },
+        launcherRequestResolved: Boolean(body.launcherRequest?.trim())
       });
       return;
     }

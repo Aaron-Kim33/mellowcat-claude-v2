@@ -131,7 +131,8 @@ Request:
 ```json
 {
   "token": "reset_xxx",
-  "password": "new-supersecret123"
+  "password": "new-supersecret123",
+  "launcherRequest": "authreq_123"
 }
 ```
 
@@ -144,7 +145,8 @@ Success:
     "id": "uuid-user-id",
     "email": "creator@example.com",
     "displayName": "MellowCat Creator"
-  }
+  },
+  "launcherRequestResolved": true
 }
 ```
 
@@ -154,6 +156,7 @@ Behavior:
 - updates `password_credentials`
 - marks reset request as used
 - creates a fresh `web_sessions` cookie
+- if `launcherRequest` is present, resolves the launcher auth request immediately
 
 Errors:
 

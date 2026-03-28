@@ -129,11 +129,16 @@ Submit to:
 
 - `POST /api/auth/reset-password`
 
+If launcher context is present, include:
+
+- `launcherRequest`
+
 Success behavior:
 
 - backend updates password
 - backend creates a fresh web session cookie
-- frontend can redirect straight to `/account?passwordReset=success`
+- if `launcherRequestResolved === true`, frontend should move straight to `/launcher-auth?requestId=...`
+- otherwise frontend can redirect to `/account?passwordReset=success`
 
 ## Launcher frontend responsibilities
 
