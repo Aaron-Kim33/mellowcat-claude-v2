@@ -4,6 +4,7 @@ import type {
   WorkflowStatusSchema,
   WorkflowUISchema
 } from "../../lib/workflow-ui-schema";
+import { useAppStore } from "../../store/app-store";
 
 interface FieldBinding {
   value: string;
@@ -68,6 +69,8 @@ export function WorkflowConfigRenderer({
   actions,
   statuses
 }: WorkflowConfigRendererProps) {
+  const launcherLanguage = useAppStore((state) => state.settings?.launcherLanguage);
+  const isKorean = launcherLanguage === "ko";
   const renderActions = (section: WorkflowUISchema["sections"][number]) =>
     section.actions ? (
       <div className="button-row">
@@ -151,7 +154,7 @@ export function WorkflowConfigRenderer({
                             className="secret-toggle"
                             onClick={binding.onToggleVisibility}
                           >
-                            {binding.visible ? "Hide" : "Show"}
+                            {binding.visible ? (isKorean ? "숨기기" : "Hide") : isKorean ? "보기" : "Show"}
                           </button>
                         </div>
                       </label>
@@ -210,7 +213,7 @@ export function WorkflowConfigRenderer({
                         target="_blank"
                         rel="noreferrer"
                       >
-                        {binding.linkLabel ?? "Open"}
+                        {binding.linkLabel ?? (isKorean ? "열기" : "Open")}
                       </a>
                     )}
                   </div>
