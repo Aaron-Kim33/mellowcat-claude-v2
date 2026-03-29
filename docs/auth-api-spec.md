@@ -40,7 +40,8 @@ Success:
     "emailVerified": false
   },
   "verificationSent": true,
-  "verificationUrl": "https://mellowcat.xyz/verify-email?token=verify_xxx",
+  "emailSent": true,
+  "verificationUrl": null,
   "verificationExpiresAt": "2026-03-29T12:00:00.000Z"
 }
 ```
@@ -52,7 +53,8 @@ Behavior:
 - creates `web_sessions`
 - sets `mellowcat_web_session` cookie
 - creates an email verification request
-- currently returns a frontend-ready `verificationUrl` directly so the web app can continue without mail infrastructure
+- sends a verification email when `MELLOWCAT_RESEND_API_KEY` and `MELLOWCAT_EMAIL_FROM` are configured
+- when email delivery is not configured, returns a frontend-ready `verificationUrl` fallback
 
 Errors:
 
@@ -115,7 +117,8 @@ Success:
   "ok": true,
   "alreadyVerified": false,
   "verificationSent": true,
-  "verificationUrl": "https://mellowcat.xyz/verify-email?token=verify_xxx",
+  "emailSent": true,
+  "verificationUrl": null,
   "verificationExpiresAt": "2026-03-29T12:00:00.000Z"
 }
 ```
@@ -186,8 +189,9 @@ Success:
 {
   "ok": true,
   "resetRequested": true,
+  "emailSent": true,
   "expiresAt": "2026-03-28T12:00:00.000Z",
-  "resetUrl": "https://mellowcat.xyz/reset-password?token=reset_xxx"
+  "resetUrl": null
 }
 ```
 
@@ -195,7 +199,8 @@ Behavior:
 
 - accepts an email address
 - if a password-based account exists, creates a short-lived password reset request
-- currently returns a frontend-ready `resetUrl` directly so the web app can continue without email infrastructure
+- sends a reset email when `MELLOWCAT_RESEND_API_KEY` and `MELLOWCAT_EMAIL_FROM` are configured
+- when email delivery is not configured, returns a frontend-ready `resetUrl` fallback
 - still returns `ok: true` when the account is missing
 
 Errors:

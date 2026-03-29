@@ -10,6 +10,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import { URL } from "url";
 import { getLemonSqueezyConfig } from "./config";
+import { getResendEmailConfig, sendEmail } from "./email";
 import {
   createLemonSqueezyCheckout,
   isLemonSqueezyConfigured,
@@ -104,6 +105,7 @@ const ROOT_DIR = path.resolve(__dirname, "../..");
 const CATALOG_PATH = path.resolve(ROOT_DIR, "resources", "bundled", "catalog.json");
 const LEMON_SQUEEZY = getLemonSqueezyConfig();
 const repositories = createRepositories();
+const EMAIL_CONFIG = getResendEmailConfig();
 const ALLOWED_WEB_ORIGINS = new Set(
   [
     WEB_BASE_URL,
@@ -346,6 +348,65 @@ async function createEmailVerification(userId: string, options?: {
     verificationUrl: buildVerificationUrl(rawToken, options),
     expiresAt
   };
+}
+
+async function deliverPasswordResetEmail(input: {
+  email: string;
+  resetUrl: string;
+  expiresAt: string;
+}): Promise<boolean> {
+  if (!EMAIL_CONFIG) {
+    return false;
+  }
+
+  await sendEmail(EMAIL_CONFIG, {
+    to: input.email,
+    subject: "Reset your MellowCat password",
+    text: [
+      "We received a request to reset your MellowCat password.",
+      "",
+      `Reset your password: ${input.resetUrl}`,
+      "",
+      `This link expires at ${input.expiresAt}.`,
+      "",
+      "If you did not request this, you can ignore this email."
+    ].join("\n"),
+    html: `
+      <p>We received a request to reset your MellowCat password.</p>
+      <p><a href="${input.resetUrl}">Reset your password</a></p>
+      <p>This link expires at <strong>${input.expiresAt}</strong>.</p>
+      <p>If you did not request this, you can ignore this email.</p>
+    `
+  });
+  return true;
+}
+
+async function deliverVerificationEmail(input: {
+  email: string;
+  verificationUrl: string;
+  expiresAt: string;
+}): Promise<boolean> {
+  if (!EMAIL_CONFIG) {
+    return false;
+  }
+
+  await sendEmail(EMAIL_CONFIG, {
+    to: input.email,
+    subject: "Verify your MellowCat email",
+    text: [
+      "Welcome to MellowCat.",
+      "",
+      `Verify your email: ${input.verificationUrl}`,
+      "",
+      `This link expires at ${input.expiresAt}.`
+    ].join("\n"),
+    html: `
+      <p>Welcome to MellowCat.</p>
+      <p><a href="${input.verificationUrl}">Verify your email</a></p>
+      <p>This link expires at <strong>${input.expiresAt}</strong>.</p>
+    `
+  });
+  return true;
 }
 
 async function getEntitlementStatus(userId: string, mcpId: string): Promise<EntitlementStatus> {
@@ -685,6 +746,11 @@ const server = createServer(async (req, res) => {
       });
       setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
       const verification = await createEmailVerification(createdUser.id);
+      const verificationDelivered = await deliverVerificationEmail({
+        email: createdUser.email,
+        verificationUrl: verification.verificationUrl,
+        expiresAt: verification.expiresAt
+      });
 
       json(req, res, 200, {
         ok: true,
@@ -696,7 +762,8 @@ const server = createServer(async (req, res) => {
           emailVerified: false
         },
         verificationSent: true,
-        verificationUrl: verification.verificationUrl,
+        emailSent: verificationDelivered,
+        verificationUrl: verificationDelivered ? undefined : verification.verificationUrl,
         verificationExpiresAt: verification.expiresAt
       });
       return;
@@ -774,12 +841,18 @@ const server = createServer(async (req, res) => {
 
       const resetUrl = new URL(PASSWORD_RESET_BASE_URL);
       resetUrl.searchParams.set("token", rawResetToken);
+      const emailDelivered = await deliverPasswordResetEmail({
+        email: credential.user.email,
+        resetUrl: resetUrl.toString(),
+        expiresAt
+      });
 
       json(req, res, 200, {
         ok: true,
         resetRequested: true,
+        emailSent: emailDelivered,
         expiresAt,
-        resetUrl: resetUrl.toString()
+        resetUrl: emailDelivered ? undefined : resetUrl.toString()
       });
       return;
     }
@@ -878,12 +951,18 @@ const server = createServer(async (req, res) => {
         source: body.source?.trim(),
         launcherRequest: body.launcherRequest?.trim()
       });
+      const verificationDelivered = await deliverVerificationEmail({
+        email: webUser.email,
+        verificationUrl: verification.verificationUrl,
+        expiresAt: verification.expiresAt
+      });
 
       json(req, res, 200, {
         ok: true,
         alreadyVerified: false,
         verificationSent: true,
-        verificationUrl: verification.verificationUrl,
+        emailSent: verificationDelivered,
+        verificationUrl: verificationDelivered ? undefined : verification.verificationUrl,
         verificationExpiresAt: verification.expiresAt
       });
       return;

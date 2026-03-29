@@ -111,13 +111,15 @@ Current backend behavior:
 
 - always returns `ok: true`
 - if the account exists and supports password login, backend also returns:
+  - `emailSent`
   - `resetUrl`
   - `expiresAt`
 
 Recommended frontend behavior for now:
 
 - show generic success state
-- if `resetUrl` exists, immediately route user to it or expose a temporary `Continue to reset password` action
+- if `emailSent === true`, show a “Check your email” success state
+- if `resetUrl` exists, expose a dev fallback `Continue to reset password` action
 
 ### 6. Reset password page
 
@@ -165,6 +167,7 @@ Success behavior:
 - backend creates a fresh web session cookie
 - if `launcherRequestResolved === true`, frontend should move straight to `/launcher-auth?requestId=...`
 - otherwise frontend can redirect to `/account?emailVerified=success`
+- if signup or resend-verification returns `emailSent === true`, show a mail-sent success state instead of navigating immediately
 
 ## Launcher frontend responsibilities
 
