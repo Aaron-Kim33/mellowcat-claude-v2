@@ -18,6 +18,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
   const copy = getLauncherCopy(launcherLanguage).pages.settings;
+  const isKorean = launcherLanguage === "ko";
 
   useEffect(() => {
     setClaudeExecutablePath(settings?.claudeExecutablePath ?? "");
@@ -53,24 +54,24 @@ export function SettingsPage() {
 
       <div className="card">
         <div className="settings-row">
-          <span>Vault Path</span>
-          <code>{settings?.vaultPath ?? "Loading..."}</code>
+          <span>{isKorean ? "Vault 경로" : "Vault Path"}</span>
+          <code>{settings?.vaultPath ?? (isKorean ? "불러오는 중..." : "Loading...")}</code>
         </div>
         <div className="settings-row">
-          <span>Claude Detected</span>
-          <strong>{claudeInstallation?.installed ? "Yes" : "No"}</strong>
+          <span>{isKorean ? "Claude 감지 여부" : "Claude Detected"}</span>
+          <strong>{claudeInstallation?.installed ? (isKorean ? "예" : "Yes") : isKorean ? "아니오" : "No"}</strong>
         </div>
         <div className="settings-row">
-          <span>Detected Path</span>
-          <code>{claudeInstallation?.executablePath ?? "Not found"}</code>
+          <span>{isKorean ? "감지된 경로" : "Detected Path"}</span>
+          <code>{claudeInstallation?.executablePath ?? (isKorean ? "찾지 못함" : "Not found")}</code>
         </div>
         <div className="settings-row">
-          <span>Auto Update</span>
-          <strong>{settings?.autoUpdate ? "Enabled" : "Disabled"}</strong>
+          <span>{isKorean ? "자동 업데이트" : "Auto Update"}</span>
+          <strong>{settings?.autoUpdate ? (isKorean ? "사용" : "Enabled") : isKorean ? "사용 안 함" : "Disabled"}</strong>
         </div>
         <div className="settings-row">
-          <span>Launch On Startup</span>
-          <strong>{settings?.launchOnStartup ? "Enabled" : "Disabled"}</strong>
+          <span>{isKorean ? "시작 프로그램 실행" : "Launch On Startup"}</span>
+          <strong>{settings?.launchOnStartup ? (isKorean ? "사용" : "Enabled") : isKorean ? "사용 안 함" : "Disabled"}</strong>
         </div>
       </div>
 
@@ -89,7 +90,7 @@ export function SettingsPage() {
           </label>
 
           <label className="field">
-            <span>Claude Executable Path</span>
+            <span>{isKorean ? "Claude 실행 파일 경로" : "Claude Executable Path"}</span>
             <input
               className="text-input"
               value={claudeExecutablePath}
@@ -99,7 +100,7 @@ export function SettingsPage() {
           </label>
 
           <label className="field">
-            <span>Claude Args</span>
+            <span>{isKorean ? "Claude 실행 인자" : "Claude Args"}</span>
             <input
               className="text-input"
               value={claudeArgsText}
@@ -116,7 +117,11 @@ export function SettingsPage() {
               onChange={(event) => setApiBaseUrl(event.target.value)}
               placeholder="https://api.mellowcat.dev/"
             />
-            <span className="subtle">Use `mock://remote` to preview remote catalog and purchase flows without a backend.</span>
+            <span className="subtle">
+              {isKorean
+                ? "백엔드 없이 원격 카탈로그와 구매 흐름을 확인하려면 `mock://remote`를 사용하세요."
+                : "Use `mock://remote` to preview remote catalog and purchase flows without a backend."}
+            </span>
           </label>
         </div>
 
@@ -127,7 +132,7 @@ export function SettingsPage() {
             onClick={() => void handleSave()}
             disabled={saving}
           >
-            {saving ? "Saving..." : copy.saveSettings}
+            {saving ? (isKorean ? "저장 중..." : "Saving...") : copy.saveSettings}
           </button>
           <button
             type="button"
@@ -149,13 +154,15 @@ export function SettingsPage() {
           <span className="subtle">
             {claudeDetectionMessage ??
               claudeInstallation?.message ??
-              "Workflow-specific configuration now lives in Installed."}
+              (isKorean
+                ? "워크플로 전용 설정은 이제 설치됨 탭에서 관리합니다."
+                : "Workflow-specific configuration now lives in Installed.")}
           </span>
           <span className="subtle">{savedMessage}</span>
         </div>
         {!claudeInstallation?.canAutoInstall && (
           <div className="manual-install-box">
-            <strong>Manual install</strong>
+            <strong>{isKorean ? "수동 설치" : "Manual install"}</strong>
             <code>{claudeInstallation?.manualInstallCommand}</code>
             <a
               className="inline-link"
@@ -163,14 +170,16 @@ export function SettingsPage() {
               target="_blank"
               rel="noreferrer"
             >
-              Open Claude Code install guide
+              {isKorean ? "Claude Code 설치 안내 열기" : "Open Claude Code install guide"}
             </a>
           </div>
         )}
         <div className="manual-install-box">
-          <strong>Workflow Config Has Moved</strong>
+          <strong>{isKorean ? "워크플로 설정 위치가 바뀌었습니다" : "Workflow Config Has Moved"}</strong>
           <p className="subtle">
-            Telegram, generation provider, and YouTube publishing settings are now managed from the Installed page so automation-specific config stays with the workflow layer.
+            {isKorean
+              ? "텔레그램, 생성 모델, 유튜브 게시 설정은 이제 설치됨 탭에서 관리합니다. 자동화별 설정을 워크플로 계층에 모아두기 위해서입니다."
+              : "Telegram, generation provider, and YouTube publishing settings are now managed from the Installed page so automation-specific config stays with the workflow layer."}
           </p>
         </div>
       </div>

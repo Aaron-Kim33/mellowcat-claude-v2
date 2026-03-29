@@ -63,6 +63,7 @@ export function InstalledPage() {
     uploadLastPackageToYouTube
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.installed;
+  const isKorean = settings?.launcherLanguage === "ko";
   const composition = evaluateMcpComposition(installed.map((item) => item.id));
   const resolvedWorkflows = resolveRegisteredWorkflows({
     installedIds: installed.map((item) => item.id),
@@ -150,7 +151,7 @@ export function InstalledPage() {
       youtubeOAuthClientSecret: youtubeOAuthClientSecret.trim() || undefined,
       youtubeOAuthRedirectPort: youtubeOAuthRedirectPort.trim() || undefined
     });
-    setSavedMessage("Workflow config saved.");
+    setSavedMessage(isKorean ? "워크플로 설정을 저장했습니다." : "Workflow config saved.");
   };
 
   const handleSaveUploadRequest = async () => {
@@ -162,7 +163,7 @@ export function InstalledPage() {
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
     });
-    setSavedMessage("Upload request saved.");
+    setSavedMessage(isKorean ? "업로드 요청을 저장했습니다." : "Upload request saved.");
   };
 
   const handleChooseVideoFile = async () => {
@@ -187,7 +188,7 @@ export function InstalledPage() {
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
     });
-    setSavedMessage("Video file selected.");
+    setSavedMessage(isKorean ? "영상 파일을 선택했습니다." : "Video file selected.");
   };
 
   const handleChooseThumbnailFile = async () => {
@@ -212,7 +213,7 @@ export function InstalledPage() {
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
     });
-    setSavedMessage("Thumbnail file selected.");
+    setSavedMessage(isKorean ? "썸네일 파일을 선택했습니다." : "Thumbnail file selected.");
   };
 
   const handleUploadLastPackage = async () => {
@@ -262,7 +263,7 @@ export function InstalledPage() {
 
       {composition.issues.length > 0 && (
         <div className="manual-install-box">
-          <strong>Composition Check</strong>
+          <strong>{isKorean ? "구성 점검" : "Composition Check"}</strong>
           {composition.issues.map((issue) => (
             <span key={`${issue.mcpId}-${issue.message}`} className="subtle">
               {issue.mcpId}: {issue.message}
@@ -274,14 +275,16 @@ export function InstalledPage() {
       <div className="card">
         <div className="card-row">
           <div>
-            <p className="eyebrow">Installed Workflow Config</p>
-            <h3>{resolvedWorkflows[0]?.schema.title ?? "Workflow Stack"}</h3>
+            <p className="eyebrow">{isKorean ? "설치된 워크플로 설정" : "Installed Workflow Config"}</p>
+            <h3>{resolvedWorkflows[0]?.schema.title ?? (isKorean ? "워크플로 묶음" : "Workflow Stack")}</h3>
           </div>
           <span className="pill">{workflowConfig?.scriptProvider ?? "openrouter_api"}</span>
         </div>
         <p className="subtle">
           {resolvedWorkflows[0]?.schema.description ??
-            "Workflow-specific configuration will appear here when compatible packs or MCPs are installed."}
+            (isKorean
+              ? "호환되는 팩이나 MCP가 설치되면 워크플로 전용 설정이 이곳에 표시됩니다."
+              : "Workflow-specific configuration will appear here when compatible packs or MCPs are installed.")}
         </p>
 
         {resolvedWorkflows.length > 0 ? (
@@ -401,37 +404,56 @@ export function InstalledPage() {
                 }}
                 statuses={{
                   savedMessage: {
-                    value: savedMessage || "Save workflow config after edits."
+                    value: savedMessage || (isKorean ? "수정 후 워크플로 설정을 저장하세요." : "Save workflow config after edits.")
                   },
                   telegramQuickStart: {
                     value: "텔레그램에서 /help 또는 /shortlist 를 보내면 시작할 수 있습니다."
                   },
                   telegramMessage: {
                     value:
-                      telegramStatus?.message ?? "Telegram control status will appear here."
+                      telegramStatus?.message ??
+                      (isKorean
+                        ? "텔레그램 제어 상태가 여기에 표시됩니다."
+                        : "Telegram control status will appear here.")
                   },
                   telegramTransport: {
-                    value: telegramStatus?.state ?? "idle"
+                    value: telegramStatus?.state ?? (isKorean ? "대기 중" : "idle")
                   },
                   youtubeState: {
-                    value: youTubeAuthStatus?.connected ? "connected" : "not connected",
+                    value: youTubeAuthStatus?.connected
+                      ? isKorean
+                        ? "연결됨"
+                        : "connected"
+                      : isKorean
+                        ? "연결 안 됨"
+                        : "not connected",
                     tone: youTubeAuthStatus?.connected ? "default" : "warning"
                   },
                   selectedVideoFile: {
-                    value: youtubeVideoFilePath || "No video selected yet",
+                    value: youtubeVideoFilePath || (isKorean ? "아직 선택한 영상이 없습니다" : "No video selected yet"),
                     tone: youtubeVideoFilePath ? "default" : "warning"
                   },
                   selectedThumbnailFile: {
-                    value: youtubeThumbnailFilePath || "No thumbnail selected",
+                    value: youtubeThumbnailFilePath || (isKorean ? "선택한 썸네일이 없습니다" : "No thumbnail selected"),
                     tone: "default"
                   },
                   latestPackage: {
-                    value: telegramStatus?.lastPackagePath ?? "Not created yet"
+                    value: telegramStatus?.lastPackagePath ?? (isKorean ? "아직 생성되지 않음" : "Not created yet")
                   },
                   uploadRequestStatus: {
                     value: youTubeUploadRequest
-                      ? `${youTubeUploadRequest.status} ${youTubeUploadRequest.videoFilePath ? "· video path set" : "· video path missing"}`
-                      : "No upload request loaded yet",
+                      ? `${youTubeUploadRequest.status} ${
+                          youTubeUploadRequest.videoFilePath
+                            ? isKorean
+                              ? "· 영상 경로 설정됨"
+                              : "· video path set"
+                            : isKorean
+                              ? "· 영상 경로 없음"
+                              : "· video path missing"
+                        }`
+                      : isKorean
+                        ? "불러온 업로드 요청이 없습니다"
+                        : "No upload request loaded yet",
                     tone:
                       !youTubeUploadRequest || youTubeUploadRequest.videoFilePath
                         ? "default"
@@ -440,26 +462,30 @@ export function InstalledPage() {
                   lastUpload: {
                     value: lastYouTubeUploadResult
                       ? lastYouTubeUploadResult.ok
-                        ? "Upload complete. The latest package is now on YouTube."
+                        ? isKorean
+                          ? "업로드가 완료되었습니다. 최신 패키지가 유튜브에 게시되었습니다."
+                          : "Upload complete. The latest package is now on YouTube."
                         : lastYouTubeUploadResult.message
                       : youTubeAuthStatus?.message ??
-                        "Connect YouTube here when this workflow needs publishing.",
+                        (isKorean
+                          ? "이 워크플로가 게시를 필요로 할 때 여기서 유튜브를 연결하세요."
+                          : "Connect YouTube here when this workflow needs publishing."),
                     tone:
                       lastYouTubeUploadResult && !lastYouTubeUploadResult.ok
                         ? "warning"
                         : "default",
                     href: lastYouTubeUploadResult?.videoUrl,
-                    linkLabel: "Open uploaded video"
+                    linkLabel: isKorean ? "업로드한 영상 열기" : "Open uploaded video"
                   },
                   instagramState: {
-                    value: "delivery connector coming soon",
+                    value: isKorean ? "전송 커넥터 준비 중" : "delivery connector coming soon",
                     tone: "warning"
                   }
                 }}
               />
 
               <div className="manual-install-box">
-                <strong>Marketplace links</strong>
+                <strong>{isKorean ? "연결된 마켓 모듈" : "Marketplace links"}</strong>
                 <div className="tag-row">
                   {catalog
                     .filter((item) => item.workflow?.ids?.includes(workflow.id))
@@ -469,11 +495,19 @@ export function InstalledPage() {
                       );
                       const stateLabel = installedRecord
                         ? installedRecord.runtime.status === "running"
-                          ? "running"
-                          : "installed"
+                          ? isKorean
+                            ? "실행 중"
+                            : "running"
+                          : isKorean
+                            ? "설치됨"
+                            : "installed"
                         : item.availability?.state === "coming_soon"
-                          ? "coming soon"
-                          : "available";
+                          ? isKorean
+                            ? "준비 중"
+                            : "coming soon"
+                          : isKorean
+                            ? "사용 가능"
+                            : "available";
 
                       return (
                         <span key={item.id} className="tag">
@@ -483,16 +517,20 @@ export function InstalledPage() {
                     })}
                 </div>
                 <p className="subtle">
-                  This workflow lights up from marketplace items that declare the same workflow id.
+                  {isKorean
+                    ? "같은 workflow id를 선언한 마켓 모듈이 있으면 이 워크플로가 활성화됩니다."
+                    : "This workflow lights up from marketplace items that declare the same workflow id."}
                 </p>
               </div>
             </div>
           ))
         ) : (
           <div className="manual-install-box">
-            <strong>No workflow stack detected yet</strong>
+            <strong>{isKorean ? "아직 감지된 워크플로 묶음이 없습니다" : "No workflow stack detected yet"}</strong>
             <p className="subtle">
-              Install a compatible Pack or automation MCP set to light up this area.
+              {isKorean
+                ? "호환되는 팩이나 자동화 MCP 묶음을 설치하면 이 영역이 활성화됩니다."
+                : "Install a compatible Pack or automation MCP set to light up this area."}
             </p>
           </div>
         )}
@@ -503,7 +541,7 @@ export function InstalledPage() {
             className="primary-button"
             onClick={() => void handleSaveWorkflowConfig()}
           >
-            Save Workflow Config
+            {isKorean ? "워크플로 설정 저장" : "Save Workflow Config"}
           </button>
         </div>
       </div>
@@ -527,12 +565,14 @@ export function InstalledPage() {
             <div className="meta-list">
               <div className="meta-item">
                 <span>{copy.enabled}</span>
-                <strong>{item.enabled ? "Yes" : "No"}</strong>
+                <strong>{item.enabled ? (isKorean ? "예" : "Yes") : isKorean ? "아니오" : "No"}</strong>
               </div>
               {composition.issues.some((issue) => issue.mcpId === item.id) && (
                 <div className="meta-item">
-                  <span>Compatibility</span>
-                  <strong className="warning-text">Needs more workflow pieces</strong>
+                  <span>{isKorean ? "호환성" : "Compatibility"}</span>
+                  <strong className="warning-text">
+                    {isKorean ? "추가 워크플로 모듈이 필요합니다" : "Needs more workflow pieces"}
+                  </strong>
                 </div>
               )}
               <div className="meta-item">
@@ -550,10 +590,10 @@ export function InstalledPage() {
                 className={item.runtime.status === "running" ? "secondary-button" : "primary-button"}
                 onClick={() => void startMcp(item.id)}
               >
-                Start
+                {isKorean ? "시작" : "Start"}
               </button>
               <button type="button" className="secondary-button" onClick={() => void stopMcp(item.id)}>
-                Stop
+                {isKorean ? "중지" : "Stop"}
               </button>
               <button
                 type="button"

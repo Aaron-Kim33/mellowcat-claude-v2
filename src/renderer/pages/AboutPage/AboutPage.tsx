@@ -4,6 +4,7 @@ import { getLauncherCopy } from "../../lib/launcher-copy";
 export function AboutPage() {
   const { appMeta, settings } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.about;
+  const isKorean = settings?.launcherLanguage === "ko";
 
   return (
     <section className="page">
@@ -22,15 +23,15 @@ export function AboutPage() {
             <strong>{appMeta?.version ?? "-"}</strong>
           </div>
           <div className="meta-item">
-            <span>Electron</span>
+            <span>{isKorean ? "Electron" : "Electron"}</span>
             <strong>{appMeta?.electronVersion ?? "-"}</strong>
           </div>
           <div className="meta-item">
-            <span>Chrome</span>
+            <span>{isKorean ? "Chrome" : "Chrome"}</span>
             <strong>{appMeta?.chromeVersion ?? "-"}</strong>
           </div>
           <div className="meta-item">
-            <span>Node.js</span>
+            <span>{isKorean ? "Node.js" : "Node.js"}</span>
             <strong>{appMeta?.nodeVersion ?? "-"}</strong>
           </div>
         </div>

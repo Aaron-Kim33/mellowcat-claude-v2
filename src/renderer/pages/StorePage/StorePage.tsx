@@ -21,6 +21,7 @@ export function StorePage() {
     createPaymentHandoff
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.store;
+  const isKorean = settings?.launcherLanguage === "ko";
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<StorePlatform>("all");
   const [purchasePending, setPurchasePending] = useState(false);
@@ -29,11 +30,11 @@ export function StorePage() {
   const installedCount = installed.length;
   const runningCount = installed.filter((item) => item.runtime.status === "running").length;
   const platformTabs: Array<{ id: StorePlatform; label: string }> = [
-    { id: "telegram", label: "Telegram" },
+    { id: "telegram", label: isKorean ? "텔레그램" : "Telegram" },
     { id: "instagram", label: "Instagram" },
     { id: "youtube", label: "YouTube" },
-    { id: "packs", label: "Packs" },
-    { id: "all", label: "All" }
+    { id: "packs", label: isKorean ? "팩" : "Packs" },
+    { id: "all", label: isKorean ? "전체" : "All" }
   ];
   const filteredCatalog = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -95,7 +96,7 @@ export function StorePage() {
         targetUrl = await createPaymentHandoff(item.id, "launcher");
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : "Checkout could not be started.";
+          error instanceof Error ? error.message : isKorean ? "결제를 시작할 수 없습니다." : "Checkout could not be started.";
         window.alert(message);
         return;
       }
@@ -104,12 +105,20 @@ export function StorePage() {
     }
 
     if (!targetUrl) {
-      window.alert("This item is not owned yet, but its checkout flow is not connected yet.");
+      window.alert(
+        isKorean
+          ? "이 상품은 아직 구매하지 않았고, 결제 흐름도 아직 연결되지 않았습니다."
+          : "This item is not owned yet, but its checkout flow is not connected yet."
+      );
       return;
     }
     setPurchasePending(true);
     setPurchasePendingId(item.id);
-    setPurchaseMessage("Complete checkout, then return to MellowCat. We will refresh access automatically.");
+    setPurchaseMessage(
+      isKorean
+        ? "브라우저에서 결제를 마친 뒤 런처로 돌아오면 접근 상태를 자동으로 새로고칩니다."
+        : "Complete checkout, then return to MellowCat. We will refresh access automatically."
+    );
     void window.mellowcat.app.openExternal(targetUrl);
   };
 
@@ -131,17 +140,23 @@ export function StorePage() {
         <div className="store-toolbar">
           {purchaseMessage && (
             <div className="manual-install-box">
-              <strong>Purchase Flow</strong>
+              <strong>{isKorean ? "구매 진행 상태" : "Purchase Flow"}</strong>
               <span className="subtle">{purchaseMessage}</span>
             </div>
           )}
           {featuredPacks.length > 0 && (
             <div className="store-pack-intro">
               <div>
-                <p className="eyebrow">Recommended Packs</p>
-                <strong>Start with a ready-made workflow, then add single MCPs only when you need extra control.</strong>
+                <p className="eyebrow">{isKorean ? "추천 팩" : "Recommended Packs"}</p>
+                <strong>
+                  {isKorean
+                    ? "먼저 묶음 워크플로로 시작하고, 세부 제어가 필요할 때만 개별 MCP를 추가하세요."
+                    : "Start with a ready-made workflow, then add single MCPs only when you need extra control."}
+                </strong>
               </div>
-              <span className="pill">{featuredPacks.length} featured packs</span>
+              <span className="pill">
+                {isKorean ? `추천 ${featuredPacks.length}개` : `${featuredPacks.length} featured packs`}
+              </span>
             </div>
           )}
           {featuredPacks.length > 0 && platform === "packs" && (
@@ -182,13 +197,13 @@ export function StorePage() {
             type="button"
             className="secondary-button"
             onClick={() => {
-              setPurchaseMessage("Refreshing your purchases...");
+              setPurchaseMessage(isKorean ? "구매 상태를 새로고치는 중입니다..." : "Refreshing your purchases...");
               void refreshStoreAccess().finally(() =>
                 window.setTimeout(() => setPurchaseMessage(""), 2500)
               );
             }}
           >
-            Refresh Purchases
+            {isKorean ? "구매 상태 새로고침" : "Refresh Purchases"}
           </button>
         </div>
       </div>
@@ -199,13 +214,15 @@ export function StorePage() {
             <div className="card">
               <div className="card-row">
                 <div>
-                  <p className="eyebrow">Current Modules</p>
-                  <h3>Implemented workflow pieces</h3>
+                  <p className="eyebrow">{isKorean ? "현재 모듈" : "Current Modules"}</p>
+                  <h3>{isKorean ? "지금 바로 사용할 수 있는 워크플로 조각" : "Implemented workflow pieces"}</h3>
                 </div>
                 <span className="pill">{filteredPieces.length}</span>
               </div>
               <p className="subtle">
-                This list only shows workflow pieces that already exist in the current product build.
+                {isKorean
+                  ? "이 목록은 현재 제품 빌드에 이미 구현되어 있는 워크플로 모듈만 보여줍니다."
+                  : "This list only shows workflow pieces that already exist in the current product build."}
               </p>
             </div>
           )}
@@ -226,9 +243,11 @@ export function StorePage() {
         </>
       ) : (
         <div className="card compact-empty-state">
-          <strong>No MCPs in this lane yet.</strong>
+          <strong>{isKorean ? "이 분류에는 아직 모듈이 없습니다." : "No MCPs in this lane yet."}</strong>
           <p className="subtle">
-            This tab is ready for {platform === "packs" ? "pack bundles" : `${platform} workflow pieces`} once they are added to the catalog.
+            {isKorean
+              ? `카탈로그에 추가되면 ${platform === "packs" ? "팩 묶음" : `${platform} 워크플로 모듈`}이 이곳에 표시됩니다.`
+              : `This tab is ready for ${platform === "packs" ? "pack bundles" : `${platform} workflow pieces`} once they are added to the catalog.`}
           </p>
         </div>
       )}

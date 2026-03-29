@@ -52,45 +52,47 @@ export function LoginPage() {
     return isOwned && item.runtime.status === "running";
   }).length;
 
-  const signInWithBrowserLabel = isKorean ? "브라우저로 로그인" : "Sign in with browser";
-  const cancelBrowserLoginLabel = isKorean ? "대기 취소" : "Cancel waiting";
-  const refreshAccessLabel = isKorean ? "접근 상태 새로고침" : "Refresh access";
-  const accountOverviewLabel = isKorean ? "계정 개요" : "Account overview";
-  const accountLibraryLabel = isKorean ? "내 라이브러리" : "Your library";
-  const ownedLabel = isKorean ? "소유" : "Owned";
-  const installedLabel = isKorean ? "설치됨" : "Installed";
-  const readyLabel = isKorean ? "설치 대기" : "Ready to install";
-  const runningLabel = isKorean ? "실행 중" : "Running";
-  const providerLabel = isKorean ? "로그인 방식" : "Sign-in source";
-  const browserAccountLabel = isKorean ? "브라우저 계정" : "Browser account";
-  const linkedProvidersTitle = isKorean ? "연동된 로그인 방식" : "Linked providers";
-  const developerAccessLabel = isKorean ? "개발자 접근" : "Developer access";
-  const developerHint = isKorean
-    ? "로컬 테스트나 백엔드 디버깅에서만 세션 토큰을 사용하세요."
-    : "Use a raw session token only for local testing or backend debugging.";
-  const sessionTokenLabel = isKorean ? "세션 토큰" : "Session Token";
-  const sessionTokenPlaceholder = isKorean
-    ? "서버에서 발급된 세션 토큰을 붙여넣으세요"
-    : "Paste a server-issued session token";
-  const useSessionTokenLabel = isKorean ? "세션 토큰 사용" : "Use Session Token";
-  const accountHint = isKorean
-    ? "이 계정으로 구매한 상품은 여기와 Marketplace에서 같은 접근 상태로 반영됩니다."
-    : "Products you purchase with this account will show the same access state here and in Marketplace.";
-  const emptyLibraryTitle = isKorean ? "아직 소유한 상품이 없습니다." : "No owned products yet.";
-  const emptyLibraryBody = isKorean
-    ? "Marketplace에서 상품을 구매하면 여기에서 바로 설치 가능 여부를 확인할 수 있습니다."
-    : "Buy products in Marketplace and they will show up here as soon as access refreshes.";
-  const accountStatusLabel = isKorean ? "계정 상태" : "Account status";
-  const emailVerificationLabel = isKorean ? "이메일 인증" : "Email verification";
-  const emailVerifiedLabel = isKorean ? "인증 완료" : "Verified";
-  const emailUnverifiedLabel = isKorean ? "인증 대기" : "Verification pending";
-  const cancelLoginErrorLabel = isKorean
-    ? "브라우저 로그인 대기를 취소하지 못했습니다."
-    : "Browser login could not be canceled.";
-  const accessCardTitle = isKorean ? "구매 및 설치 상태" : "Purchases and installs";
-  const accessCardHint = isKorean
-    ? "구매한 상품은 여기에서 바로 설치하거나 업데이트 상태를 확인할 수 있습니다."
-    : "Owned products can be installed or rechecked here without bouncing back to Marketplace.";
+  const text = {
+    signInWithBrowserLabel: isKorean ? "브라우저로 로그인" : "Sign in with browser",
+    cancelBrowserLoginLabel: isKorean ? "대기 취소" : "Cancel waiting",
+    refreshAccessLabel: isKorean ? "접근 상태 새로고침" : "Refresh access",
+    accountOverviewLabel: isKorean ? "계정 개요" : "Account overview",
+    accountLibraryLabel: isKorean ? "내 라이브러리" : "Your library",
+    ownedLabel: isKorean ? "소유" : "Owned",
+    installedLabel: isKorean ? "설치됨" : "Installed",
+    readyLabel: isKorean ? "설치 대기" : "Ready to install",
+    runningLabel: isKorean ? "실행 중" : "Running",
+    providerLabel: isKorean ? "로그인 방식" : "Sign-in source",
+    browserAccountLabel: isKorean ? "브라우저 계정" : "Browser account",
+    linkedProvidersTitle: isKorean ? "연결된 로그인 방식" : "Linked providers",
+    developerAccessLabel: isKorean ? "개발자 접근" : "Developer access",
+    developerHint: isKorean
+      ? "로컬 테스트나 백엔드 디버깅에서만 세션 토큰을 사용하세요."
+      : "Use a raw session token only for local testing or backend debugging.",
+    sessionTokenLabel: isKorean ? "세션 토큰" : "Session Token",
+    sessionTokenPlaceholder: isKorean
+      ? "서버에서 발급된 세션 토큰을 붙여넣으세요"
+      : "Paste a server-issued session token",
+    useSessionTokenLabel: isKorean ? "세션 토큰 사용" : "Use Session Token",
+    accountHint: isKorean
+      ? "이 계정으로 구매한 상품은 여기와 마켓에서 같은 접근 상태로 반영됩니다."
+      : "Products you purchase with this account will show the same access state here and in Marketplace.",
+    emptyLibraryTitle: isKorean ? "아직 소유한 상품이 없습니다." : "No owned products yet.",
+    emptyLibraryBody: isKorean
+      ? "마켓에서 상품을 구매하면 여기에서 바로 설치 가능 여부를 확인할 수 있습니다."
+      : "Buy products in Marketplace and they will show up here as soon as access refreshes.",
+    accountStatusLabel: isKorean ? "계정 상태" : "Account status",
+    emailVerificationLabel: isKorean ? "이메일 인증" : "Email verification",
+    emailVerifiedLabel: isKorean ? "인증 완료" : "Verified",
+    emailUnverifiedLabel: isKorean ? "인증 대기" : "Verification pending",
+    cancelLoginErrorLabel: isKorean
+      ? "브라우저 로그인 대기를 취소하지 못했습니다."
+      : "Browser login could not be canceled.",
+    accessCardTitle: isKorean ? "구매 및 설치 상태" : "Purchases and installs",
+    accessCardHint: isKorean
+      ? "구매한 상품은 여기에서 바로 설치하거나 업데이트 상태를 확인할 수 있습니다."
+      : "Owned products can be installed or rechecked here without bouncing back to Marketplace."
+  };
 
   const handleBrowserLogin = async () => {
     try {
@@ -105,7 +107,7 @@ export function LoginPage() {
     try {
       await cancelLogin();
     } catch (error) {
-      const message = error instanceof Error ? error.message : cancelLoginErrorLabel;
+      const message = error instanceof Error ? error.message : text.cancelLoginErrorLabel;
       window.alert(message);
     }
   };
@@ -114,8 +116,7 @@ export function LoginPage() {
     try {
       await loginWithToken(sessionToken);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Token login failed.";
+      const message = error instanceof Error ? error.message : "Token login failed.";
       window.alert(message);
     }
   };
@@ -175,10 +176,10 @@ export function LoginPage() {
           <p className="subtle">{copy.subtitle}</p>
         </div>
         <div className="hero-stats">
-          <span className="pill">{ownedItems.length} {ownedLabel}</span>
-          <span className="pill">{installedOwnedCount} {installedLabel}</span>
-          <span className="pill">{readyToInstallCount} {readyLabel}</span>
-          <span className="pill">{runningOwnedCount} {runningLabel}</span>
+          <span className="pill">{ownedItems.length} {text.ownedLabel}</span>
+          <span className="pill">{installedOwnedCount} {text.installedLabel}</span>
+          <span className="pill">{readyToInstallCount} {text.readyLabel}</span>
+          <span className="pill">{runningOwnedCount} {text.runningLabel}</span>
         </div>
       </div>
 
@@ -186,7 +187,7 @@ export function LoginPage() {
         <article className="card account-panel">
           <div className="card-row">
             <div>
-              <p className="eyebrow">{accountOverviewLabel}</p>
+              <p className="eyebrow">{text.accountOverviewLabel}</p>
               <h3>{authSession?.displayName ?? copy.guest}</h3>
             </div>
             <span className={`pill ${authSession?.loggedIn ? "account-pill-live" : ""}`}>
@@ -203,10 +204,10 @@ export function LoginPage() {
               <strong>{authSession?.email ?? "-"}</strong>
             </div>
             <div className="meta-item">
-              <span>{providerLabel}</span>
+              <span>{text.providerLabel}</span>
               <strong>
                 {authSession?.loggedIn
-                  ? formatProviderSummary(authSession.linkedProviders, browserAccountLabel)
+                  ? formatProviderSummary(authSession.linkedProviders, text.browserAccountLabel)
                   : "-"}
               </strong>
             </div>
@@ -215,19 +216,19 @@ export function LoginPage() {
               <strong>{authSession?.loggedIn ? copy.loggedIn : copy.loggedOut}</strong>
             </div>
             <div className="meta-item">
-              <span>{emailVerificationLabel}</span>
+              <span>{text.emailVerificationLabel}</span>
               <strong>
                 {authSession?.loggedIn
                   ? authSession.emailVerified
-                    ? emailVerifiedLabel
-                    : emailUnverifiedLabel
+                    ? text.emailVerifiedLabel
+                    : text.emailUnverifiedLabel
                   : "-"}
               </strong>
             </div>
           </div>
           {authSession?.loggedIn && authSession.linkedProviders?.length ? (
             <div className="manual-install-box">
-              <strong>{linkedProvidersTitle}</strong>
+              <strong>{text.linkedProvidersTitle}</strong>
               <div className="tag-row">
                 {authSession.linkedProviders.map((provider) => (
                   <span key={provider} className="tag">
@@ -237,10 +238,10 @@ export function LoginPage() {
               </div>
             </div>
           ) : null}
-          <p className="subtle">{accountHint}</p>
+          <p className="subtle">{text.accountHint}</p>
           {authStatusMessage && (
             <div className="manual-install-box">
-              <strong>{accountStatusLabel}</strong>
+              <strong>{text.accountStatusLabel}</strong>
               <span className="subtle">{authStatusMessage}</span>
             </div>
           )}
@@ -251,15 +252,11 @@ export function LoginPage() {
               onClick={() => void handleBrowserLogin()}
               disabled={authBusy}
             >
-              {authBusy ? authStatusMessage ?? signInWithBrowserLabel : signInWithBrowserLabel}
+              {authBusy ? authStatusMessage ?? text.signInWithBrowserLabel : text.signInWithBrowserLabel}
             </button>
             {authBusy && (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void handleCancelLogin()}
-              >
-                {cancelBrowserLoginLabel}
+              <button type="button" className="secondary-button" onClick={() => void handleCancelLogin()}>
+                {text.cancelBrowserLoginLabel}
               </button>
             )}
             <button
@@ -268,7 +265,7 @@ export function LoginPage() {
               onClick={() => void handleRefreshAccess()}
               disabled={refreshing || authBusy}
             >
-              {refreshing ? `${refreshAccessLabel}...` : refreshAccessLabel}
+              {refreshing ? `${text.refreshAccessLabel}...` : text.refreshAccessLabel}
             </button>
             <button
               type="button"
@@ -281,18 +278,18 @@ export function LoginPage() {
           </div>
           {isDeveloperMode && (
             <details className="developer-access-box">
-              <summary>{developerAccessLabel}</summary>
+              <summary>{text.developerAccessLabel}</summary>
               <div className="developer-access-content">
                 <label className="field">
-                  <span>{sessionTokenLabel}</span>
+                  <span>{text.sessionTokenLabel}</span>
                   <input
                     className="text-input"
                     type="password"
                     value={sessionToken}
                     onChange={(event) => setSessionToken(event.target.value)}
-                    placeholder={sessionTokenPlaceholder}
+                    placeholder={text.sessionTokenPlaceholder}
                   />
-                  <span className="subtle">{developerHint}</span>
+                  <span className="subtle">{text.developerHint}</span>
                 </label>
                 <div className="button-row">
                   <button
@@ -301,7 +298,7 @@ export function LoginPage() {
                     onClick={() => void handleTokenLogin()}
                     disabled={!sessionToken.trim() || authBusy}
                   >
-                    {useSessionTokenLabel}
+                    {text.useSessionTokenLabel}
                   </button>
                 </div>
               </div>
@@ -312,12 +309,12 @@ export function LoginPage() {
         <article className="card account-panel">
           <div className="card-row">
             <div>
-              <p className="eyebrow">{accountLibraryLabel}</p>
-              <h3>{accessCardTitle}</h3>
+              <p className="eyebrow">{text.accountLibraryLabel}</p>
+              <h3>{text.accessCardTitle}</h3>
             </div>
             <span className="pill">{ownedItems.length}</span>
           </div>
-          <p className="subtle">{accessCardHint}</p>
+          <p className="subtle">{text.accessCardHint}</p>
           {ownedItems.length > 0 ? (
             <div className="account-library-list">
               {ownedItems.map((item) => (
@@ -328,13 +325,14 @@ export function LoginPage() {
                   busy={activeLibraryActionId === item.id}
                   onInstall={handleInstall}
                   onRecheck={handleRecheck}
+                  isKorean={isKorean}
                 />
               ))}
             </div>
           ) : (
             <div className="manual-install-box">
-              <strong>{emptyLibraryTitle}</strong>
-              <span className="subtle">{emptyLibraryBody}</span>
+              <strong>{text.emptyLibraryTitle}</strong>
+              <span className="subtle">{text.emptyLibraryBody}</span>
             </div>
           )}
         </article>
@@ -371,6 +369,7 @@ interface OwnedProductRowProps {
   busy: boolean;
   onInstall: (mcpId: string) => Promise<void>;
   onRecheck: (mcpId: string) => Promise<void>;
+  isKorean: boolean;
 }
 
 function OwnedProductRow({
@@ -378,31 +377,52 @@ function OwnedProductRow({
   installedRecord,
   busy,
   onInstall,
-  onRecheck
+  onRecheck,
+  isKorean
 }: OwnedProductRowProps) {
   const hasUpdate = installedRecord
     ? installedRecord.version !== item.latestVersion
     : false;
   const statusLabel =
     item.entitlement?.status === "trial"
-      ? "Trial access"
+      ? isKorean
+        ? "체험 접근"
+        : "Trial access"
       : installedRecord
         ? installedRecord.runtime.status === "running"
-          ? "Installed and running"
-          : "Installed locally"
-        : "Ready to install";
+          ? isKorean
+            ? "설치 및 실행 중"
+            : "Installed and running"
+          : isKorean
+            ? "로컬에 설치됨"
+            : "Installed locally"
+        : isKorean
+          ? "설치 준비 완료"
+          : "Ready to install";
 
   const installStateLabel = installedRecord
     ? installedRecord.lastError
-      ? "Install error"
+      ? isKorean
+        ? "설치 오류"
+        : "Install error"
       : installedRecord.installState === "updating"
-        ? "Updating..."
+        ? isKorean
+          ? "업데이트 중..."
+          : "Updating..."
         : installedRecord.installState === "downloading"
-          ? "Installing..."
+          ? isKorean
+            ? "설치 중..."
+            : "Installing..."
           : hasUpdate
-            ? "Update available"
-            : "Ready"
-    : "Ready";
+            ? isKorean
+              ? "업데이트 가능"
+              : "Update available"
+            : isKorean
+              ? "준비됨"
+              : "Ready"
+    : isKorean
+      ? "준비됨"
+      : "Ready";
 
   return (
     <div className="account-library-item">
@@ -414,8 +434,10 @@ function OwnedProductRow({
         <div className="tag-row">
           <span className="tag">{item.distribution.priceText ?? item.distribution.type}</span>
           <span className="tag">{statusLabel}</span>
-          <span className="tag">latest:{item.latestVersion}</span>
-          {installedRecord && <span className="tag">local:{installedRecord.version}</span>}
+          <span className="tag">{isKorean ? `최신:${item.latestVersion}` : `latest:${item.latestVersion}`}</span>
+          {installedRecord && (
+            <span className="tag">{isKorean ? `로컬:${installedRecord.version}` : `local:${installedRecord.version}`}</span>
+          )}
         </div>
       </div>
       <div className="account-library-item-footer">
@@ -427,7 +449,7 @@ function OwnedProductRow({
             onClick={() => void onRecheck(item.id)}
             disabled={busy}
           >
-            {busy ? "Working..." : hasUpdate ? "Update Now" : "Recheck"}
+            {busy ? (isKorean ? "처리 중..." : "Working...") : hasUpdate ? (isKorean ? "지금 업데이트" : "Update Now") : isKorean ? "다시 확인" : "Recheck"}
           </button>
         ) : (
           <button
@@ -436,7 +458,7 @@ function OwnedProductRow({
             onClick={() => void onInstall(item.id)}
             disabled={busy}
           >
-            {busy ? "Installing..." : "Install"}
+            {busy ? (isKorean ? "설치 중..." : "Installing...") : isKorean ? "설치" : "Install"}
           </button>
         )}
       </div>
