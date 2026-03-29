@@ -294,12 +294,69 @@ export const useAppStore = create<AppState>((set) => ({
     await window.mellowcat.claude.sendInput(sessionId, input);
   },
   installMcp: async (mcpId: string) => {
-    await window.mellowcat.mcp.install(mcpId);
-    const installed = await window.mellowcat.mcp.listInstalled();
-    set((state) => ({
-      installed,
-      selectedMcpLogId: state.selectedMcpLogId ?? mcpId
-    }));
+    const { catalog, installed } = useAppStore.getState();
+    const catalogItem = catalog.find((item) => item.id === mcpId);
+    const existingRecord = installed.find((item) => item.id === mcpId);
+    const optimisticRecord: InstalledMCPRecord | undefined = catalogItem
+      ? {
+          id: mcpId,
+          version: existingRecord?.version ?? catalogItem.latestVersion,
+          installState: existingRecord ? "updating" : "downloading",
+          enabled: existingRecord?.enabled ?? true,
+          installPath: existingRecord?.installPath ?? "",
+          entrypoint: existingRecord?.entrypoint,
+          installedAt: existingRecord?.installedAt,
+          updatedAt: new Date().toISOString(),
+          lastError: undefined,
+          source: existingRecord?.source ?? {
+            type: catalogItem.package?.source === "remote" ? "remote" : "bundled"
+          },
+          workflow: {
+            ids: catalogItem.workflow?.ids ?? existingRecord?.workflow?.ids ?? []
+          },
+          entitlement: {
+            status: catalogItem.entitlement?.status ?? existingRecord?.entitlement.status ?? "free",
+            checkedAt: new Date().toISOString()
+          },
+          runtime: existingRecord?.runtime ?? {
+            status: "stopped"
+          }
+        }
+      : undefined;
+
+    if (optimisticRecord) {
+      set((state) => ({
+        installed: [
+          ...state.installed.filter((item) => item.id !== mcpId),
+          optimisticRecord
+        ],
+        selectedMcpLogId: state.selectedMcpLogId ?? mcpId
+      }));
+    }
+
+    try {
+      await window.mellowcat.mcp.install(mcpId);
+      const nextInstalled = await window.mellowcat.mcp.listInstalled();
+      set((state) => ({
+        installed: nextInstalled,
+        selectedMcpLogId: state.selectedMcpLogId ?? mcpId
+      }));
+    } catch (error) {
+      if (optimisticRecord) {
+        const message = error instanceof Error ? error.message : "Install failed.";
+        set((state) => ({
+          installed: [
+            ...state.installed.filter((item) => item.id !== mcpId),
+            {
+              ...optimisticRecord,
+              installState: "error",
+              lastError: message
+            }
+          ]
+        }));
+      }
+      throw error;
+    }
   },
   uninstallMcp: async (mcpId: string) => {
     await window.mellowcat.mcp.uninstall(mcpId);
@@ -338,9 +395,43 @@ export const useAppStore = create<AppState>((set) => ({
     set({ installed });
   },
   updateMcp: async (mcpId: string) => {
-    await window.mellowcat.mcp.update(mcpId);
-    const installed = await window.mellowcat.mcp.listInstalled();
-    set({ installed });
+    const existingRecord = useAppStore.getState().installed.find((item) => item.id === mcpId);
+    if (existingRecord) {
+      set((state) => ({
+        installed: state.installed.map((item) =>
+          item.id === mcpId
+            ? {
+                ...item,
+                installState: "updating",
+                lastError: undefined,
+                updatedAt: new Date().toISOString()
+              }
+            : item
+        )
+      }));
+    }
+
+    try {
+      await window.mellowcat.mcp.update(mcpId);
+      const installed = await window.mellowcat.mcp.listInstalled();
+      set({ installed });
+    } catch (error) {
+      if (existingRecord) {
+        const message = error instanceof Error ? error.message : "Update check failed.";
+        set((state) => ({
+          installed: state.installed.map((item) =>
+            item.id === mcpId
+              ? {
+                  ...item,
+                  installState: "error",
+                  lastError: message
+                }
+              : item
+          )
+        }));
+      }
+      throw error;
+    }
   },
   selectMcpLog: (mcpId: string) => {
     set({ selectedMcpLogId: mcpId });

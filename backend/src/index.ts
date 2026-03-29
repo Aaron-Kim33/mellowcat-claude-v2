@@ -89,6 +89,8 @@ const APP_BASE_URL = process.env.MELLOWCAT_APP_BASE_URL ?? `http://${HOST}:${POR
 const WEB_BASE_URL = process.env.MELLOWCAT_WEB_BASE_URL ?? "https://mellowcat.xyz";
 const PASSWORD_RESET_BASE_URL =
   process.env.MELLOWCAT_PASSWORD_RESET_BASE_URL ?? `${WEB_BASE_URL}/reset-password`;
+const EMAIL_VERIFICATION_BASE_URL =
+  process.env.MELLOWCAT_EMAIL_VERIFICATION_BASE_URL ?? `${WEB_BASE_URL}/verify-email`;
 const GOOGLE_CLIENT_ID = process.env.MELLOWCAT_GOOGLE_CLIENT_ID?.trim();
 const GOOGLE_CLIENT_SECRET = process.env.MELLOWCAT_GOOGLE_CLIENT_SECRET?.trim();
 const GOOGLE_REDIRECT_URI =
@@ -324,6 +326,28 @@ async function getUserEntitlements(userId: string) {
   return repositories.entitlements.listEntitlementsForUser(userId);
 }
 
+async function getLinkedProviders(userId: string): Promise<string[]> {
+  return repositories.auth.listAuthProvidersForUser(userId);
+}
+
+async function createEmailVerification(userId: string, options?: {
+  source?: string;
+  launcherRequest?: string;
+}): Promise<{ verificationUrl: string; expiresAt: string }> {
+  const rawToken = `verify_${randomBytes(18).toString("hex")}`;
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await repositories.auth.createEmailVerificationRequest({
+    userId,
+    tokenHash: sha256(rawToken),
+    expiresAt
+  });
+
+  return {
+    verificationUrl: buildVerificationUrl(rawToken, options),
+    expiresAt
+  };
+}
+
 async function getEntitlementStatus(userId: string, mcpId: string): Promise<EntitlementStatus> {
   const record = await repositories.entitlements.findEntitlement(userId, mcpId);
   if (!record) {
@@ -490,6 +514,21 @@ function buildWebRedirect(pathname: string, search?: Record<string, string | und
   return targetUrl.toString();
 }
 
+function buildVerificationUrl(
+  rawToken: string,
+  options?: { source?: string; launcherRequest?: string }
+): string {
+  const verificationUrl = new URL(EMAIL_VERIFICATION_BASE_URL);
+  verificationUrl.searchParams.set("token", rawToken);
+  if (options?.source) {
+    verificationUrl.searchParams.set("source", options.source);
+  }
+  if (options?.launcherRequest) {
+    verificationUrl.searchParams.set("launcherRequest", options.launcherRequest);
+  }
+  return verificationUrl.toString();
+}
+
 function parseCookies(req: IncomingMessage): Record<string, string> {
   const header = req.headers.cookie;
   if (!header) {
@@ -580,6 +619,8 @@ const server = createServer(async (req, res) => {
         userId: user.id,
         email: user.email,
         displayName: user.displayName,
+        linkedProviders: await getLinkedProviders(user.id),
+        emailVerified: Boolean(user.emailVerifiedAt),
         source: "remote",
         lastSyncedAt: new Date().toISOString()
       });
@@ -643,14 +684,20 @@ const server = createServer(async (req, res) => {
         source: "signup"
       });
       setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
+      const verification = await createEmailVerification(createdUser.id);
 
       json(req, res, 200, {
         ok: true,
         user: {
           id: createdUser.id,
           email: createdUser.email,
-          displayName: createdUser.displayName
-        }
+          displayName: createdUser.displayName,
+          linkedProviders: await getLinkedProviders(createdUser.id),
+          emailVerified: false
+        },
+        verificationSent: true,
+        verificationUrl: verification.verificationUrl,
+        verificationExpiresAt: verification.expiresAt
       });
       return;
     }
@@ -691,7 +738,9 @@ const server = createServer(async (req, res) => {
         user: {
           id: credential.user.id,
           email: credential.user.email,
-          displayName: credential.user.displayName
+          displayName: credential.user.displayName,
+          linkedProviders: await getLinkedProviders(credential.user.id),
+          emailVerified: Boolean(credential.user.emailVerifiedAt)
         },
         launcherRequestResolved: Boolean(body.launcherRequest?.trim())
       });
@@ -800,7 +849,102 @@ const server = createServer(async (req, res) => {
         user: {
           id: resetUser.id,
           email: resetUser.email,
-          displayName: resetUser.displayName
+          displayName: resetUser.displayName,
+          linkedProviders: await getLinkedProviders(resetUser.id),
+          emailVerified: Boolean(resetUser.emailVerifiedAt)
+        },
+        launcherRequestResolved: Boolean(body.launcherRequest?.trim())
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/send-verification") {
+      const webUser = await findUserByWebCookie(req);
+      if (!webUser) {
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        return;
+      }
+
+      if (webUser.emailVerifiedAt) {
+        json(req, res, 200, {
+          ok: true,
+          alreadyVerified: true
+        });
+        return;
+      }
+
+      const body = await readJson<{ source?: string; launcherRequest?: string }>(req);
+      const verification = await createEmailVerification(webUser.id, {
+        source: body.source?.trim(),
+        launcherRequest: body.launcherRequest?.trim()
+      });
+
+      json(req, res, 200, {
+        ok: true,
+        alreadyVerified: false,
+        verificationSent: true,
+        verificationUrl: verification.verificationUrl,
+        verificationExpiresAt: verification.expiresAt
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/verify-email") {
+      const body = await readJson<{ token?: string; launcherRequest?: string }>(req);
+      const token = body.token?.trim();
+      if (!token) {
+        json(req, res, 400, createError("BAD_REQUEST", "token is required."));
+        return;
+      }
+
+      const verificationRequest =
+        await repositories.auth.findEmailVerificationRequestByTokenHash(sha256(token));
+      if (!verificationRequest) {
+        json(req, res, 404, createError("VERIFY_NOT_FOUND", "Verification link was not found."));
+        return;
+      }
+
+      if (verificationRequest.usedAt) {
+        json(req, res, 409, createError("VERIFY_USED", "Verification link was already used."));
+        return;
+      }
+
+      if (new Date(verificationRequest.expiresAt).getTime() < Date.now()) {
+        json(req, res, 410, createError("VERIFY_EXPIRED", "Verification link expired."));
+        return;
+      }
+
+      const verifiedUser = await repositories.auth.markUserEmailVerified(verificationRequest.userId);
+      await repositories.auth.markEmailVerificationRequestUsed(verificationRequest.id);
+
+      if (!verifiedUser) {
+        json(req, res, 404, createError("USER_NOT_FOUND", "Account was not found."));
+        return;
+      }
+
+      if (body.launcherRequest?.trim()) {
+        await repositories.auth.resolveLauncherAuthRequest(
+          sha256(body.launcherRequest),
+          verifiedUser.id
+        );
+      }
+
+      const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
+      await repositories.auth.createWebSession({
+        userId: verifiedUser.id,
+        tokenHash: sha256(rawWebToken),
+        source: "email-verification"
+      });
+      setCookie(res, "mellowcat_web_session", rawWebToken, 60 * 60 * 24 * 30);
+
+      json(req, res, 200, {
+        ok: true,
+        user: {
+          id: verifiedUser.id,
+          email: verifiedUser.email,
+          displayName: verifiedUser.displayName,
+          linkedProviders: await getLinkedProviders(verifiedUser.id),
+          emailVerified: true
         },
         launcherRequestResolved: Boolean(body.launcherRequest?.trim())
       });
@@ -841,7 +985,9 @@ const server = createServer(async (req, res) => {
         user: {
           id: webUser.id,
           email: webUser.email,
-          displayName: webUser.displayName
+          displayName: webUser.displayName,
+          linkedProviders: await getLinkedProviders(webUser.id),
+          emailVerified: Boolean(webUser.emailVerifiedAt)
         }
       });
       return;
@@ -922,6 +1068,7 @@ const server = createServer(async (req, res) => {
         providerUserId: googleUser.sub as string,
         email: googleUser.email
       });
+      await repositories.auth.markUserEmailVerified(oauthUser.id);
 
       const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
       await repositories.auth.createWebSession({
@@ -1060,6 +1207,8 @@ const server = createServer(async (req, res) => {
           userId: resolvedUser.id,
           email: resolvedUser.email,
           displayName: resolvedUser.displayName,
+          linkedProviders: await getLinkedProviders(resolvedUser.id),
+          emailVerified: Boolean(resolvedUser.emailVerifiedAt),
           source: "remote",
           lastSyncedAt: new Date().toISOString()
         }

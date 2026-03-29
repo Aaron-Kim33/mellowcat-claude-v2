@@ -1,7 +1,11 @@
+export type AuthProvider = "password" | "google";
+
 export interface AuthSession {
   userId?: string;
   email?: string;
   displayName?: string;
+  linkedProviders?: AuthProvider[];
+  emailVerified?: boolean;
   accessToken?: string;
   source?: "demo" | "remote" | "token";
   lastSyncedAt?: string;

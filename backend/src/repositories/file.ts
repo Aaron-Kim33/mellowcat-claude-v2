@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "crypto";
 import type {
   AuthIdentityRecord,
   BackendRepositories,
+  EmailVerificationRequestRecord,
   EntitlementRecord,
   LauncherAuthRequestRecord,
   PasswordResetRequestRecord,
@@ -17,6 +18,7 @@ import type {
 interface FileDatabaseShape {
   users: UserRecord[];
   authIdentities: AuthIdentityRecord[];
+  emailVerificationRequests: EmailVerificationRequestRecord[];
   passwordCredentials: PasswordCredentialRecord[];
   passwordResetRequests: PasswordResetRequestRecord[];
   webSessions: WebSessionRecord[];
@@ -53,6 +55,7 @@ function seedDatabase(): FileDatabaseShape {
       }
     ],
     authIdentities: [],
+    emailVerificationRequests: [],
     passwordCredentials: [],
     passwordResetRequests: [],
     webSessions: [],
@@ -106,6 +109,29 @@ export function createFileRepositories(): BackendRepositories {
       async findUserByEmail(email: string) {
         const db = loadDb();
         return db.users.find((user) => user.email.toLowerCase() === email.toLowerCase());
+      },
+      async listAuthProvidersForUser(userId: string) {
+        const db = loadDb();
+        const providers = new Set<string>();
+        if (db.passwordCredentials.some((entry) => entry.userId === userId)) {
+          providers.add("password");
+        }
+        for (const identity of db.authIdentities) {
+          if (identity.userId === userId) {
+            providers.add(identity.provider);
+          }
+        }
+        return Array.from(providers).sort();
+      },
+      async markUserEmailVerified(userId) {
+        const db = loadDb();
+        const user = db.users.find((entry) => entry.id === userId);
+        if (!user) {
+          return undefined;
+        }
+        user.emailVerifiedAt = new Date().toISOString();
+        saveDb(db);
+        return user;
       },
       async createUser(user) {
         const db = loadDb();
@@ -296,6 +322,32 @@ export function createFileRepositories(): BackendRepositories {
       async markPasswordResetRequestUsed(id) {
         const db = loadDb();
         const request = db.passwordResetRequests.find((entry) => entry.id === id);
+        if (!request) {
+          return;
+        }
+        request.usedAt = new Date().toISOString();
+        saveDb(db);
+      },
+      async createEmailVerificationRequest(input) {
+        const db = loadDb();
+        const created: EmailVerificationRequestRecord = {
+          id: `verify_${randomBytes(8).toString("hex")}`,
+          userId: input.userId,
+          tokenHash: input.tokenHash,
+          expiresAt: input.expiresAt,
+          createdAt: new Date().toISOString()
+        };
+        db.emailVerificationRequests.push(created);
+        saveDb(db);
+        return created;
+      },
+      async findEmailVerificationRequestByTokenHash(tokenHash) {
+        const db = loadDb();
+        return db.emailVerificationRequests.find((entry) => entry.tokenHash === tokenHash);
+      },
+      async markEmailVerificationRequestUsed(id) {
+        const db = loadDb();
+        const request = db.emailVerificationRequests.find((entry) => entry.id === id);
         if (!request) {
           return;
         }

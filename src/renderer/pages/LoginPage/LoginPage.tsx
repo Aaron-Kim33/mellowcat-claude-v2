@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import type { MCPCatalogItem } from "@common/types/mcp";
-import { useAppStore } from "../../store/app-store";
+import type { AuthProvider } from "@common/types/auth";
+import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
 import { getLauncherCopy } from "../../lib/launcher-copy";
+import { useAppStore } from "../../store/app-store";
 
 export function LoginPage() {
   const {
@@ -15,12 +16,15 @@ export function LoginPage() {
     cancelLogin,
     loginWithToken,
     logout,
-    refreshStoreAccess
+    refreshStoreAccess,
+    installMcp,
+    updateMcp
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.account;
   const isKorean = settings?.launcherLanguage === "ko";
   const [sessionToken, setSessionToken] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [activeLibraryActionId, setActiveLibraryActionId] = useState<string>();
 
   const isDeveloperMode =
     settings?.apiBaseUrl?.startsWith("http://127.0.0.1") ||
@@ -36,12 +40,12 @@ export function LoginPage() {
     [catalog]
   );
 
-  const installedIds = useMemo(
-    () => new Set(installed.map((item) => item.id)),
+  const installedById = useMemo(
+    () => new Map(installed.map((item) => [item.id, item])),
     [installed]
   );
-  const readyToInstallCount = ownedItems.filter((item) => !installedIds.has(item.id)).length;
-  const installedOwnedCount = ownedItems.filter((item) => installedIds.has(item.id)).length;
+  const readyToInstallCount = ownedItems.filter((item) => !installedById.has(item.id)).length;
+  const installedOwnedCount = ownedItems.filter((item) => installedById.has(item.id)).length;
   const runningOwnedCount = installed.filter((item) => {
     const isOwned =
       item.entitlement.status === "owned" || item.entitlement.status === "trial";
@@ -59,6 +63,7 @@ export function LoginPage() {
   const runningLabel = isKorean ? "실행 중" : "Running";
   const providerLabel = isKorean ? "로그인 방식" : "Sign-in source";
   const browserAccountLabel = isKorean ? "브라우저 계정" : "Browser account";
+  const linkedProvidersTitle = isKorean ? "연동된 로그인 방식" : "Linked providers";
   const developerAccessLabel = isKorean ? "개발자 접근" : "Developer access";
   const developerHint = isKorean
     ? "로컬 테스트나 백엔드 디버깅에서만 세션 토큰을 사용하세요."
@@ -76,9 +81,16 @@ export function LoginPage() {
     ? "Marketplace에서 상품을 구매하면 여기에서 바로 설치 가능 여부를 확인할 수 있습니다."
     : "Buy products in Marketplace and they will show up here as soon as access refreshes.";
   const accountStatusLabel = isKorean ? "계정 상태" : "Account status";
+  const emailVerificationLabel = isKorean ? "이메일 인증" : "Email verification";
+  const emailVerifiedLabel = isKorean ? "인증 완료" : "Verified";
+  const emailUnverifiedLabel = isKorean ? "인증 대기" : "Verification pending";
   const cancelLoginErrorLabel = isKorean
     ? "브라우저 로그인 대기를 취소하지 못했습니다."
     : "Browser login could not be canceled.";
+  const accessCardTitle = isKorean ? "구매 및 설치 상태" : "Purchases and installs";
+  const accessCardHint = isKorean
+    ? "구매한 상품은 여기에서 바로 설치하거나 업데이트 상태를 확인할 수 있습니다."
+    : "Owned products can be installed or rechecked here without bouncing back to Marketplace.";
 
   const handleBrowserLogin = async () => {
     try {
@@ -130,6 +142,30 @@ export function LoginPage() {
     }
   };
 
+  const handleInstall = async (mcpId: string) => {
+    setActiveLibraryActionId(mcpId);
+    try {
+      await installMcp(mcpId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Install failed.";
+      window.alert(message);
+    } finally {
+      setActiveLibraryActionId(undefined);
+    }
+  };
+
+  const handleRecheck = async (mcpId: string) => {
+    setActiveLibraryActionId(mcpId);
+    try {
+      await updateMcp(mcpId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Update check failed.";
+      window.alert(message);
+    } finally {
+      setActiveLibraryActionId(undefined);
+    }
+  };
+
   return (
     <section className="page">
       <div className="hero">
@@ -168,13 +204,39 @@ export function LoginPage() {
             </div>
             <div className="meta-item">
               <span>{providerLabel}</span>
-              <strong>{authSession?.loggedIn ? browserAccountLabel : "-"}</strong>
+              <strong>
+                {authSession?.loggedIn
+                  ? formatProviderSummary(authSession.linkedProviders, browserAccountLabel)
+                  : "-"}
+              </strong>
             </div>
             <div className="meta-item">
               <span>{copy.status}</span>
               <strong>{authSession?.loggedIn ? copy.loggedIn : copy.loggedOut}</strong>
             </div>
+            <div className="meta-item">
+              <span>{emailVerificationLabel}</span>
+              <strong>
+                {authSession?.loggedIn
+                  ? authSession.emailVerified
+                    ? emailVerifiedLabel
+                    : emailUnverifiedLabel
+                  : "-"}
+              </strong>
+            </div>
           </div>
+          {authSession?.loggedIn && authSession.linkedProviders?.length ? (
+            <div className="manual-install-box">
+              <strong>{linkedProvidersTitle}</strong>
+              <div className="tag-row">
+                {authSession.linkedProviders.map((provider) => (
+                  <span key={provider} className="tag">
+                    {formatProviderLabel(provider)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <p className="subtle">{accountHint}</p>
           {authStatusMessage && (
             <div className="manual-install-box">
@@ -251,17 +313,21 @@ export function LoginPage() {
           <div className="card-row">
             <div>
               <p className="eyebrow">{accountLibraryLabel}</p>
-              <h3>{isKorean ? "구매 및 설치 상태" : "Purchases and installs"}</h3>
+              <h3>{accessCardTitle}</h3>
             </div>
             <span className="pill">{ownedItems.length}</span>
           </div>
+          <p className="subtle">{accessCardHint}</p>
           {ownedItems.length > 0 ? (
             <div className="account-library-list">
               {ownedItems.map((item) => (
                 <OwnedProductRow
                   key={item.id}
                   item={item}
-                  isInstalled={installedIds.has(item.id)}
+                  installedRecord={installedById.get(item.id)}
+                  busy={activeLibraryActionId === item.id}
+                  onInstall={handleInstall}
+                  onRecheck={handleRecheck}
                 />
               ))}
             </div>
@@ -277,28 +343,102 @@ export function LoginPage() {
   );
 }
 
-interface OwnedProductRowProps {
-  item: MCPCatalogItem;
-  isInstalled: boolean;
+function formatProviderLabel(provider: AuthProvider): string {
+  switch (provider) {
+    case "google":
+      return "Google";
+    case "password":
+      return "Email + Password";
+    default:
+      return provider;
+  }
 }
 
-function OwnedProductRow({ item, isInstalled }: OwnedProductRowProps) {
+function formatProviderSummary(
+  providers: AuthProvider[] | undefined,
+  fallback: string
+): string {
+  if (!providers?.length) {
+    return fallback;
+  }
+
+  return providers.map((provider) => formatProviderLabel(provider)).join(", ");
+}
+
+interface OwnedProductRowProps {
+  item: MCPCatalogItem;
+  installedRecord?: InstalledMCPRecord;
+  busy: boolean;
+  onInstall: (mcpId: string) => Promise<void>;
+  onRecheck: (mcpId: string) => Promise<void>;
+}
+
+function OwnedProductRow({
+  item,
+  installedRecord,
+  busy,
+  onInstall,
+  onRecheck
+}: OwnedProductRowProps) {
+  const hasUpdate = installedRecord
+    ? installedRecord.version !== item.latestVersion
+    : false;
   const statusLabel =
     item.entitlement?.status === "trial"
       ? "Trial access"
-      : isInstalled
-        ? "Installed locally"
+      : installedRecord
+        ? installedRecord.runtime.status === "running"
+          ? "Installed and running"
+          : "Installed locally"
         : "Ready to install";
+
+  const installStateLabel = installedRecord
+    ? installedRecord.lastError
+      ? "Install error"
+      : installedRecord.installState === "updating"
+        ? "Updating..."
+        : installedRecord.installState === "downloading"
+          ? "Installing..."
+          : hasUpdate
+            ? "Update available"
+            : "Ready"
+    : "Ready";
 
   return (
     <div className="account-library-item">
-      <div>
-        <strong>{item.name}</strong>
-        <p className="subtle">{item.summary}</p>
+      <div className="account-library-item-header">
+        <div>
+          <strong>{item.name}</strong>
+          <p className="subtle">{item.summary}</p>
+        </div>
+        <div className="tag-row">
+          <span className="tag">{item.distribution.priceText ?? item.distribution.type}</span>
+          <span className="tag">{statusLabel}</span>
+          <span className="tag">latest:{item.latestVersion}</span>
+          {installedRecord && <span className="tag">local:{installedRecord.version}</span>}
+        </div>
       </div>
-      <div className="tag-row">
-        <span className="tag">{item.distribution.priceText ?? item.distribution.type}</span>
-        <span className="tag">{statusLabel}</span>
+      <div className="account-library-item-footer">
+        <span className="subtle">{installStateLabel}</span>
+        {installedRecord ? (
+          <button
+            type="button"
+            className={hasUpdate ? "primary-button" : "secondary-button"}
+            onClick={() => void onRecheck(item.id)}
+            disabled={busy}
+          >
+            {busy ? "Working..." : hasUpdate ? "Update Now" : "Recheck"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void onInstall(item.id)}
+            disabled={busy}
+          >
+            {busy ? "Installing..." : "Install"}
+          </button>
+        )}
       </div>
     </div>
   );

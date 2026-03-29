@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import type {
   BackendRepositories,
+  EmailVerificationRequestRecord,
   EntitlementRecord,
   LauncherAuthRequestRecord,
   PasswordResetRequestRecord,
@@ -60,6 +61,8 @@ function mapUser(row: Json): UserRecord {
     id: String(row.id),
     email: String(row.email),
     displayName: typeof row.display_name === "string" ? row.display_name : undefined,
+    emailVerifiedAt:
+      typeof row.email_verified_at === "string" ? row.email_verified_at : undefined,
     createdAt: typeof row.created_at === "string" ? row.created_at : undefined
   };
 }
@@ -130,6 +133,17 @@ function mapPasswordResetRequest(row: Json): PasswordResetRequestRecord {
   };
 }
 
+function mapEmailVerificationRequest(row: Json): EmailVerificationRequestRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    tokenHash: String(row.token_hash),
+    expiresAt: String(row.expires_at),
+    usedAt: typeof row.used_at === "string" ? row.used_at : undefined,
+    createdAt: typeof row.created_at === "string" ? row.created_at : undefined
+  };
+}
+
 function first<T>(items: T[] | null | undefined): T | undefined {
   return Array.isArray(items) && items.length > 0 ? items[0] : undefined;
 }
@@ -169,6 +183,39 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
       async findUserByEmail(email: string) {
         const rows = await client.request<Json[]>("app_users", {
           query: `select=*&email=eq.${encodeURIComponent(email)}`
+        });
+        const row = first(rows);
+        return row ? mapUser(row) : undefined;
+      },
+      async listAuthProvidersForUser(userId) {
+        const providers = new Set<string>();
+
+        const passwordRows = await client.request<Json[]>("password_credentials", {
+          query: `select=user_id&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+        });
+        if (first(passwordRows)) {
+          providers.add("password");
+        }
+
+        const identityRows = await client.request<Json[]>("auth_identities", {
+          query: `select=provider&user_id=eq.${encodeURIComponent(userId)}`
+        });
+        for (const row of identityRows) {
+          if (typeof row.provider === "string" && row.provider.trim()) {
+            providers.add(row.provider);
+          }
+        }
+
+        return Array.from(providers).sort();
+      },
+      async markUserEmailVerified(userId) {
+        const rows = await client.request<Json[]>("app_users", {
+          method: "PATCH",
+          query: `id=eq.${encodeURIComponent(userId)}`,
+          body: JSON.stringify({
+            email_verified_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
         });
         const row = first(rows);
         return row ? mapUser(row) : undefined;
@@ -362,6 +409,33 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
       },
       async markPasswordResetRequestUsed(id) {
         await client.request<Json[]>("password_reset_requests", {
+          method: "PATCH",
+          query: `id=eq.${encodeURIComponent(id)}`,
+          body: JSON.stringify({
+            used_at: new Date().toISOString()
+          })
+        });
+      },
+      async createEmailVerificationRequest(input) {
+        const rows = await client.request<Json[]>("email_verification_requests", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: input.userId,
+            token_hash: input.tokenHash,
+            expires_at: input.expiresAt
+          })
+        });
+        return mapEmailVerificationRequest(rows[0]);
+      },
+      async findEmailVerificationRequestByTokenHash(tokenHash) {
+        const rows = await client.request<Json[]>("email_verification_requests", {
+          query: `select=*&token_hash=eq.${encodeURIComponent(tokenHash)}&limit=1`
+        });
+        const row = first(rows);
+        return row ? mapEmailVerificationRequest(row) : undefined;
+      },
+      async markEmailVerificationRequestUsed(id) {
+        await client.request<Json[]>("email_verification_requests", {
           method: "PATCH",
           query: `id=eq.${encodeURIComponent(id)}`,
           body: JSON.stringify({

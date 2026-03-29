@@ -23,7 +23,18 @@ export class MCPInstallService {
   async install(mcpId: string): Promise<void> {
     const catalogItem = await this.requireCatalogItem(mcpId);
     this.ensureInstallAllowed(catalogItem);
+    const existingRecord = this.manifestRepository.listInstalled().find((item) => item.id === mcpId);
     const isRemotePackage = catalogItem.package?.source === "remote";
+    const currentPath = this.pathService.getInstalledCurrentPath(mcpId);
+    this.manifestRepository.upsert(
+      this.buildInstallRecord(catalogItem, currentPath, {
+        existingRecord,
+        installState: existingRecord ? "updating" : "downloading",
+        version: existingRecord?.version ?? catalogItem.latestVersion
+      })
+    );
+
+    try {
     const remoteInstall = isRemotePackage
       ? await this.remotePackageService.prepareInstall(catalogItem)
       : undefined;
@@ -32,7 +43,6 @@ export class MCPInstallService {
     this.validatePackageManifest(catalogItem, packageManifest);
 
     const versionPath = this.pathService.getInstalledVersionPath(mcpId, packageManifest.version);
-    const currentPath = this.pathService.getInstalledCurrentPath(mcpId);
     const bundledPackagePath = this.pathService.getBundledPackagePath(mcpId);
 
     this.fileService.ensureDir(this.pathService.getInstalledVersionsPath(mcpId));
@@ -54,32 +64,27 @@ export class MCPInstallService {
     }
     this.refreshCurrentVersion(versionPath, currentPath);
 
-    const record: InstalledMCPRecord = {
-      id: mcpId,
-      version: packageManifest.version,
-      installState: "installed",
-      enabled: true,
-      installPath: currentPath,
-      entrypoint: packageManifest.entrypoint,
-      installedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      source: {
-        type: isRemotePackage ? "remote" : "bundled",
-        url: remoteInstall?.sourceUrl
-      },
-      workflow: {
-        ids: catalogItem.workflow?.ids ?? []
-      },
-      entitlement: {
-        status: catalogItem.entitlement?.status ?? "free",
-        checkedAt: new Date().toISOString()
-      },
-      runtime: {
-        status: "stopped"
-      }
-    };
-
-    this.manifestRepository.upsert(record);
+      this.manifestRepository.upsert(
+        this.buildInstallRecord(catalogItem, currentPath, {
+          existingRecord,
+          installState: "installed",
+          version: packageManifest.version,
+          entrypoint: packageManifest.entrypoint,
+          sourceUrl: remoteInstall?.sourceUrl
+        })
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Install failed.";
+      this.manifestRepository.upsert(
+        this.buildInstallRecord(catalogItem, currentPath, {
+          existingRecord,
+          installState: "error",
+          version: existingRecord?.version ?? catalogItem.latestVersion,
+          lastError: message
+        })
+      );
+      throw error;
+    }
   }
 
   async uninstall(mcpId: string): Promise<void> {
@@ -126,5 +131,51 @@ export class MCPInstallService {
   private refreshCurrentVersion(versionPath: string, currentPath: string): void {
     this.fileService.remove(currentPath);
     this.fileService.copyDirectory(versionPath, currentPath);
+  }
+
+  private buildInstallRecord(
+    catalogItem: MCPCatalogItem,
+    currentPath: string,
+    options: {
+      existingRecord?: InstalledMCPRecord;
+      installState: InstalledMCPRecord["installState"];
+      version: string;
+      entrypoint?: string;
+      sourceUrl?: string;
+      lastError?: string;
+    }
+  ): InstalledMCPRecord {
+    const now = new Date().toISOString();
+    const existingRecord = options.existingRecord;
+    const isRemotePackage = catalogItem.package?.source === "remote";
+
+    return {
+      id: catalogItem.id,
+      version: options.version,
+      installState: options.installState,
+      enabled: existingRecord?.enabled ?? true,
+      installPath: currentPath,
+      entrypoint: options.entrypoint ?? existingRecord?.entrypoint,
+      installedAt:
+        options.installState === "installed"
+          ? existingRecord?.installedAt ?? now
+          : existingRecord?.installedAt,
+      updatedAt: now,
+      lastError: options.lastError,
+      source: {
+        type: isRemotePackage ? "remote" : "bundled",
+        url: options.sourceUrl ?? existingRecord?.source.url
+      },
+      workflow: {
+        ids: catalogItem.workflow?.ids ?? existingRecord?.workflow?.ids ?? []
+      },
+      entitlement: {
+        status: catalogItem.entitlement?.status ?? existingRecord?.entitlement.status ?? "free",
+        checkedAt: now
+      },
+      runtime: existingRecord?.runtime ?? {
+        status: "stopped"
+      }
+    };
   }
 }

@@ -135,6 +135,16 @@ export function MCPCard({
           </span>
         </div>
       )}
+      {(installState === "downloading" || installState === "updating") && (
+        <div className="manual-install-box">
+          <strong>{installState === "downloading" ? "Installing package" : "Updating package"}</strong>
+          <span className="subtle">
+            {installState === "downloading"
+              ? "MellowCat is downloading, verifying, and unpacking this MCP for local use."
+              : "MellowCat is checking the latest package and refreshing your local copy."}
+          </span>
+        </div>
+      )}
       {!isInstalled && entitlementStatus === "owned" && (
         <div className="manual-install-box">
           <strong>Ready to install</strong>

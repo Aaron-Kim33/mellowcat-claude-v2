@@ -177,6 +177,8 @@ export class AuthService {
         userId: stored.userId,
         email: stored.email,
         displayName: stored.displayName,
+        linkedProviders: stored.linkedProviders,
+        emailVerified: stored.emailVerified,
         source: stored.source,
         lastSyncedAt: stored.lastSyncedAt,
         accessToken
@@ -200,6 +202,8 @@ export class AuthService {
       userId: this.session.userId,
       email: this.session.email,
       displayName: this.session.displayName,
+      linkedProviders: this.session.linkedProviders,
+      emailVerified: this.session.emailVerified,
       source: this.session.source,
       lastSyncedAt: this.session.lastSyncedAt
     });

@@ -8,6 +8,7 @@ Recommended pages:
 
 - `/login`
 - `/signup`
+- `/verify-email`
 - `/forgot-password`
 - `/reset-password`
 - `/account`
@@ -33,6 +34,7 @@ States to support:
 - email already exists
 - weak password
 - generic server error
+- email verification pending
 
 ### 2. Login page
 
@@ -85,6 +87,7 @@ Show:
 - current email
 - display name
 - linked providers
+- email verification status
 - purchases or ownership summary later
 
 Actions:
@@ -92,6 +95,7 @@ Actions:
 - logout
 - change password later
 - connect Google later if account started as password-only
+- resend verification email later
 
 ### 5. Forgot password page
 
@@ -139,6 +143,28 @@ Success behavior:
 - backend creates a fresh web session cookie
 - if `launcherRequestResolved === true`, frontend should move straight to `/launcher-auth?requestId=...`
 - otherwise frontend can redirect to `/account?passwordReset=success`
+
+### 7. Verify email page
+
+Read:
+
+- `token` from query string
+
+If launcher context is present, also preserve:
+
+- `source=launcher`
+- `launcherRequest`
+
+Submit to:
+
+- `POST /api/auth/verify-email`
+
+Success behavior:
+
+- backend marks the account verified
+- backend creates a fresh web session cookie
+- if `launcherRequestResolved === true`, frontend should move straight to `/launcher-auth?requestId=...`
+- otherwise frontend can redirect to `/account?emailVerified=success`
 
 ## Launcher frontend responsibilities
 
@@ -192,6 +218,8 @@ Suggested copy:
 - `POST /api/auth/logout`
 - `POST /api/auth/forgot-password`
 - `POST /api/auth/reset-password`
+- `POST /api/auth/send-verification`
+- `POST /api/auth/verify-email`
 - `GET /api/auth/oauth/google/start`
 - `GET /api/auth/oauth/google/callback`
 

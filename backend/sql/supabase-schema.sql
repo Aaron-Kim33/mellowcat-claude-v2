@@ -8,6 +8,9 @@ create table if not exists app_users (
   updated_at timestamptz not null default now()
 );
 
+alter table if exists app_users
+  add column if not exists email_verified_at timestamptz;
+
 create table if not exists launcher_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references app_users(id) on delete cascade,
@@ -79,6 +82,18 @@ create table if not exists password_reset_requests (
 
 create index if not exists password_reset_requests_user_id_idx
   on password_reset_requests(user_id);
+
+create table if not exists email_verification_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists email_verification_requests_user_id_idx
+  on email_verification_requests(user_id);
 
 create table if not exists products (
   id text primary key,

@@ -5,6 +5,7 @@ export interface UserRecord {
   email: string;
   displayName?: string;
   launcherToken?: string;
+  emailVerifiedAt?: string;
   createdAt?: string;
 }
 
@@ -52,6 +53,15 @@ export interface LauncherAuthRequestRecord {
 }
 
 export interface PasswordResetRequestRecord {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  usedAt?: string;
+  createdAt?: string;
+}
+
+export interface EmailVerificationRequestRecord {
   id: string;
   userId: string;
   tokenHash: string;
@@ -111,6 +121,8 @@ export interface AuthRepository {
   findUserByLauncherToken(token: string): Promise<UserRecord | undefined>;
   findUserById(userId: string): Promise<UserRecord | undefined>;
   findUserByEmail(email: string): Promise<UserRecord | undefined>;
+  listAuthProvidersForUser(userId: string): Promise<string[]>;
+  markUserEmailVerified(userId: string): Promise<UserRecord | undefined>;
   createUser(user: CreateUserInput): Promise<UserRecord>;
   createPasswordCredential(input: PasswordCredentialRecord): Promise<void>;
   findPasswordCredentialByEmail(
@@ -161,6 +173,15 @@ export interface AuthRepository {
     tokenHash: string
   ): Promise<PasswordResetRequestRecord | undefined>;
   markPasswordResetRequestUsed(id: string): Promise<void>;
+  createEmailVerificationRequest(input: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: string;
+  }): Promise<EmailVerificationRequestRecord>;
+  findEmailVerificationRequestByTokenHash(
+    tokenHash: string
+  ): Promise<EmailVerificationRequestRecord | undefined>;
+  markEmailVerificationRequestUsed(id: string): Promise<void>;
 }
 
 export interface PaymentRepository {

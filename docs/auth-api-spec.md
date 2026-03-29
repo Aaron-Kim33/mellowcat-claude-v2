@@ -7,6 +7,7 @@ This auth API layer now covers:
 - email/password sign-up
 - email/password login
 - logout
+- email verification
 - password reset
 - current web user lookup
 - launcher browser-auth handoff
@@ -34,8 +35,13 @@ Success:
   "user": {
     "id": "uuid-user-id",
     "email": "creator@example.com",
-    "displayName": "MellowCat Creator"
-  }
+    "displayName": "MellowCat Creator",
+    "linkedProviders": ["password"],
+    "emailVerified": false
+  },
+  "verificationSent": true,
+  "verificationUrl": "https://mellowcat.xyz/verify-email?token=verify_xxx",
+  "verificationExpiresAt": "2026-03-29T12:00:00.000Z"
 }
 ```
 
@@ -45,6 +51,8 @@ Behavior:
 - creates `password_credentials`
 - creates `web_sessions`
 - sets `mellowcat_web_session` cookie
+- creates an email verification request
+- currently returns a frontend-ready `verificationUrl` directly so the web app can continue without mail infrastructure
 
 Errors:
 
@@ -74,7 +82,9 @@ Success:
   "user": {
     "id": "uuid-user-id",
     "email": "creator@example.com",
-    "displayName": "MellowCat Creator"
+    "displayName": "MellowCat Creator",
+    "linkedProviders": ["password"],
+    "emailVerified": false
   },
   "launcherRequestResolved": true
 }
@@ -91,6 +101,74 @@ Errors:
 
 - `BAD_REQUEST`
 - `INVALID_CREDENTIALS`
+
+### `POST /api/auth/send-verification`
+
+Authentication:
+
+- requires `mellowcat_web_session` cookie
+
+Success:
+
+```json
+{
+  "ok": true,
+  "alreadyVerified": false,
+  "verificationSent": true,
+  "verificationUrl": "https://mellowcat.xyz/verify-email?token=verify_xxx",
+  "verificationExpiresAt": "2026-03-29T12:00:00.000Z"
+}
+```
+
+Behavior:
+
+- issues a fresh email verification request for the signed-in web user
+- if already verified, returns `{ "ok": true, "alreadyVerified": true }`
+
+### `POST /api/auth/verify-email`
+
+Request:
+
+```json
+{
+  "token": "verify_xxx",
+  "launcherRequest": "authreq_123"
+}
+```
+
+`launcherRequest` is optional.
+
+Success:
+
+```json
+{
+  "ok": true,
+  "user": {
+    "id": "uuid-user-id",
+    "email": "creator@example.com",
+    "displayName": "MellowCat Creator",
+    "linkedProviders": ["google", "password"],
+    "emailVerified": true
+  },
+  "launcherRequestResolved": true
+}
+```
+
+Behavior:
+
+- validates verification token
+- marks `app_users.email_verified_at`
+- marks verification request as used
+- creates a fresh `mellowcat_web_session` cookie
+- if `launcherRequest` is present, resolves the launcher auth request immediately
+
+Errors:
+
+- `BAD_REQUEST`
+- `VERIFY_NOT_FOUND`
+- `VERIFY_USED`
+- `VERIFY_EXPIRED`
+- `USER_NOT_FOUND`
 
 ### `POST /api/auth/forgot-password`
 
@@ -192,7 +270,9 @@ Success:
   "user": {
     "id": "uuid-user-id",
     "email": "creator@example.com",
-    "displayName": "MellowCat Creator"
+    "displayName": "MellowCat Creator",
+    "linkedProviders": ["password"],
+    "emailVerified": true
   }
 }
 ```

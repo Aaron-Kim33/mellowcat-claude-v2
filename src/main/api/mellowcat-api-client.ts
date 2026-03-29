@@ -23,6 +23,8 @@ const MOCK_SESSION: AuthSession = {
   userId: "user_mock_remote",
   email: "creator@mellowcat.dev",
   displayName: "Mock Remote Creator",
+  linkedProviders: ["password"],
+  emailVerified: true,
   source: "remote",
   lastSyncedAt: "2026-03-27T09:00:00.000Z"
 };
