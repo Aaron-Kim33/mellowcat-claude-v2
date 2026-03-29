@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useAppStore } from "../../store/app-store";
 import { getLauncherCopy } from "../../lib/launcher-copy";
+import { useAppStore } from "../../store/app-store";
 
 export function SettingsPage() {
   const {
@@ -19,6 +19,10 @@ export function SettingsPage() {
   const [savedMessage, setSavedMessage] = useState("");
   const copy = getLauncherCopy(launcherLanguage).pages.settings;
   const isKorean = launcherLanguage === "ko";
+  const isDeveloperMode =
+    settings?.apiBaseUrl?.startsWith("http://127.0.0.1") ||
+    settings?.apiBaseUrl?.startsWith("http://localhost") ||
+    settings?.apiBaseUrl === "mock://remote";
 
   useEffect(() => {
     setClaudeExecutablePath(settings?.claudeExecutablePath ?? "");
@@ -88,41 +92,6 @@ export function SettingsPage() {
               <option value="ko">{copy.korean}</option>
             </select>
           </label>
-
-          <label className="field">
-            <span>{isKorean ? "Claude 실행 파일 경로" : "Claude Executable Path"}</span>
-            <input
-              className="text-input"
-              value={claudeExecutablePath}
-              onChange={(event) => setClaudeExecutablePath(event.target.value)}
-              placeholder="C:\\path\\to\\claude.exe"
-            />
-          </label>
-
-          <label className="field">
-            <span>{isKorean ? "Claude 실행 인자" : "Claude Args"}</span>
-            <input
-              className="text-input"
-              value={claudeArgsText}
-              onChange={(event) => setClaudeArgsText(event.target.value)}
-              placeholder="--model sonnet --verbose"
-            />
-          </label>
-
-          <label className="field">
-            <span>API Base URL</span>
-            <input
-              className="text-input"
-              value={apiBaseUrl}
-              onChange={(event) => setApiBaseUrl(event.target.value)}
-              placeholder="https://api.mellowcat.dev/"
-            />
-            <span className="subtle">
-              {isKorean
-                ? "백엔드 없이 원격 카탈로그와 구매 흐름을 확인하려면 `mock://remote`를 사용하세요."
-                : "Use `mock://remote` to preview remote catalog and purchase flows without a backend."}
-            </span>
-          </label>
         </div>
 
         <div className="button-row">
@@ -160,6 +129,49 @@ export function SettingsPage() {
           </span>
           <span className="subtle">{savedMessage}</span>
         </div>
+
+        {isDeveloperMode && (
+          <details className="developer-access-box">
+            <summary>{isKorean ? "개발자 설정" : "Developer settings"}</summary>
+            <div className="developer-access-content">
+              <label className="field">
+                <span>{isKorean ? "Claude 실행 파일 경로" : "Claude Executable Path"}</span>
+                <input
+                  className="text-input"
+                  value={claudeExecutablePath}
+                  onChange={(event) => setClaudeExecutablePath(event.target.value)}
+                  placeholder="C:\\path\\to\\claude.exe"
+                />
+              </label>
+
+              <label className="field">
+                <span>{isKorean ? "Claude 실행 인자" : "Claude Args"}</span>
+                <input
+                  className="text-input"
+                  value={claudeArgsText}
+                  onChange={(event) => setClaudeArgsText(event.target.value)}
+                  placeholder="--model sonnet --verbose"
+                />
+              </label>
+
+              <label className="field">
+                <span>API Base URL</span>
+                <input
+                  className="text-input"
+                  value={apiBaseUrl}
+                  onChange={(event) => setApiBaseUrl(event.target.value)}
+                  placeholder="https://api.mellowcat.dev/"
+                />
+                <span className="subtle">
+                  {isKorean
+                    ? "로컬 테스트나 백엔드 진단이 필요할 때만 수정하세요. `mock://remote`로 원격 흐름을 가볍게 점검할 수 있습니다."
+                    : "Only change this for local testing or backend diagnostics. Use `mock://remote` for quick remote flow checks."}
+                </span>
+              </label>
+            </div>
+          </details>
+        )}
+
         {!claudeInstallation?.canAutoInstall && (
           <div className="manual-install-box">
             <strong>{isKorean ? "수동 설치" : "Manual install"}</strong>
@@ -174,6 +186,7 @@ export function SettingsPage() {
             </a>
           </div>
         )}
+
         <div className="manual-install-box">
           <strong>{isKorean ? "워크플로 설정 위치가 바뀌었습니다" : "Workflow Config Has Moved"}</strong>
           <p className="subtle">

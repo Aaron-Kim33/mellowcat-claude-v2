@@ -70,6 +70,9 @@ const authBridge: MellowCatAPI["auth"] = {
   loginWithToken: (token: string) => ipcRenderer.invoke("auth:loginWithToken", token),
   createPaymentHandoff: (productId: string, source?: string) =>
     ipcRenderer.invoke("auth:createPaymentHandoff", productId, source),
+  sendVerificationEmail: () => ipcRenderer.invoke("auth:sendVerificationEmail"),
+  changeEmail: (email: string) => ipcRenderer.invoke("auth:changeEmail", email),
+  unlinkProvider: (provider: string) => ipcRenderer.invoke("auth:unlinkProvider", provider),
   logout: () => ipcRenderer.invoke("auth:logout")
 };
 

@@ -238,9 +238,15 @@ export function InstalledPage() {
   const selectedOutput = selectedMcpLogId ? mcpOutputById[selectedMcpLogId] ?? "" : "";
   const sortedInstalled = [...installed].sort((left, right) => {
     const leftScore =
+      (left.installState === "error" ? 30 : 0) +
+      (left.installState === "updating" ? 20 : 0) +
+      (left.installState === "downloading" ? 15 : 0) +
       (left.runtime.status === "running" ? 20 : 0) +
       (left.enabled ? 10 : 0);
     const rightScore =
+      (right.installState === "error" ? 30 : 0) +
+      (right.installState === "updating" ? 20 : 0) +
+      (right.installState === "downloading" ? 15 : 0) +
       (right.runtime.status === "running" ? 20 : 0) +
       (right.enabled ? 10 : 0);
 
@@ -250,6 +256,10 @@ export function InstalledPage() {
 
     return left.id.localeCompare(right.id);
   });
+  const installingCount = installed.filter((item) => item.installState === "downloading").length;
+  const updatingCount = installed.filter((item) => item.installState === "updating").length;
+  const errorCount = installed.filter((item) => item.installState === "error").length;
+  const runningCount = installed.filter((item) => item.runtime.status === "running").length;
 
   return (
     <section className="page">
@@ -259,7 +269,28 @@ export function InstalledPage() {
           <h2>{copy.title}</h2>
           <p className="subtle">{copy.subtitle}</p>
         </div>
+        <div className="hero-stats">
+          <span className="pill">{isKorean ? `설치 중 ${installingCount}` : `${installingCount} installing`}</span>
+          <span className="pill">{isKorean ? `업데이트 ${updatingCount}` : `${updatingCount} updating`}</span>
+          <span className="pill">{isKorean ? `오류 ${errorCount}` : `${errorCount} errors`}</span>
+          <span className="pill">{isKorean ? `실행 중 ${runningCount}` : `${runningCount} running`}</span>
+        </div>
       </div>
+
+      {(installingCount > 0 || updatingCount > 0 || errorCount > 0) && (
+        <div className="manual-install-box">
+          <strong>{isKorean ? "설치 진행 상태" : "Install activity"}</strong>
+          <span className="subtle">
+            {errorCount > 0
+              ? isKorean
+                ? "오류가 있는 항목이 위쪽에 먼저 표시됩니다. 다시 확인하거나 재설치해 복구할 수 있습니다."
+                : "Items with errors are pinned first so you can recover them quickly."
+              : isKorean
+                ? "패키지를 내려받고 검증하는 동안 이 화면에서 진행 상태를 계속 확인할 수 있습니다."
+                : "Stay on this screen to track packages being downloaded and refreshed."}
+          </span>
+        </div>
+      )}
 
       {composition.issues.length > 0 && (
         <div className="manual-install-box">
@@ -290,6 +321,73 @@ export function InstalledPage() {
         {resolvedWorkflows.length > 0 ? (
           resolvedWorkflows.map((workflow) => (
             <div key={workflow.id} className="workflow-stack-block">
+              {workflow.schema.sections.some((section) => section.id === "youtube") && (
+                <div className="manual-install-box">
+                  <div className="card-row">
+                    <div>
+                      <strong>{isKorean ? "유튜브 빠른 액션" : "YouTube quick actions"}</strong>
+                      <p className="subtle">
+                        {isKorean
+                          ? "연결과 업로드를 여기서 바로 시작할 수 있습니다."
+                          : "Start connection and upload from here."}
+                      </p>
+                    </div>
+                    <div className="button-row">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void refreshYouTubeStatus()}
+                      >
+                        {isKorean ? "상태 새로고침" : "Refresh status"}
+                      </button>
+                      {youTubeAuthStatus?.connected ? (
+                        <button
+                          type="button"
+                          className="danger-button"
+                          onClick={() => void disconnectYouTube()}
+                        >
+                          {isKorean ? "연결 해제" : "Disconnect"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="primary-button youtube"
+                          onClick={() => void connectYouTube()}
+                          disabled={!youtubeOAuthClientId.trim()}
+                        >
+                          {isKorean ? "유튜브 연결" : "Connect YouTube"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="primary-button youtube"
+                        onClick={() => void handleUploadLastPackage()}
+                        disabled={
+                          !youTubeAuthStatus?.connected ||
+                          !telegramStatus?.lastPackagePath ||
+                          !youtubeVideoFilePath.trim()
+                        }
+                      >
+                        {isKorean ? "유튜브에 업로드" : "Upload to YouTube"}
+                      </button>
+                    </div>
+                  </div>
+                  {!youTubeAuthStatus?.connected && !youtubeOAuthClientId.trim() && (
+                    <span className="subtle">
+                      {isKorean
+                        ? "먼저 아래 설정에서 YouTube OAuth Client ID를 입력해야 연결 버튼이 활성화됩니다."
+                        : "Enter a YouTube OAuth Client ID below before the connect button becomes available."}
+                    </span>
+                  )}
+                  {youTubeAuthStatus?.connected && !youtubeVideoFilePath.trim() && (
+                    <span className="subtle">
+                      {isKorean
+                        ? "업로드하려면 먼저 영상 파일을 선택해 주세요."
+                        : "Choose a video file before starting the upload."}
+                    </span>
+                  )}
+                </div>
+              )}
               <WorkflowConfigRenderer
                 schema={workflow.schema}
                 fields={{
@@ -562,10 +660,44 @@ export function InstalledPage() {
                 {item.runtime.status}
               </button>
             </div>
+            {(item.installState === "downloading" ||
+              item.installState === "updating" ||
+              item.installState === "error") && (
+              <div className="manual-install-box">
+                <strong>
+                  {item.installState === "downloading"
+                    ? isKorean
+                      ? "설치 패키지를 준비하는 중입니다"
+                      : "Preparing installation package"
+                    : item.installState === "updating"
+                      ? isKorean
+                        ? "최신 패키지로 갱신하는 중입니다"
+                        : "Refreshing to the latest package"
+                      : isKorean
+                        ? "복구가 필요한 항목입니다"
+                        : "This item needs attention"}
+                </strong>
+                <span className="subtle">
+                  {item.installState === "error"
+                    ? item.lastError ?? (isKorean ? "다시 확인 또는 재설치를 시도해 주세요." : "Try rechecking or reinstalling this item.")
+                    : item.installState === "downloading"
+                      ? isKorean
+                        ? "원격 패키지를 내려받고 검증한 뒤 로컬 워크플로에 반영합니다."
+                        : "The remote package is being downloaded, verified, and prepared for local use."
+                      : isKorean
+                        ? "로컬 사본을 최신 빌드에 맞춰 다시 쓰는 중입니다."
+                        : "Your local copy is being rewritten against the newest build."}
+                </span>
+              </div>
+            )}
             <div className="meta-list">
               <div className="meta-item">
                 <span>{copy.enabled}</span>
                 <strong>{item.enabled ? (isKorean ? "예" : "Yes") : isKorean ? "아니오" : "No"}</strong>
+              </div>
+              <div className="meta-item">
+                <span>{isKorean ? "설치 상태" : "Install state"}</span>
+                <strong>{item.installState}</strong>
               </div>
               {composition.issues.some((issue) => issue.mcpId === item.id) && (
                 <div className="meta-item">

@@ -1,8 +1,11 @@
 import type {
   AuthSession,
+  ChangeEmailResponse,
   LauncherAuthResolveResponse,
   LauncherAuthStartResponse,
-  PaymentHandoffResponse
+  PaymentHandoffResponse,
+  ProviderUnlinkResponse,
+  VerificationActionResponse
 } from "../../common/types/auth";
 import type { MCPCatalogItem, MCPEntitlementRecord } from "../../common/types/mcp";
 
@@ -228,6 +231,33 @@ export class MellowCatApiClient {
   async logoutLauncher(): Promise<void> {
     await this.request<{ ok: boolean }>("/api/auth/launcher/logout", {
       method: "POST"
+    });
+  }
+
+  async sendVerificationEmail(source = "launcher"): Promise<VerificationActionResponse> {
+    return this.request<VerificationActionResponse>("/api/auth/send-verification", {
+      method: "POST",
+      body: {
+        source
+      }
+    });
+  }
+
+  async changeEmail(email: string): Promise<ChangeEmailResponse> {
+    return this.request<ChangeEmailResponse>("/api/auth/change-email", {
+      method: "POST",
+      body: {
+        email
+      }
+    });
+  }
+
+  async unlinkProvider(provider: string): Promise<ProviderUnlinkResponse> {
+    return this.request<ProviderUnlinkResponse>("/api/auth/providers/unlink", {
+      method: "POST",
+      body: {
+        provider
+      }
     });
   }
 

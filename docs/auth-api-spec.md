@@ -108,7 +108,9 @@ Errors:
 
 Authentication:
 
-- requires `mellowcat_web_session` cookie
+- requires either:
+  - `mellowcat_web_session` cookie
+  - launcher bearer token
 
 Success:
 
@@ -127,6 +129,84 @@ Behavior:
 
 - issues a fresh email verification request for the signed-in web user
 - if already verified, returns `{ "ok": true, "alreadyVerified": true }`
+
+### `POST /api/auth/change-email`
+
+Authentication:
+
+- requires either:
+  - `mellowcat_web_session` cookie
+  - launcher bearer token
+
+Request:
+
+```json
+{
+  "email": "new-address@example.com"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "verificationSent": true,
+  "emailSent": true,
+  "verificationUrl": null,
+  "verificationExpiresAt": "2026-03-29T12:00:00.000Z"
+}
+```
+
+Behavior:
+
+- updates the account email
+- clears verified status for the new address
+- issues a fresh verification request
+- sends a verification email when Resend is configured
+
+Errors:
+
+- `BAD_REQUEST`
+- `EMAIL_EXISTS`
+- `UNAUTHENTICATED`
+
+### `POST /api/auth/providers/unlink`
+
+Authentication:
+
+- requires either:
+  - `mellowcat_web_session` cookie
+  - launcher bearer token
+
+Request:
+
+```json
+{
+  "provider": "google"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "linkedProviders": ["password"]
+}
+```
+
+Behavior:
+
+- removes one linked sign-in method
+- refuses to remove the final remaining provider
+
+Errors:
+
+- `BAD_REQUEST`
+- `PROVIDER_NOT_LINKED`
+- `LAST_PROVIDER`
+- `UNAUTHENTICATED`
 
 ### `POST /api/auth/verify-email`
 

@@ -11,5 +11,10 @@ export function registerAuthIpc(authService: AuthService): void {
   ipcMain.handle("auth:createPaymentHandoff", (_event, productId: string, source?: string) =>
     authService.createPaymentHandoff(productId, source)
   );
+  ipcMain.handle("auth:sendVerificationEmail", () => authService.sendVerificationEmail());
+  ipcMain.handle("auth:changeEmail", (_event, email: string) => authService.changeEmail(email));
+  ipcMain.handle("auth:unlinkProvider", (_event, provider: string) =>
+    authService.unlinkProvider(provider)
+  );
   ipcMain.handle("auth:logout", () => authService.logout());
 }

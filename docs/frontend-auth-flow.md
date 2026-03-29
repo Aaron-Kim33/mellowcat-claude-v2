@@ -93,9 +93,9 @@ Show:
 Actions:
 
 - logout
-- change password later
-- connect Google later if account started as password-only
-- resend verification email later
+- change email
+- resend verification email
+- unlink a provider only when another provider remains
 
 ### 5. Forgot password page
 
@@ -222,6 +222,8 @@ Suggested copy:
 - `POST /api/auth/forgot-password`
 - `POST /api/auth/reset-password`
 - `POST /api/auth/send-verification`
+- `POST /api/auth/change-email`
+- `POST /api/auth/providers/unlink`
 - `POST /api/auth/verify-email`
 - `GET /api/auth/oauth/google/start`
 - `GET /api/auth/oauth/google/callback`

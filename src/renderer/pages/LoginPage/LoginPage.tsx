@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AuthProvider } from "@common/types/auth";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
+import { getFriendlyErrorMessage } from "../../lib/launcher-error";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 import { useAppStore } from "../../store/app-store";
 
@@ -17,14 +18,25 @@ export function LoginPage() {
     loginWithToken,
     logout,
     refreshStoreAccess,
+    sendVerificationEmail,
+    changeEmail,
+    unlinkProvider,
     installMcp,
     updateMcp
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.account;
   const isKorean = settings?.launcherLanguage === "ko";
   const [sessionToken, setSessionToken] = useState("");
+  const [nextEmail, setNextEmail] = useState(authSession?.email ?? "");
   const [refreshing, setRefreshing] = useState(false);
   const [activeLibraryActionId, setActiveLibraryActionId] = useState<string>();
+  const [accountBusyAction, setAccountBusyAction] = useState<
+    "verify" | "changeEmail" | "unlink-password" | "unlink-google" | undefined
+  >();
+
+  useEffect(() => {
+    setNextEmail(authSession?.email ?? "");
+  }, [authSession?.email]);
 
   const isDeveloperMode =
     settings?.apiBaseUrl?.startsWith("http://127.0.0.1") ||
@@ -44,6 +56,39 @@ export function LoginPage() {
     () => new Map(installed.map((item) => [item.id, item])),
     [installed]
   );
+  const sortedOwnedItems = useMemo(
+    () =>
+      [...ownedItems].sort((left, right) => {
+        const leftInstalled = installedById.get(left.id);
+        const rightInstalled = installedById.get(right.id);
+        const score = (record?: InstalledMCPRecord) => {
+          if (!record) {
+            return 40;
+          }
+          if (record.installState === "error") {
+            return 35;
+          }
+          if (record.installState === "updating") {
+            return 30;
+          }
+          if (record.installState === "downloading") {
+            return 25;
+          }
+          if (record.runtime.status === "running") {
+            return 20;
+          }
+          return 10;
+        };
+
+        const scoreDelta = score(rightInstalled) - score(leftInstalled);
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
+
+        return left.name.localeCompare(right.name);
+      }),
+    [installedById, ownedItems]
+  );
   const readyToInstallCount = ownedItems.filter((item) => !installedById.has(item.id)).length;
   const installedOwnedCount = ownedItems.filter((item) => installedById.has(item.id)).length;
   const runningOwnedCount = installed.filter((item) => {
@@ -58,7 +103,7 @@ export function LoginPage() {
     refreshAccessLabel: isKorean ? "접근 상태 새로고침" : "Refresh access",
     accountOverviewLabel: isKorean ? "계정 개요" : "Account overview",
     accountLibraryLabel: isKorean ? "내 라이브러리" : "Your library",
-    ownedLabel: isKorean ? "소유" : "Owned",
+    ownedLabel: isKorean ? "보유" : "Owned",
     installedLabel: isKorean ? "설치됨" : "Installed",
     readyLabel: isKorean ? "설치 대기" : "Ready to install",
     runningLabel: isKorean ? "실행 중" : "Running",
@@ -77,7 +122,7 @@ export function LoginPage() {
     accountHint: isKorean
       ? "이 계정으로 구매한 상품은 여기와 마켓에서 같은 접근 상태로 반영됩니다."
       : "Products you purchase with this account will show the same access state here and in Marketplace.",
-    emptyLibraryTitle: isKorean ? "아직 소유한 상품이 없습니다." : "No owned products yet.",
+    emptyLibraryTitle: isKorean ? "아직 보유한 상품이 없습니다." : "No owned products yet.",
     emptyLibraryBody: isKorean
       ? "마켓에서 상품을 구매하면 여기에서 바로 설치 가능 여부를 확인할 수 있습니다."
       : "Buy products in Marketplace and they will show up here as soon as access refreshes.",
@@ -91,15 +136,34 @@ export function LoginPage() {
     accessCardTitle: isKorean ? "구매 및 설치 상태" : "Purchases and installs",
     accessCardHint: isKorean
       ? "구매한 상품은 여기에서 바로 설치하거나 업데이트 상태를 확인할 수 있습니다."
-      : "Owned products can be installed or rechecked here without bouncing back to Marketplace."
+      : "Owned products can be installed or rechecked here without bouncing back to Marketplace.",
+    accessPriorityHint: isKorean
+      ? "설치 대기, 오류, 업데이트가 필요한 항목이 먼저 보이도록 정렬됩니다."
+      : "Items needing install, recovery, or update are shown first.",
+    changeEmailTitle: isKorean ? "이메일 변경" : "Change email",
+    changeEmailHint: isKorean
+      ? "이메일을 바꾸면 새 주소로 인증 메일을 다시 보냅니다."
+      : "Changing your email sends a new verification email to the updated address.",
+    changeEmailButton: isKorean ? "이메일 변경" : "Update email",
+    resendVerificationButton: isKorean ? "인증 메일 다시 보내기" : "Resend verification",
+    verificationSentNotice: isKorean
+      ? "인증 메일을 보냈어요. 메일함을 확인해 주세요."
+      : "Verification email sent. Check your inbox.",
+    emailChangedNotice: isKorean
+      ? "이메일을 변경했어요. 새 주소로 보낸 인증 메일을 확인해 주세요."
+      : "Email updated. Check the new inbox for a verification email.",
+    emailInputLabel: isKorean ? "새 이메일 주소" : "New email address",
+    unlinkProviderLabel: isKorean ? "연결 해제" : "Unlink",
+    unlinkProviderHint: isKorean
+      ? "마지막 로그인 방식은 삭제할 수 없습니다."
+      : "At least one sign-in method must remain linked."
   };
 
   const handleBrowserLogin = async () => {
     try {
       await login();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Login failed.";
-      window.alert(message);
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "auth" }));
     }
   };
 
@@ -107,8 +171,10 @@ export function LoginPage() {
     try {
       await cancelLogin();
     } catch (error) {
-      const message = error instanceof Error ? error.message : text.cancelLoginErrorLabel;
-      window.alert(message);
+      window.alert(
+        getFriendlyErrorMessage(error, { isKorean, context: "auth" }) ||
+          text.cancelLoginErrorLabel
+      );
     }
   };
 
@@ -116,8 +182,7 @@ export function LoginPage() {
     try {
       await loginWithToken(sessionToken);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Token login failed.";
-      window.alert(message);
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "auth" }));
     }
   };
 
@@ -125,8 +190,7 @@ export function LoginPage() {
     try {
       await logout();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Logout failed.";
-      window.alert(message);
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "auth" }));
     }
   };
 
@@ -135,9 +199,7 @@ export function LoginPage() {
     try {
       await refreshStoreAccess();
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Access refresh failed.";
-      window.alert(message);
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "network" }));
     } finally {
       setRefreshing(false);
     }
@@ -148,8 +210,7 @@ export function LoginPage() {
     try {
       await installMcp(mcpId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Install failed.";
-      window.alert(message);
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "install" }));
     } finally {
       setActiveLibraryActionId(undefined);
     }
@@ -160,10 +221,53 @@ export function LoginPage() {
     try {
       await updateMcp(mcpId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Update check failed.";
-      window.alert(message);
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "update" }));
     } finally {
       setActiveLibraryActionId(undefined);
+    }
+  };
+
+  const handleSendVerification = async () => {
+    setAccountBusyAction("verify");
+    try {
+      const response = await sendVerificationEmail();
+      if (response.verificationUrl) {
+        window.alert(`${text.verificationSentNotice}\n\n${response.verificationUrl}`);
+      } else {
+        window.alert(text.verificationSentNotice);
+      }
+    } catch (error) {
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "auth" }));
+    } finally {
+      setAccountBusyAction(undefined);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    setAccountBusyAction("changeEmail");
+    try {
+      const response = await changeEmail(nextEmail);
+      if (response.verificationUrl) {
+        window.alert(`${text.emailChangedNotice}\n\n${response.verificationUrl}`);
+      } else {
+        window.alert(text.emailChangedNotice);
+      }
+    } catch (error) {
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "auth" }));
+    } finally {
+      setAccountBusyAction(undefined);
+    }
+  };
+
+  const handleUnlinkProvider = async (provider: AuthProvider) => {
+    const actionId = `unlink-${provider}` as const;
+    setAccountBusyAction(actionId);
+    try {
+      await unlinkProvider(provider);
+    } catch (error) {
+      window.alert(getFriendlyErrorMessage(error, { isKorean, context: "auth" }));
+    } finally {
+      setAccountBusyAction(undefined);
     }
   };
 
@@ -236,6 +340,67 @@ export function LoginPage() {
                   </span>
                 ))}
               </div>
+              {authSession.linkedProviders.length > 1 ? (
+                <div className="button-row">
+                  {authSession.linkedProviders.map((provider) => (
+                    <button
+                      key={`unlink-${provider}`}
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void handleUnlinkProvider(provider)}
+                      disabled={accountBusyAction !== undefined}
+                    >
+                      {accountBusyAction === (`unlink-${provider}` as const)
+                        ? `${text.unlinkProviderLabel}...`
+                        : `${formatProviderLabel(provider)} ${text.unlinkProviderLabel}`}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="subtle">{text.unlinkProviderHint}</span>
+              )}
+            </div>
+          ) : null}
+          {authSession?.loggedIn ? (
+            <div className="manual-install-box">
+              <strong>{text.changeEmailTitle}</strong>
+              <span className="subtle">{text.changeEmailHint}</span>
+              <label className="field">
+                <span>{text.emailInputLabel}</span>
+                <input
+                  className="text-input"
+                  type="email"
+                  value={nextEmail}
+                  onChange={(event) => setNextEmail(event.target.value)}
+                  placeholder="hello@mellowcat.xyz"
+                />
+              </label>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleSendVerification()}
+                  disabled={accountBusyAction !== undefined || authSession.emailVerified}
+                >
+                  {accountBusyAction === "verify"
+                    ? `${text.resendVerificationButton}...`
+                    : text.resendVerificationButton}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleChangeEmail()}
+                  disabled={
+                    accountBusyAction !== undefined ||
+                    !nextEmail.trim() ||
+                    nextEmail.trim().toLowerCase() === authSession.email?.toLowerCase()
+                  }
+                >
+                  {accountBusyAction === "changeEmail"
+                    ? `${text.changeEmailButton}...`
+                    : text.changeEmailButton}
+                </button>
+              </div>
             </div>
           ) : null}
           <p className="subtle">{text.accountHint}</p>
@@ -252,10 +417,16 @@ export function LoginPage() {
               onClick={() => void handleBrowserLogin()}
               disabled={authBusy}
             >
-              {authBusy ? authStatusMessage ?? text.signInWithBrowserLabel : text.signInWithBrowserLabel}
+              {authBusy
+                ? authStatusMessage ?? text.signInWithBrowserLabel
+                : text.signInWithBrowserLabel}
             </button>
             {authBusy && (
-              <button type="button" className="secondary-button" onClick={() => void handleCancelLogin()}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleCancelLogin()}
+              >
                 {text.cancelBrowserLoginLabel}
               </button>
             )}
@@ -315,9 +486,10 @@ export function LoginPage() {
             <span className="pill">{ownedItems.length}</span>
           </div>
           <p className="subtle">{text.accessCardHint}</p>
+          <p className="subtle">{text.accessPriorityHint}</p>
           {ownedItems.length > 0 ? (
             <div className="account-library-list">
-              {ownedItems.map((item) => (
+              {sortedOwnedItems.map((item) => (
                 <OwnedProductRow
                   key={item.id}
                   item={item}
@@ -383,22 +555,33 @@ function OwnedProductRow({
   const hasUpdate = installedRecord
     ? installedRecord.version !== item.latestVersion
     : false;
-  const statusLabel =
-    item.entitlement?.status === "trial"
-      ? isKorean
-        ? "체험 접근"
-        : "Trial access"
-      : installedRecord
-        ? installedRecord.runtime.status === "running"
-          ? isKorean
-            ? "설치 및 실행 중"
-            : "Installed and running"
-          : isKorean
-            ? "로컬에 설치됨"
-            : "Installed locally"
-        : isKorean
-          ? "설치 준비 완료"
-          : "Ready to install";
+  const statusLabel = (() => {
+    if (item.entitlement?.status === "trial") {
+      return isKorean ? "체험 접근" : "Trial access";
+    }
+
+    if (!installedRecord) {
+      return isKorean ? "설치 준비 완료" : "Ready to install";
+    }
+
+    if (installedRecord.installState === "error") {
+      return isKorean ? "복구 필요" : "Needs attention";
+    }
+
+    if (installedRecord.installState === "updating") {
+      return isKorean ? "업데이트 중" : "Updating";
+    }
+
+    if (installedRecord.installState === "downloading") {
+      return isKorean ? "설치 중" : "Installing";
+    }
+
+    if (installedRecord.runtime.status === "running") {
+      return isKorean ? "설치 및 실행 중" : "Installed and running";
+    }
+
+    return isKorean ? "로컬에 설치됨" : "Installed locally";
+  })();
 
   const installStateLabel = installedRecord
     ? installedRecord.lastError
@@ -423,6 +606,27 @@ function OwnedProductRow({
     : isKorean
       ? "준비됨"
       : "Ready";
+  const detailLabel = installedRecord?.lastError
+    ? installedRecord.lastError
+    : installedRecord
+      ? installedRecord.installState === "updating"
+        ? isKorean
+          ? "최신 패키지를 받아 로컬 사본을 새로 고치는 중입니다."
+          : "Refreshing your local package with the latest build."
+        : installedRecord.installState === "downloading"
+          ? isKorean
+            ? "계정에 연결된 패키지를 내려받고 검증하는 중입니다."
+            : "Downloading and verifying the package tied to your account."
+          : hasUpdate
+            ? isKorean
+              ? "새 버전이 준비되어 있습니다. 다시 확인을 눌러 업데이트할 수 있습니다."
+              : "A newer package is ready. Recheck to apply the update."
+            : isKorean
+              ? "로컬 사본이 최신 상태입니다."
+              : "Your local copy is up to date."
+      : isKorean
+        ? "아직 설치하지 않았습니다. 계정에 연결된 권한으로 바로 설치할 수 있습니다."
+        : "Not installed yet. You can install immediately with your account access.";
 
   return (
     <div className="account-library-item">
@@ -441,7 +645,10 @@ function OwnedProductRow({
         </div>
       </div>
       <div className="account-library-item-footer">
-        <span className="subtle">{installStateLabel}</span>
+        <div>
+          <span className="subtle">{installStateLabel}</span>
+          <p className="subtle">{detailLabel}</p>
+        </div>
         {installedRecord ? (
           <button
             type="button"
@@ -449,7 +656,17 @@ function OwnedProductRow({
             onClick={() => void onRecheck(item.id)}
             disabled={busy}
           >
-            {busy ? (isKorean ? "처리 중..." : "Working...") : hasUpdate ? (isKorean ? "지금 업데이트" : "Update Now") : isKorean ? "다시 확인" : "Recheck"}
+            {busy
+              ? isKorean
+                ? "처리 중..."
+                : "Working..."
+              : hasUpdate
+                ? isKorean
+                  ? "지금 업데이트"
+                  : "Update Now"
+                : isKorean
+                  ? "다시 확인"
+                  : "Recheck"}
           </button>
         ) : (
           <button
@@ -458,7 +675,13 @@ function OwnedProductRow({
             onClick={() => void onInstall(item.id)}
             disabled={busy}
           >
-            {busy ? (isKorean ? "설치 중..." : "Installing...") : isKorean ? "설치" : "Install"}
+            {busy
+              ? isKorean
+                ? "설치 중..."
+                : "Installing..."
+              : isKorean
+                ? "설치"
+                : "Install"}
           </button>
         )}
       </div>

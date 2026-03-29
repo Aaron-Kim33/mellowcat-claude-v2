@@ -121,6 +121,7 @@ export interface AuthRepository {
   findUserByLauncherToken(token: string): Promise<UserRecord | undefined>;
   findUserById(userId: string): Promise<UserRecord | undefined>;
   findUserByEmail(email: string): Promise<UserRecord | undefined>;
+  updateUserEmail(userId: string, email: string): Promise<UserRecord | undefined>;
   listAuthProvidersForUser(userId: string): Promise<string[]>;
   markUserEmailVerified(userId: string): Promise<UserRecord | undefined>;
   createUser(user: CreateUserInput): Promise<UserRecord>;
@@ -129,6 +130,7 @@ export interface AuthRepository {
     email: string
   ): Promise<{ user: UserRecord; passwordHash: string } | undefined>;
   updatePasswordCredential(input: PasswordCredentialRecord): Promise<void>;
+  deletePasswordCredential(userId: string): Promise<void>;
   findUserByIdentity(
     provider: string,
     providerUserId: string
@@ -139,6 +141,7 @@ export interface AuthRepository {
     providerUserId: string;
     email?: string;
   }): Promise<void>;
+  deleteAuthIdentityForUser(userId: string, provider: string): Promise<void>;
   createLauncherSession(input: {
     userId: string;
     tokenHash: string;

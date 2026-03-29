@@ -1,6 +1,12 @@
 import type { AppMeta } from "./app";
 import type { ShortformWorkflowConfig, TelegramControlStatus } from "./automation";
-import type { AuthSession, PaymentHandoffResponse } from "./auth";
+import type {
+  AuthSession,
+  ChangeEmailResponse,
+  PaymentHandoffResponse,
+  ProviderUnlinkResponse,
+  VerificationActionResponse
+} from "./auth";
 import type {
   ClaudeInstallationStatus,
   ClaudeOutputEvent,
@@ -57,6 +63,9 @@ export interface MellowCatAPI {
       productId: string,
       source?: string
     ) => Promise<PaymentHandoffResponse>;
+    sendVerificationEmail: () => Promise<VerificationActionResponse>;
+    changeEmail: (email: string) => Promise<ChangeEmailResponse>;
+    unlinkProvider: (provider: string) => Promise<ProviderUnlinkResponse>;
     logout: () => Promise<void>;
   };
   automation: {

@@ -110,6 +110,17 @@ export function createFileRepositories(): BackendRepositories {
         const db = loadDb();
         return db.users.find((user) => user.email.toLowerCase() === email.toLowerCase());
       },
+      async updateUserEmail(userId, email) {
+        const db = loadDb();
+        const user = db.users.find((entry) => entry.id === userId);
+        if (!user) {
+          return undefined;
+        }
+        user.email = email;
+        delete user.emailVerifiedAt;
+        saveDb(db);
+        return user;
+      },
       async listAuthProvidersForUser(userId: string) {
         const db = loadDb();
         const providers = new Set<string>();
@@ -178,6 +189,11 @@ export function createFileRepositories(): BackendRepositories {
         });
         saveDb(db);
       },
+      async deletePasswordCredential(userId) {
+        const db = loadDb();
+        db.passwordCredentials = db.passwordCredentials.filter((entry) => entry.userId !== userId);
+        saveDb(db);
+      },
       async findPasswordCredentialByEmail(email) {
         const db = loadDb();
         const user = db.users.find((entry) => entry.email.toLowerCase() === email.toLowerCase());
@@ -223,6 +239,13 @@ export function createFileRepositories(): BackendRepositories {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
+        saveDb(db);
+      },
+      async deleteAuthIdentityForUser(userId, provider) {
+        const db = loadDb();
+        db.authIdentities = db.authIdentities.filter(
+          (entry) => !(entry.userId === userId && entry.provider === provider)
+        );
         saveDb(db);
       },
       async createLauncherSession(input) {

@@ -1,8 +1,11 @@
 import { shell } from "electron";
 import type {
   AuthSession,
+  ChangeEmailResponse,
   LauncherAuthResolveResponse,
-  PaymentHandoffResponse
+  PaymentHandoffResponse,
+  ProviderUnlinkResponse,
+  VerificationActionResponse
 } from "../../../common/types/auth";
 import { MellowCatApiClient } from "../../api/mellowcat-api-client";
 import { FileService } from "../system/file-service";
@@ -165,6 +168,70 @@ export class AuthService {
     this.apiClient.setAccessToken(undefined);
     this.secretsStore.delete("authAccessToken");
     this.persist();
+  }
+
+  async sendVerificationEmail(): Promise<VerificationActionResponse> {
+    if (!this.apiClient.isConfigured()) {
+      throw new Error("API base URL is not configured.");
+    }
+
+    if (!this.session.accessToken) {
+      throw new Error("Sign in again before requesting verification.");
+    }
+
+    return this.apiClient.sendVerificationEmail("launcher");
+  }
+
+  async changeEmail(email: string): Promise<ChangeEmailResponse> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new Error("Email is required.");
+    }
+
+    if (!this.apiClient.isConfigured()) {
+      throw new Error("API base URL is not configured.");
+    }
+
+    if (!this.session.accessToken) {
+      throw new Error("Sign in again before changing email.");
+    }
+
+    const response = await this.apiClient.changeEmail(normalizedEmail);
+    const remoteSession = await this.apiClient.getSession();
+    this.session = {
+      ...remoteSession,
+      accessToken: this.session.accessToken,
+      source: "remote",
+      lastSyncedAt: new Date().toISOString()
+    };
+    this.persist();
+    return response;
+  }
+
+  async unlinkProvider(provider: string): Promise<ProviderUnlinkResponse> {
+    const normalizedProvider = provider.trim().toLowerCase();
+    if (!normalizedProvider) {
+      throw new Error("Provider is required.");
+    }
+
+    if (!this.apiClient.isConfigured()) {
+      throw new Error("API base URL is not configured.");
+    }
+
+    if (!this.session.accessToken) {
+      throw new Error("Sign in again before updating linked providers.");
+    }
+
+    const response = await this.apiClient.unlinkProvider(normalizedProvider);
+    const remoteSession = await this.apiClient.getSession();
+    this.session = {
+      ...remoteSession,
+      accessToken: this.session.accessToken,
+      source: "remote",
+      lastSyncedAt: new Date().toISOString()
+    };
+    this.persist();
+    return response;
   }
 
   private load(): AuthSession {

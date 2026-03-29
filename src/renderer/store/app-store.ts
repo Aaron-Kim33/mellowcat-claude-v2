@@ -68,6 +68,11 @@ interface AppState {
   cancelLogin: () => Promise<void>;
   loginWithToken: (token: string) => Promise<void>;
   createPaymentHandoff: (productId: string, source?: string) => Promise<string>;
+  sendVerificationEmail: () => Promise<{ emailSent?: boolean; verificationUrl?: string | null }>;
+  changeEmail: (
+    email: string
+  ) => Promise<{ emailSent?: boolean; verificationUrl?: string | null }>;
+  unlinkProvider: (provider: string) => Promise<string[]>;
   logout: () => Promise<void>;
 }
 
@@ -530,6 +535,42 @@ export const useAppStore = create<AppState>((set) => ({
   createPaymentHandoff: async (productId: string, source = "launcher") => {
     const response = await window.mellowcat.auth.createPaymentHandoff(productId, source);
     return response.paymentUrl;
+  },
+  sendVerificationEmail: async () => {
+    const response = await window.mellowcat.auth.sendVerificationEmail();
+    const authSession = await window.mellowcat.auth.getSession();
+    set({ authSession });
+    return {
+      emailSent: response.emailSent,
+      verificationUrl: response.verificationUrl
+    };
+  },
+  changeEmail: async (email: string) => {
+    const response = await window.mellowcat.auth.changeEmail(email);
+    const [authSession, catalog] = await Promise.all([
+      window.mellowcat.auth.getSession(),
+      window.mellowcat.mcp.listCatalog()
+    ]);
+    set({
+      authSession,
+      catalog
+    });
+    return {
+      emailSent: response.emailSent,
+      verificationUrl: response.verificationUrl
+    };
+  },
+  unlinkProvider: async (provider: string) => {
+    const response = await window.mellowcat.auth.unlinkProvider(provider);
+    const [authSession, catalog] = await Promise.all([
+      window.mellowcat.auth.getSession(),
+      window.mellowcat.mcp.listCatalog()
+    ]);
+    set({
+      authSession,
+      catalog
+    });
+    return response.linkedProviders;
   },
   logout: async () => {
     await window.mellowcat.auth.logout();

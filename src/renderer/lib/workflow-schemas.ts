@@ -82,8 +82,7 @@ const TELEGRAM_SECTION = {
   id: "telegram",
   eyebrow: "텔레그램",
   title: "검토와 운영 제어",
-  description:
-    "봇 안에서 /lang ko 또는 /lang en 으로 출력 언어를 바로 바꿀 수 있습니다.",
+  description: "봇 안에서 /lang ko 또는 /lang en 으로 출력 언어를 바로 바꿀 수 있습니다.",
   fields: [
     {
       id: "telegramBotToken",
@@ -112,7 +111,7 @@ const YOUTUBE_SECTION = {
   eyebrow: "유튜브",
   title: "연결과 업로드",
   description:
-    "1. 텔레그램에서 후보를 승인해 패키지를 만들고, 2. 영상 파일을 선택한 뒤, 3. 같은 영역에서 업로드합니다.",
+    "1. 텔레그램에서 후보를 승인해 패키지를 만들고, 2. 영상 파일을 선택한 뒤, 3. 상단 빠른 액션에서 실제 유튜브 업로드를 진행합니다.",
   actionPlacement: "beforeFields",
   fields: [
     {
@@ -184,12 +183,8 @@ const YOUTUBE_SECTION = {
     }
   ],
   actions: [
-    { id: "refreshYouTube", label: "유튜브 상태 새로고침", tone: "secondary" },
-    { id: "connectYouTube", label: "유튜브 연결", tone: "youtube" },
-    { id: "disconnectYouTube", label: "연결 해제", tone: "danger" },
     { id: "chooseVideoFile", label: "영상 파일 선택", tone: "secondary" },
-    { id: "chooseThumbnailFile", label: "썸네일 선택", tone: "secondary" },
-    { id: "uploadLastPackage", label: "최근 패키지 업로드", tone: "youtube" }
+    { id: "chooseThumbnailFile", label: "썸네일 선택", tone: "secondary" }
   ],
   statuses: [
     { id: "youtubeState", label: "유튜브 연결 상태" },

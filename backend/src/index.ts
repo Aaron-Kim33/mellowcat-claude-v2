@@ -106,6 +106,11 @@ const CATALOG_PATH = path.resolve(ROOT_DIR, "resources", "bundled", "catalog.jso
 const LEMON_SQUEEZY = getLemonSqueezyConfig();
 const repositories = createRepositories();
 const EMAIL_CONFIG = getResendEmailConfig();
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const AUTH_RATE_LIMIT_MAX = 25;
+const PAYMENT_RATE_LIMIT_MAX = 20;
+const LOGIN_FAILURE_LIMIT = 8;
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const ALLOWED_WEB_ORIGINS = new Set(
   [
     WEB_BASE_URL,
@@ -145,6 +150,54 @@ const DEV_LAUNCHER_USERS = [
     token: "dev-launcher-token-3"
   }
 ] as const;
+
+interface RateLimitState {
+  count: number;
+  resetAt: number;
+}
+
+const rateLimitStore = new Map<string, RateLimitState>();
+const loginFailureStore = new Map<string, RateLimitState>();
+
+function isTruthyEnv(value?: string): boolean {
+  return value?.trim().toLowerCase() === "true";
+}
+
+function isLocalLikeUrl(value?: string): boolean {
+  if (!value) {
+    return false;
+  }
+
+  return (
+    value.includes("127.0.0.1") ||
+    value.includes("localhost") ||
+    value.startsWith("http://0.0.0.0")
+  );
+}
+
+function shouldEnableDevSeeds(): boolean {
+  if (isTruthyEnv(process.env.MELLOWCAT_ENABLE_DEV_SEEDS)) {
+    return true;
+  }
+
+  return (
+    HOST === "127.0.0.1" ||
+    HOST === "localhost" ||
+    isLocalLikeUrl(APP_BASE_URL) ||
+    isLocalLikeUrl(WEB_BASE_URL)
+  );
+}
+
+function audit(event: string, details: Record<string, unknown> = {}): void {
+  console.info(
+    "[audit]",
+    JSON.stringify({
+      event,
+      at: new Date().toISOString(),
+      ...details
+    })
+  );
+}
 
 function loadCatalog(): CatalogItem[] {
   const raw = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as CatalogItem[];
@@ -286,6 +339,10 @@ function shortTokenHash(token?: string): string {
 }
 
 async function ensureDevLauncherUsers(): Promise<void> {
+  if (!shouldEnableDevSeeds()) {
+    return;
+  }
+
   for (const devUser of DEV_LAUNCHER_USERS) {
     let user = await repositories.auth.findUserByEmail(devUser.email);
     if (!user) {
@@ -305,6 +362,10 @@ async function ensureDevLauncherUsers(): Promise<void> {
       });
     }
   }
+
+  audit("dev_seed.users_ready", {
+    count: DEV_LAUNCHER_USERS.length
+  });
 }
 
 function getBearerToken(req: IncomingMessage): string | undefined {
@@ -314,6 +375,59 @@ function getBearerToken(req: IncomingMessage): string | undefined {
   }
 
   return header.slice("Bearer ".length).trim();
+}
+
+function getClientIp(req: IncomingMessage): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0].trim();
+  }
+
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+function takeWindowCounter(
+  store: Map<string, RateLimitState>,
+  key: string,
+  windowMs: number
+): RateLimitState {
+  const now = Date.now();
+  const existing = store.get(key);
+  if (!existing || existing.resetAt <= now) {
+    const fresh = { count: 0, resetAt: now + windowMs };
+    store.set(key, fresh);
+    return fresh;
+  }
+
+  return existing;
+}
+
+function incrementRateLimit(
+  store: Map<string, RateLimitState>,
+  key: string,
+  windowMs: number
+): RateLimitState {
+  const entry = takeWindowCounter(store, key, windowMs);
+  entry.count += 1;
+  return entry;
+}
+
+function isRateLimited(
+  store: Map<string, RateLimitState>,
+  key: string,
+  limit: number,
+  windowMs: number
+): boolean {
+  const entry = takeWindowCounter(store, key, windowMs);
+  return entry.count >= limit;
+}
+
+function clearCounter(store: Map<string, RateLimitState>, key: string): void {
+  store.delete(key);
+}
+
+function getLoginFailureKey(req: IncomingMessage, email: string): string {
+  return `${getClientIp(req)}:${email.toLowerCase()}`;
 }
 
 async function findUserByToken(token?: string): Promise<UserRecord | undefined> {
@@ -635,6 +749,13 @@ async function findUserByWebCookie(req: IncomingMessage): Promise<UserRecord | u
   return repositories.auth.findUserByWebSessionToken(token);
 }
 
+async function findAuthenticatedUser(
+  req: IncomingMessage,
+  launcherUser?: UserRecord
+): Promise<UserRecord | undefined> {
+  return launcherUser ?? findUserByWebCookie(req);
+}
+
 async function upsertEntitlement(userId: string, mcpId: string) {
   return repositories.entitlements.upsertOwnedEntitlement(userId, mcpId);
 }
@@ -708,6 +829,14 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/auth/signup") {
+      const authRateLimitKey = `auth:signup:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "signup", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
       const body = await readJson<{ email?: string; password?: string; displayName?: string }>(req);
       const email = body.email?.trim().toLowerCase();
       const password = body.password?.trim();
@@ -725,6 +854,7 @@ const server = createServer(async (req, res) => {
 
       const existing = await repositories.auth.findUserByEmail(email);
       if (existing) {
+        audit("auth.signup_exists", { email, ip: getClientIp(req) });
         json(req, res, 409, createError("EMAIL_EXISTS", "An account with this email already exists."));
         return;
       }
@@ -766,10 +896,23 @@ const server = createServer(async (req, res) => {
         verificationUrl: verificationDelivered ? undefined : verification.verificationUrl,
         verificationExpiresAt: verification.expiresAt
       });
+      audit("auth.signup_success", {
+        userId: createdUser.id,
+        email: createdUser.email,
+        emailSent: verificationDelivered
+      });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/auth/login") {
+      const authRateLimitKey = `auth:login:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "login", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
       const body = await readJson<{ email?: string; password?: string; launcherRequest?: string }>(req);
       const email = body.email?.trim().toLowerCase();
       const password = body.password?.trim();
@@ -779,10 +922,24 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      const loginFailureKey = email ? getLoginFailureKey(req, email) : undefined;
+      if (loginFailureKey && isRateLimited(loginFailureStore, loginFailureKey, LOGIN_FAILURE_LIMIT, LOGIN_FAILURE_WINDOW_MS)) {
+        audit("auth.login_blocked", { email, ip: getClientIp(req) });
+        json(req, res, 429, createError("BRUTE_FORCE_PROTECTION", "Too many failed sign-in attempts. Please try again later."));
+        return;
+      }
+
       const credential = await repositories.auth.findPasswordCredentialByEmail(email);
       if (!credential || !verifyPassword(password, credential.passwordHash)) {
+        if (loginFailureKey) {
+          incrementRateLimit(loginFailureStore, loginFailureKey, LOGIN_FAILURE_WINDOW_MS);
+        }
+        audit("auth.login_failed", { email, ip: getClientIp(req) });
         json(req, res, 401, createError("INVALID_CREDENTIALS", "Email or password is incorrect."));
         return;
+      }
+      if (loginFailureKey) {
+        clearCounter(loginFailureStore, loginFailureKey);
       }
 
       const rawWebToken = `web_${randomBytes(16).toString("hex")}`;
@@ -811,10 +968,23 @@ const server = createServer(async (req, res) => {
         },
         launcherRequestResolved: Boolean(body.launcherRequest?.trim())
       });
+      audit("auth.login_success", {
+        userId: credential.user.id,
+        email: credential.user.email,
+        launcherRequestResolved: Boolean(body.launcherRequest?.trim())
+      });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/auth/forgot-password") {
+      const authRateLimitKey = `auth:forgot:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "forgot-password", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
       const body = await readJson<{ email?: string }>(req);
       const email = body.email?.trim().toLowerCase();
       if (!email) {
@@ -828,6 +998,7 @@ const server = createServer(async (req, res) => {
           ok: true,
           resetRequested: true
         });
+        audit("auth.reset_requested_unknown_user", { email, ip: getClientIp(req) });
         return;
       }
 
@@ -854,10 +1025,23 @@ const server = createServer(async (req, res) => {
         expiresAt,
         resetUrl: emailDelivered ? undefined : resetUrl.toString()
       });
+      audit("auth.reset_requested", {
+        userId: credential.user.id,
+        email: credential.user.email,
+        emailSent: emailDelivered
+      });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/auth/reset-password") {
+      const authRateLimitKey = `auth:reset:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "reset-password", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
       const body = await readJson<{ token?: string; password?: string; launcherRequest?: string }>(req);
       const token = body.token?.trim();
       const password = body.password?.trim();
@@ -928,31 +1112,45 @@ const server = createServer(async (req, res) => {
         },
         launcherRequestResolved: Boolean(body.launcherRequest?.trim())
       });
+      audit("auth.reset_completed", {
+        userId: resetUser.id,
+        email: resetUser.email,
+        launcherRequestResolved: Boolean(body.launcherRequest?.trim())
+      });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/auth/send-verification") {
-      const webUser = await findUserByWebCookie(req);
-      if (!webUser) {
+      const authRateLimitKey = `auth:verify:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "send-verification", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
+      const sessionUser = await findAuthenticatedUser(req, user);
+      if (!sessionUser) {
         json(req, res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
         return;
       }
 
-      if (webUser.emailVerifiedAt) {
+      if (sessionUser.emailVerifiedAt) {
         json(req, res, 200, {
           ok: true,
           alreadyVerified: true
         });
+        audit("auth.verification_already_verified", { userId: sessionUser.id });
         return;
       }
 
       const body = await readJson<{ source?: string; launcherRequest?: string }>(req);
-      const verification = await createEmailVerification(webUser.id, {
+      const verification = await createEmailVerification(sessionUser.id, {
         source: body.source?.trim(),
         launcherRequest: body.launcherRequest?.trim()
       });
       const verificationDelivered = await deliverVerificationEmail({
-        email: webUser.email,
+        email: sessionUser.email,
         verificationUrl: verification.verificationUrl,
         expiresAt: verification.expiresAt
       });
@@ -964,6 +1162,128 @@ const server = createServer(async (req, res) => {
         emailSent: verificationDelivered,
         verificationUrl: verificationDelivered ? undefined : verification.verificationUrl,
         verificationExpiresAt: verification.expiresAt
+      });
+      audit("auth.verification_sent", {
+        userId: sessionUser.id,
+        email: sessionUser.email,
+        emailSent: verificationDelivered
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/change-email") {
+      const authRateLimitKey = `auth:change-email:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "change-email", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
+      const sessionUser = await findAuthenticatedUser(req, user);
+      if (!sessionUser) {
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        return;
+      }
+
+      const body = await readJson<{ email?: string }>(req);
+      const nextEmail = body.email?.trim().toLowerCase();
+      if (!nextEmail) {
+        json(req, res, 400, createError("BAD_REQUEST", "email is required."));
+        return;
+      }
+
+      if (nextEmail === sessionUser.email.toLowerCase()) {
+        json(req, res, 200, {
+          ok: true,
+          verificationSent: false,
+          emailSent: false
+        });
+        return;
+      }
+
+      const existing = await repositories.auth.findUserByEmail(nextEmail);
+      if (existing && existing.id !== sessionUser.id) {
+        json(req, res, 409, createError("EMAIL_EXISTS", "An account with this email already exists."));
+        return;
+      }
+
+      const updatedUser = await repositories.auth.updateUserEmail(sessionUser.id, nextEmail);
+      if (!updatedUser) {
+        json(req, res, 404, createError("USER_NOT_FOUND", "Account was not found."));
+        return;
+      }
+
+      const verification = await createEmailVerification(updatedUser.id, {
+        source: "launcher"
+      });
+      const verificationDelivered = await deliverVerificationEmail({
+        email: updatedUser.email,
+        verificationUrl: verification.verificationUrl,
+        expiresAt: verification.expiresAt
+      });
+
+      json(req, res, 200, {
+        ok: true,
+        verificationSent: true,
+        emailSent: verificationDelivered,
+        verificationUrl: verificationDelivered ? undefined : verification.verificationUrl,
+        verificationExpiresAt: verification.expiresAt
+      });
+      audit("auth.email_changed", {
+        userId: sessionUser.id,
+        email: updatedUser.email,
+        emailSent: verificationDelivered
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/providers/unlink") {
+      const authRateLimitKey = `auth:unlink-provider:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, authRateLimitKey, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("auth.rate_limited", { route: "unlink-provider", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many auth requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, authRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
+      const sessionUser = await findAuthenticatedUser(req, user);
+      if (!sessionUser) {
+        json(req, res, 401, createError("UNAUTHENTICATED", "Sign in to continue."));
+        return;
+      }
+
+      const body = await readJson<{ provider?: string }>(req);
+      const provider = body.provider?.trim().toLowerCase();
+      if (!provider) {
+        json(req, res, 400, createError("BAD_REQUEST", "provider is required."));
+        return;
+      }
+
+      const linkedProviders = await getLinkedProviders(sessionUser.id);
+      if (!linkedProviders.includes(provider)) {
+        json(req, res, 404, createError("PROVIDER_NOT_LINKED", "That sign-in method is not linked to this account."));
+        return;
+      }
+
+      if (linkedProviders.length <= 1) {
+        json(req, res, 409, createError("LAST_PROVIDER", "At least one sign-in method must remain linked."));
+        return;
+      }
+
+      if (provider === "password") {
+        await repositories.auth.deletePasswordCredential(sessionUser.id);
+      } else {
+        await repositories.auth.deleteAuthIdentityForUser(sessionUser.id, provider);
+      }
+
+      json(req, res, 200, {
+        ok: true,
+        linkedProviders: await getLinkedProviders(sessionUser.id)
+      });
+      audit("auth.provider_unlinked", {
+        userId: sessionUser.id,
+        provider
       });
       return;
     }
@@ -1025,6 +1345,11 @@ const server = createServer(async (req, res) => {
           linkedProviders: await getLinkedProviders(verifiedUser.id),
           emailVerified: true
         },
+        launcherRequestResolved: Boolean(body.launcherRequest?.trim())
+      });
+      audit("auth.verify_email_success", {
+        userId: verifiedUser.id,
+        email: verifiedUser.email,
         launcherRequestResolved: Boolean(body.launcherRequest?.trim())
       });
       return;
@@ -1200,6 +1525,10 @@ const server = createServer(async (req, res) => {
         loginUrl: loginUrl.toString(),
         expiresAt
       });
+      audit("auth.launcher_start", {
+        requestId: rawRequestToken,
+        source: "launcher"
+      });
       return;
     }
 
@@ -1232,6 +1561,11 @@ const server = createServer(async (req, res) => {
 
       await repositories.auth.resolveLauncherAuthRequest(sha256(requestId), webUser.id);
       json(req, res, 200, { ok: true });
+      audit("auth.launcher_complete", {
+        requestId,
+        userId: webUser.id,
+        email: webUser.email
+      });
       return;
     }
 
@@ -1288,9 +1622,14 @@ const server = createServer(async (req, res) => {
           displayName: resolvedUser.displayName,
           linkedProviders: await getLinkedProviders(resolvedUser.id),
           emailVerified: Boolean(resolvedUser.emailVerifiedAt),
-          source: "remote",
-          lastSyncedAt: new Date().toISOString()
+        source: "remote",
+        lastSyncedAt: new Date().toISOString()
         }
+      });
+      audit("auth.launcher_resolved", {
+        requestId,
+        userId: resolvedUser.id,
+        email: resolvedUser.email
       });
       return;
     }
@@ -1335,6 +1674,14 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/payment/handoff") {
+      const paymentRateLimitKey = `payment:handoff:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, paymentRateLimitKey, PAYMENT_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("payment.rate_limited", { route: "handoff", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many payment requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, paymentRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
       if (!user) {
         json(req, res, 401, createError("UNAUTHENTICATED", "You need to sign in again before starting checkout."));
         return;
@@ -1374,6 +1721,11 @@ const server = createServer(async (req, res) => {
         handoffToken: rawToken,
         paymentUrl: createPaymentUrl(rawToken),
         expiresAt
+      });
+      audit("payment.handoff_created", {
+        userId: user.id,
+        productId,
+        handoffToken: shortTokenHash(rawToken)
       });
       return;
     }
@@ -1429,6 +1781,14 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/payment/create-checkout-session") {
+      const paymentRateLimitKey = `payment:checkout:${getClientIp(req)}`;
+      if (isRateLimited(rateLimitStore, paymentRateLimitKey, PAYMENT_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+        audit("payment.rate_limited", { route: "checkout", ip: getClientIp(req) });
+        json(req, res, 429, createError("RATE_LIMITED", "Too many payment requests. Please wait before trying again."));
+        return;
+      }
+      incrementRateLimit(rateLimitStore, paymentRateLimitKey, RATE_LIMIT_WINDOW_MS);
+
       const body = await readJson<{ handoffToken?: string }>(req);
       const handoffToken = body.handoffToken?.trim();
       if (!handoffToken) {
@@ -1508,6 +1868,12 @@ const server = createServer(async (req, res) => {
         checkoutUrl,
         paymentId: createdPayment.id
       });
+      audit("payment.checkout_created", {
+        userId: handoff.userId,
+        productId: handoff.productId,
+        paymentId: createdPayment.id,
+        provider: paymentBase.provider
+      });
       return;
     }
 
@@ -1555,6 +1921,12 @@ const server = createServer(async (req, res) => {
               providerSessionId: body.data?.attributes?.identifier ?? payment.providerSessionId
             });
             await upsertEntitlement(payment.userId, payment.productId);
+            audit("payment.webhook_order_created", {
+              provider: "lemonsqueezy",
+              userId: payment.userId,
+              productId: payment.productId,
+              paymentId: payment.id
+            });
           }
         }
       } else {

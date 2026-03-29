@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MCPCard } from "../../components/MCPCard/MCPCard";
-import { useAppStore } from "../../store/app-store";
+import { getFriendlyErrorMessage } from "../../lib/launcher-error";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 import {
   type StorePlatform,
@@ -8,6 +8,7 @@ import {
   getPlatformTone,
   matchesStorePlatform
 } from "../../lib/store-platform";
+import { useAppStore } from "../../store/app-store";
 
 export function StorePage() {
   const {
@@ -36,6 +37,7 @@ export function StorePage() {
     { id: "packs", label: isKorean ? "팩" : "Packs" },
     { id: "all", label: isKorean ? "전체" : "All" }
   ];
+
   const filteredCatalog = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return catalog.filter((item) => {
@@ -59,11 +61,14 @@ export function StorePage() {
       return haystack.includes(normalized);
     });
   }, [catalog, platform, query]);
+
   const featuredPacks = useMemo(
     () => catalog.filter((item) => detectStorePlatform(item) === "packs").slice(0, 2),
     [catalog]
   );
-  const filteredPieces = filteredCatalog.filter((item) => detectStorePlatform(item) !== "packs");
+  const filteredPieces = filteredCatalog.filter(
+    (item) => detectStorePlatform(item) !== "packs"
+  );
 
   useEffect(() => {
     if (!purchasePending) {
@@ -71,10 +76,14 @@ export function StorePage() {
     }
 
     const handleFocus = () => {
-      setPurchaseMessage("Refreshing your purchases...");
+      setPurchaseMessage(
+        isKorean ? "구매 상태를 다시 확인하는 중입니다..." : "Refreshing your purchases..."
+      );
       void refreshStoreAccess()
         .then(() => {
-          setPurchaseMessage("Purchase status refreshed.");
+          setPurchaseMessage(
+            isKorean ? "구매 상태를 새로고쳤습니다." : "Purchase status refreshed."
+          );
         })
         .finally(() => {
           setPurchasePending(false);
@@ -85,7 +94,7 @@ export function StorePage() {
 
     window.addEventListener("focus", handleFocus, { once: true });
     return () => window.removeEventListener("focus", handleFocus);
-  }, [purchasePending, refreshStoreAccess]);
+  }, [isKorean, purchasePending, refreshStoreAccess]);
 
   const handlePurchase = async (item: (typeof catalog)[number]) => {
     const baseUrl = item.commerce?.checkoutUrl ?? item.commerce?.productUrl;
@@ -95,9 +104,7 @@ export function StorePage() {
       try {
         targetUrl = await createPaymentHandoff(item.id, "launcher");
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : isKorean ? "결제를 시작할 수 없습니다." : "Checkout could not be started.";
-        window.alert(message);
+        window.alert(getFriendlyErrorMessage(error, { isKorean, context: "payment" }));
         return;
       }
     } else {
@@ -107,11 +114,12 @@ export function StorePage() {
     if (!targetUrl) {
       window.alert(
         isKorean
-          ? "이 상품은 아직 구매하지 않았고, 결제 흐름도 아직 연결되지 않았습니다."
-          : "This item is not owned yet, but its checkout flow is not connected yet."
+          ? "이 상품의 결제 흐름이 아직 연결되지 않았습니다. 잠시 후 다시 확인해 주세요."
+          : "Checkout is not connected for this item yet. Please try again later."
       );
       return;
     }
+
     setPurchasePending(true);
     setPurchasePendingId(item.id);
     setPurchaseMessage(
@@ -131,8 +139,12 @@ export function StorePage() {
           <p className="subtle">{copy.subtitle}</p>
         </div>
         <div className="hero-stats">
-          <span className="pill">{installedCount} {copy.installed}</span>
-          <span className="pill">{runningCount} {copy.running}</span>
+          <span className="pill">
+            {installedCount} {copy.installed}
+          </span>
+          <span className="pill">
+            {runningCount} {copy.running}
+          </span>
         </div>
       </div>
 
@@ -180,7 +192,9 @@ export function StorePage() {
               <button
                 key={item.id}
                 type="button"
-                className={`platform-button ${getPlatformTone(item.id)}${platform === item.id ? " active" : ""}`}
+                className={`platform-button ${getPlatformTone(item.id)}${
+                  platform === item.id ? " active" : ""
+                }`}
                 onClick={() => setPlatform(item.id)}
               >
                 {item.label}
@@ -197,7 +211,11 @@ export function StorePage() {
             type="button"
             className="secondary-button"
             onClick={() => {
-              setPurchaseMessage(isKorean ? "구매 상태를 새로고치는 중입니다..." : "Refreshing your purchases...");
+              setPurchaseMessage(
+                isKorean
+                  ? "구매 상태를 새로고치는 중입니다..."
+                  : "Refreshing your purchases..."
+              );
               void refreshStoreAccess().finally(() =>
                 window.setTimeout(() => setPurchaseMessage(""), 2500)
               );
@@ -215,7 +233,11 @@ export function StorePage() {
               <div className="card-row">
                 <div>
                   <p className="eyebrow">{isKorean ? "현재 모듈" : "Current Modules"}</p>
-                  <h3>{isKorean ? "지금 바로 사용할 수 있는 워크플로 조각" : "Implemented workflow pieces"}</h3>
+                  <h3>
+                    {isKorean
+                      ? "지금 바로 사용할 수 있는 워크플로 조각"
+                      : "Implemented workflow pieces"}
+                  </h3>
                 </div>
                 <span className="pill">{filteredPieces.length}</span>
               </div>
@@ -243,11 +265,17 @@ export function StorePage() {
         </>
       ) : (
         <div className="card compact-empty-state">
-          <strong>{isKorean ? "이 분류에는 아직 모듈이 없습니다." : "No MCPs in this lane yet."}</strong>
+          <strong>
+            {isKorean ? "이 분류에는 아직 모듈이 없습니다." : "No MCPs in this lane yet."}
+          </strong>
           <p className="subtle">
             {isKorean
-              ? `카탈로그에 추가되면 ${platform === "packs" ? "팩 묶음" : `${platform} 워크플로 모듈`}이 이곳에 표시됩니다.`
-              : `This tab is ready for ${platform === "packs" ? "pack bundles" : `${platform} workflow pieces`} once they are added to the catalog.`}
+              ? `카탈로그에 추가되면 ${
+                  platform === "packs" ? "팩 묶음" : `${platform} 워크플로 모듈`
+                }이 이곳에 표시됩니다.`
+              : `This tab is ready for ${
+                  platform === "packs" ? "pack bundles" : `${platform} workflow pieces`
+                } once they are added to the catalog.`}
           </p>
         </div>
       )}
@@ -262,6 +290,8 @@ function buildPurchaseUrl(baseUrl: string, productId: string): string {
     url.searchParams.set("source", "launcher");
     return url.toString();
   } catch {
-    return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}productId=${encodeURIComponent(productId)}&source=launcher`;
+    return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}productId=${encodeURIComponent(
+      productId
+    )}&source=launcher`;
   }
 }

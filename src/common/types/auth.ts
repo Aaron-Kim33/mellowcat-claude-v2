@@ -26,6 +26,28 @@ export interface LauncherAuthStartResponse {
   expiresAt: string;
 }
 
+export interface VerificationActionResponse {
+  ok: true;
+  alreadyVerified?: boolean;
+  verificationSent?: boolean;
+  emailSent?: boolean;
+  verificationUrl?: string | null;
+  verificationExpiresAt?: string;
+}
+
+export interface ChangeEmailResponse {
+  ok: true;
+  emailSent?: boolean;
+  verificationSent?: boolean;
+  verificationUrl?: string | null;
+  verificationExpiresAt?: string;
+}
+
+export interface ProviderUnlinkResponse {
+  ok: true;
+  linkedProviders: AuthProvider[];
+}
+
 export interface LauncherAuthPendingResponse {
   ok: true;
   status: "pending";

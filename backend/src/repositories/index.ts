@@ -12,5 +12,11 @@ export function createRepositories(): BackendRepositories {
     });
   }
 
+  if (process.env.MELLOWCAT_ALLOW_FILE_REPOSITORY?.trim().toLowerCase() !== "true") {
+    console.warn(
+      "[backend] Supabase repository is not configured. Falling back to file storage. Set MELLOWCAT_ALLOW_FILE_REPOSITORY=true only for local development."
+    );
+  }
+
   return createFileRepositories();
 }

@@ -187,6 +187,19 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
         const row = first(rows);
         return row ? mapUser(row) : undefined;
       },
+      async updateUserEmail(userId, email) {
+        const rows = await client.request<Json[]>("app_users", {
+          method: "PATCH",
+          query: `id=eq.${encodeURIComponent(userId)}`,
+          body: JSON.stringify({
+            email,
+            email_verified_at: null,
+            updated_at: new Date().toISOString()
+          })
+        });
+        const row = first(rows);
+        return row ? mapUser(row) : undefined;
+      },
       async listAuthProvidersForUser(userId) {
         const providers = new Set<string>();
 
@@ -276,6 +289,12 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
           })
         });
       },
+      async deletePasswordCredential(userId) {
+        await client.request<Json[]>("password_credentials", {
+          method: "DELETE",
+          query: `user_id=eq.${encodeURIComponent(userId)}`
+        });
+      },
       async findUserByIdentity(provider, providerUserId) {
         const identityRows = await client.request<Json[]>("auth_identities", {
           query: [
@@ -306,6 +325,15 @@ export function createSupabaseRepositories(config: SupabaseConfig): BackendRepos
             email: input.email ?? null,
             updated_at: new Date().toISOString()
           })
+        });
+      },
+      async deleteAuthIdentityForUser(userId, provider) {
+        await client.request<Json[]>("auth_identities", {
+          method: "DELETE",
+          query: [
+            `user_id=eq.${encodeURIComponent(userId)}`,
+            `provider=eq.${encodeURIComponent(provider)}`
+          ].join("&")
         });
       },
       async createLauncherSession(input) {
