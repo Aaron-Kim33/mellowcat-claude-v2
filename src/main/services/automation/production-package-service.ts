@@ -1,20 +1,65 @@
 import path from "node:path";
 import type {
   AutomationJobSnapshot,
+  AutomationJobStage,
   ShortformScriptDraft
 } from "../../../common/types/automation";
+import type { GeneratedMediaPackageManifest } from "../../../common/types/media-generation";
+import type { WorkflowCheckpointEnvelope, WorkflowJobSnapshot } from "../../../common/types/slot-workflow";
 import { FileService } from "../system/file-service";
 import { PathService } from "../system/path-service";
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
+import { CheckpointWorkflowService } from "./checkpoint-workflow-service";
+import { PexelsAssetService } from "./pexels-asset-service";
+import { ScenePlanService } from "./scene-plan-service";
+import { SubtitleService } from "./subtitle-service";
+import { VoiceoverService } from "./voiceover-service";
+import { MediaCompositionService } from "./media-composition-service";
 
 export class ProductionPackageService {
   constructor(
     private readonly pathService: PathService,
     private readonly fileService: FileService,
-    private readonly workflowConfigService: ShortformWorkflowConfigService
+    private readonly workflowConfigService: ShortformWorkflowConfigService,
+    private readonly checkpointWorkflowService: CheckpointWorkflowService,
+    private readonly scenePlanService: ScenePlanService,
+    private readonly pexelsAssetService: PexelsAssetService,
+    private readonly subtitleService: SubtitleService,
+    private readonly voiceoverService: VoiceoverService,
+    private readonly mediaCompositionService: MediaCompositionService
   ) {}
 
-  createPackage(job: AutomationJobSnapshot, draft: ShortformScriptDraft): string {
+  async runCreatePipeline(jobId: string): Promise<WorkflowJobSnapshot> {
+    const snapshot = this.checkpointWorkflowService.inspectJob(jobId);
+    if (!snapshot.job) {
+      throw new Error(`Workflow job ${jobId} was not found.`);
+    }
+
+    const processCheckpoint = snapshot.checkpoints[2] as
+      | WorkflowCheckpointEnvelope<{
+          scriptDraft?: ShortformScriptDraft;
+        }>
+      | undefined;
+    const draft = processCheckpoint?.payload?.scriptDraft;
+    if (!draft) {
+      throw new Error("checkpoint-2가 아직 없어 소재 생성을 시작할 수 없습니다.");
+    }
+
+    const now = new Date().toISOString();
+    const job: AutomationJobSnapshot = {
+      id: snapshot.job.jobId,
+      title: snapshot.job.title,
+      stage: this.resolveCreateStage(snapshot.job.currentStage),
+      createdAt: snapshot.job.createdAt,
+      updatedAt: now
+    };
+
+    await this.createPackage(job, draft);
+
+    return this.checkpointWorkflowService.inspectJob(jobId);
+  }
+
+  async createPackage(job: AutomationJobSnapshot, draft: ShortformScriptDraft): Promise<string> {
     const packagePath = this.pathService.getAutomationPackagePath(job.id);
     const workflowConfig = this.workflowConfigService.get();
     this.fileService.ensureDir(packagePath);
@@ -32,11 +77,18 @@ export class ProductionPackageService {
       "",
       hashtags
     ].join("\n");
+    const scenePlanResult = await this.scenePlanService.generateScenePlan(draft, primaryTitle);
+    const scenePlan = scenePlanResult.document;
 
     this.fileService.writeJsonFile(path.join(packagePath, "script.json"), {
       job,
       draft
     });
+    this.fileService.writeJsonFile(path.join(packagePath, "scene-plan-source.json"), {
+      source: scenePlanResult.source,
+      error: scenePlanResult.error ?? null
+    });
+    this.fileService.writeJsonFile(path.join(packagePath, "scene-plan.json"), scenePlan);
 
     this.fileService.writeJsonFile(path.join(packagePath, "package.json"), {
       jobId: job.id,
@@ -45,6 +97,16 @@ export class ProductionPackageService {
       stage: job.stage,
       outputs: [
         "script.json",
+        "scene-plan-source.json",
+        "scene-plan.json",
+        "asset-manifest.json",
+        "voiceover-cues.json",
+        "voiceover-script.txt",
+        "voiceover-source.json",
+        "voiceover.mp3",
+        "captions.srt",
+        "composition-source.json",
+        "final-video.mp4",
         "caption.txt",
         "narration.txt",
         "hook.txt",
@@ -131,25 +193,111 @@ export class ProductionPackageService {
         }
       }
     );
+    const generatedMediaManifest: GeneratedMediaPackageManifest = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      provider: "youtube-material-generator-mcp",
+      language: "ko",
+      totalDurationSec: scenePlan.totalDurationSec,
+      scenes: scenePlan.scenes.map((scene) => ({
+        sceneIndex: scene.index,
+        fallbackUsed: true,
+        trim: {
+          sourceStartSec: 0,
+          sourceEndSec: scene.durationSec
+        }
+      })),
+      voiceoverCues: scenePlan.scenes.map((scene) => ({
+        sceneIndex: scene.index,
+        startSec: scene.startSec,
+        endSec: scene.endSec,
+        text: scene.text
+      })),
+      subtitles: scenePlan.scenes.map((scene, index) => ({
+        index: index + 1,
+        startSec: scene.startSec,
+        endSec: scene.endSec,
+        text: scene.text
+      })),
+      artifacts: {
+        scenePlanPath: "scene-plan.json",
+        assetsManifestPath: "asset-manifest.json",
+        voiceoverPath: "",
+        subtitlePath: "",
+        finalVideoPath: "",
+        thumbnailPath: undefined
+      }
+    };
+    const enrichedMediaManifest = await this.pexelsAssetService.enrichManifestWithPexels(
+      generatedMediaManifest,
+      scenePlan,
+      workflowConfig.pexelsApiKey
+    );
+    const subtitleContents = this.subtitleService.buildSrt(enrichedMediaManifest.subtitles);
+    const voiceoverScript = this.subtitleService.buildVoiceoverScript(
+      enrichedMediaManifest.voiceoverCues
+    );
+    this.fileService.writeJsonFile(
+      path.join(packagePath, "voiceover-cues.json"),
+      enrichedMediaManifest.voiceoverCues
+    );
+    this.fileService.writeTextFile(
+      path.join(packagePath, "voiceover-script.txt"),
+      voiceoverScript
+    );
+    this.fileService.writeTextFile(path.join(packagePath, "captions.srt"), subtitleContents);
+    const voiceoverResult = await this.voiceoverService.generateVoiceover(
+      enrichedMediaManifest.voiceoverCues,
+      packagePath
+    );
+    this.fileService.writeJsonFile(path.join(packagePath, "voiceover-source.json"), {
+      source: voiceoverResult.source,
+      error: voiceoverResult.error ?? null
+    });
+    let finalizedMediaManifest: GeneratedMediaPackageManifest = {
+      ...enrichedMediaManifest,
+      artifacts: {
+        ...enrichedMediaManifest.artifacts,
+        voiceoverPath: voiceoverResult.relativePath ?? "",
+        subtitlePath: "captions.srt"
+      }
+    };
+    const compositionResult = await this.mediaCompositionService.composeFinalVideo(
+      finalizedMediaManifest,
+      packagePath
+    );
+    finalizedMediaManifest = compositionResult.manifest;
+    this.fileService.writeJsonFile(path.join(packagePath, "composition-source.json"), {
+      source: compositionResult.source,
+      error: compositionResult.error ?? null
+    });
+    this.fileService.writeJsonFile(
+      path.join(packagePath, "asset-manifest.json"),
+      finalizedMediaManifest
+    );
+
+    const uploadRequest = {
+      platform: "youtube" as const,
+      status: "draft" as const,
+      videoFilePath: compositionResult.relativePath
+        ? path.join(packagePath, compositionResult.relativePath)
+        : "",
+      thumbnailFilePath: "",
+      scheduledPublishAt: "",
+      metadata: {
+        title: uploadTitle,
+        description: uploadDescription,
+        tags: hashtags.split(" "),
+        categoryId: workflowConfig.youtubeCategoryId ?? "22",
+        privacyStatus: workflowConfig.youtubePrivacyStatus ?? "private",
+        selfDeclaredMadeForKids:
+          (workflowConfig.youtubeAudience ?? "not_made_for_kids") === "made_for_kids"
+      }
+    };
 
     this.fileService.writeJsonFile(
       path.join(packagePath, "youtube-upload-request.json"),
-      {
-        platform: "youtube",
-        status: "draft",
-        videoFilePath: "",
-        thumbnailFilePath: "",
-        scheduledPublishAt: "",
-        metadata: {
-          title: uploadTitle,
-          description: uploadDescription,
-          tags: hashtags.split(" "),
-          categoryId: workflowConfig.youtubeCategoryId ?? "22",
-          privacyStatus: workflowConfig.youtubePrivacyStatus ?? "private",
-          selfDeclaredMadeForKids:
-            (workflowConfig.youtubeAudience ?? "not_made_for_kids") === "made_for_kids"
-        }
-      }
+      uploadRequest
     );
 
     this.fileService.writeTextFile(
@@ -157,6 +305,12 @@ export class ProductionPackageService {
       [
         "# Production Checklist",
         "",
+        "- Review `scene-plan.json` before collecting assets",
+        "- Populate `asset-manifest.json` with selected scene assets",
+        "- Review `voiceover-cues.json` and `voiceover-script.txt` before TTS generation",
+        "- Confirm `voiceover-source.json` and generated dubbing audio from the scene timing",
+        "- Confirm `captions.srt` lines and timing from the same scene map",
+        "- Confirm `composition-source.json` and the generated `final-video.mp4`",
         "- Confirm the chosen title option",
         "- Tighten hook for first 3 seconds if needed",
         "- Add Korean subtitles with strong contrast words",
@@ -166,6 +320,17 @@ export class ProductionPackageService {
         "- Review CTA tone before publishing"
       ].join("\n")
     );
+
+    this.checkpointWorkflowService.writeCreateCheckpoint({
+      job,
+      packagePath,
+      draft,
+      uploadRequest
+    });
+    this.checkpointWorkflowService.writeOutputCheckpoint({
+      job,
+      uploadRequest
+    });
 
     return packagePath;
   }
@@ -197,5 +362,12 @@ export class ProductionPackageService {
 
   private clamp(value: string, maxLength: number): string {
     return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+  }
+
+  private resolveCreateStage(currentStage: string): AutomationJobStage {
+    if (currentStage === "error" || currentStage === "rejected") {
+      return "error";
+    }
+    return "ready";
   }
 }

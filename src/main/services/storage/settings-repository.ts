@@ -7,8 +7,13 @@ import { SecretsStore } from "./secrets-store";
 const SECRET_KEYS = [
   "openRouterApiKey",
   "openAiApiKey",
+  "secondaryOpenRouterApiKey",
+  "secondaryOpenAiApiKey",
   "telegramBotToken",
-  "youtubeOAuthClientSecret"
+  "pexelsApiKey",
+  "azureSpeechKey",
+  "youtubeOAuthClientSecret",
+  "instagramAccessToken"
 ] as const;
 
 export class SettingsRepository {
@@ -103,14 +108,19 @@ export class SettingsRepository {
       generatedMcpConfigPath: this.pathService.getGeneratedConfigPath(),
       autoUpdate: true,
       launchOnStartup: false,
-      launcherLanguage: "en",
+      launcherLanguage: "ko",
       trendWindow: "24h",
       apiBaseUrl: process.env.MELLOWCAT_API_URL,
       claudeArgs: [],
       scriptProvider: "openrouter_api",
-      openRouterModel: "openai/gpt-4o-mini",
-      openAiModel: "gpt-5-mini",
-      telegramOutputLanguage: "en",
+      openRouterModel: "openai/gpt-5.4-mini",
+      openAiModel: "gpt-5.4-mini",
+      secondaryScriptProvider: "openai_api",
+      secondaryOpenRouterModel: "anthropic/claude-sonnet-4.6",
+      secondaryOpenAiModel: "gpt-5.4",
+      telegramOutputLanguage: "ko",
+      instagramAccountHandle: "",
+      azureSpeechVoice: "ko-KR-SunHiNeural",
       youtubePrivacyStatus: "private",
       youtubeCategoryId: "22",
       youtubeAudience: "not_made_for_kids",

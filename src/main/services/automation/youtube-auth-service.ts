@@ -11,6 +11,7 @@ import type {
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 import { SecretsStore } from "../storage/secrets-store";
 import { PathService } from "../system/path-service";
+import { CheckpointWorkflowService } from "./checkpoint-workflow-service";
 
 interface YouTubeAuthStateFile {
   connectedAt?: string;
@@ -24,7 +25,8 @@ export class YouTubeAuthService {
   constructor(
     private readonly workflowConfigService: ShortformWorkflowConfigService,
     private readonly secretsStore: SecretsStore,
-    private readonly pathService: PathService
+    private readonly pathService: PathService,
+    private readonly checkpointWorkflowService: CheckpointWorkflowService
   ) {}
 
   getStatus(): YouTubeAuthStatus {
@@ -448,6 +450,19 @@ export class YouTubeAuthService {
     };
 
     fs.writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf-8");
+    const jobId = path.basename(packagePath);
+    const now = new Date().toISOString();
+    this.checkpointWorkflowService.writeOutputCheckpoint({
+      job: {
+        id: jobId,
+        title: uploadRequest.metadata.title,
+        stage: partial.status === "error" ? "error" : "ready",
+        createdAt: now,
+        updatedAt: now
+      },
+      uploadRequest,
+      uploadResult: result
+    });
     return result;
   }
 

@@ -14,6 +14,13 @@ import type {
   YouTubeUploadRequest,
   YouTubeUploadResult
 } from "@common/types/settings";
+import type {
+  ManualInputCheckpointPayload,
+  ManualCreateCheckpointPayload,
+  ManualOutputCheckpointPayload,
+  ManualProcessCheckpointPayload,
+  WorkflowJobSnapshot
+} from "@common/types/slot-workflow";
 
 interface AppState {
   catalog: MCPCatalogItem[];
@@ -22,6 +29,7 @@ interface AppState {
   telegramStatus?: TelegramControlStatus;
   settings?: AppSettings;
   workflowConfig?: ShortformWorkflowConfig;
+  workflowJobSnapshot?: WorkflowJobSnapshot;
   appUpdateStatus?: AppUpdateStatus;
   youTubeAuthStatus?: YouTubeAuthStatus;
   youTubeUploadRequest?: YouTubeUploadRequest;
@@ -63,6 +71,12 @@ interface AppState {
   selectMcpLog: (mcpId: string) => void;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
   saveWorkflowConfig: (patch: Partial<ShortformWorkflowConfig>) => Promise<void>;
+  refreshWorkflowJobSnapshot: (jobId: string) => Promise<void>;
+  runCreatePipeline: (jobId: string) => Promise<void>;
+  saveManualInputCheckpoint: (payload: ManualInputCheckpointPayload) => Promise<void>;
+  saveManualProcessCheckpoint: (payload: ManualProcessCheckpointPayload) => Promise<void>;
+  saveManualCreateCheckpoint: (payload: ManualCreateCheckpointPayload) => Promise<void>;
+  saveManualOutputCheckpoint: (payload: ManualOutputCheckpointPayload) => Promise<void>;
   refreshStoreAccess: () => Promise<void>;
   login: () => Promise<void>;
   cancelLogin: () => Promise<void>;
@@ -260,7 +274,9 @@ export const useAppStore = create<AppState>((set) => ({
     set({ youTubeAuthStatus });
   },
   refreshYouTubeUploadRequest: async () => {
-    const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
+    const packagePath =
+      useAppStore.getState().telegramStatus?.lastPackagePath ??
+      useAppStore.getState().workflowJobSnapshot?.resolvedPackagePath;
     if (!packagePath) {
       set({ youTubeUploadRequest: undefined });
       return;
@@ -271,7 +287,9 @@ export const useAppStore = create<AppState>((set) => ({
     set({ youTubeUploadRequest });
   },
   saveYouTubeUploadRequest: async (patch: Partial<YouTubeUploadRequest>) => {
-    const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
+    const packagePath =
+      useAppStore.getState().telegramStatus?.lastPackagePath ??
+      useAppStore.getState().workflowJobSnapshot?.resolvedPackagePath;
     if (!packagePath) {
       return;
     }
@@ -284,7 +302,9 @@ export const useAppStore = create<AppState>((set) => ({
   pickYouTubeThumbnailFile: async () =>
     window.mellowcat.automation.pickYouTubeThumbnailFile(),
   uploadLastPackageToYouTube: async () => {
-    const packagePath = useAppStore.getState().telegramStatus?.lastPackagePath;
+    const packagePath =
+      useAppStore.getState().telegramStatus?.lastPackagePath ??
+      useAppStore.getState().workflowJobSnapshot?.resolvedPackagePath;
     if (!packagePath) {
       return;
     }
@@ -478,6 +498,45 @@ export const useAppStore = create<AppState>((set) => ({
       youTubeAuthStatus,
       youTubeUploadRequest
     });
+  },
+  refreshWorkflowJobSnapshot: async (jobId: string) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.inspectWorkflowJob(jobId);
+    set({ workflowJobSnapshot });
+  },
+  runCreatePipeline: async (jobId: string) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.runCreatePipeline(jobId);
+    const packagePath =
+      workflowJobSnapshot.resolvedPackagePath ??
+      useAppStore.getState().telegramStatus?.lastPackagePath;
+    const [youTubeAuthStatus, youTubeUploadRequest] = await Promise.all([
+      window.mellowcat.automation.getYouTubeStatus(),
+      packagePath
+        ? window.mellowcat.automation
+            .inspectYouTubeUploadRequest(packagePath)
+            .catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
+    set({
+      workflowJobSnapshot,
+      youTubeAuthStatus,
+      youTubeUploadRequest
+    });
+  },
+  saveManualInputCheckpoint: async (payload) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.saveManualInputCheckpoint(payload);
+    set({ workflowJobSnapshot });
+  },
+  saveManualProcessCheckpoint: async (payload) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.saveManualProcessCheckpoint(payload);
+    set({ workflowJobSnapshot });
+  },
+  saveManualCreateCheckpoint: async (payload) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.saveManualCreateCheckpoint(payload);
+    set({ workflowJobSnapshot });
+  },
+  saveManualOutputCheckpoint: async (payload) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.saveManualOutputCheckpoint(payload);
+    set({ workflowJobSnapshot });
   },
   refreshStoreAccess: async () => {
     const [authSession, catalog, installed] = await Promise.all([

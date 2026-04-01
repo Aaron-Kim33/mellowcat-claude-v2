@@ -39,6 +39,29 @@ export class PathService {
     return path.join(this.getAutomationPackagesRootPath(), jobId);
   }
 
+  getAutomationJobsRootPath(): string {
+    return this.getAutomationPackagesRootPath();
+  }
+
+  getAutomationJobPath(jobId: string): string {
+    return this.getAutomationPackagePath(jobId);
+  }
+
+  getAutomationJobRecordPath(jobId: string): string {
+    return path.join(this.getAutomationJobPath(jobId), "job.json");
+  }
+
+  getAutomationCheckpointPath(jobId: string, checkpointNumber: 1 | 2 | 3 | 4): string {
+    return path.join(this.getAutomationJobPath(jobId), `checkpoint-${checkpointNumber}`, "checkpoint.json");
+  }
+
+  getAutomationCheckpointAttachmentsPath(
+    jobId: string,
+    checkpointNumber: 1 | 2 | 3 | 4
+  ): string {
+    return path.join(this.getAutomationJobPath(jobId), `checkpoint-${checkpointNumber}`, "attachments");
+  }
+
   getBundledResourcesPath(): string {
     return app.isPackaged
       ? path.join(process.resourcesPath, "bundled")

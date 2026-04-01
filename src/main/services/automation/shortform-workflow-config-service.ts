@@ -9,7 +9,9 @@ const SECRET_KEYS = [
   "openRouterApiKey",
   "openAiApiKey",
   "telegramBotToken",
-  "youtubeOAuthClientSecret"
+  "pexelsApiKey",
+  "youtubeOAuthClientSecret",
+  "instagramAccessToken"
 ] as const;
 
 export class ShortformWorkflowConfigService {
@@ -44,10 +46,23 @@ export class ShortformWorkflowConfigService {
 
     assignIfMissing("trendWindow", settings.trendWindow);
     assignIfMissing("scriptProvider", settings.scriptProvider);
+    assignIfMissing("inputAiConnection", "connection_1");
+    assignIfMissing("processAiConnection", "connection_1");
+    assignIfMissing("createAiConnection", "connection_1");
+    assignIfMissing("outputAiConnection", "connection_1");
+    assignIfMissing("inputAiProvider", settings.scriptProvider);
+    assignIfMissing("processAiProvider", settings.scriptProvider);
+    assignIfMissing("createAiProvider", settings.scriptProvider);
+    assignIfMissing("outputAiProvider", settings.scriptProvider);
+    assignIfMissing("inputAiModel", settings.openRouterModel ?? settings.openAiModel);
+    assignIfMissing("processAiModel", settings.openRouterModel ?? settings.openAiModel);
+    assignIfMissing("createAiModel", settings.openRouterModel ?? settings.openAiModel);
+    assignIfMissing("outputAiModel", settings.openRouterModel ?? settings.openAiModel);
     assignIfMissing("openRouterModel", settings.openRouterModel);
     assignIfMissing("openAiModel", settings.openAiModel);
     assignIfMissing("telegramAdminChatId", settings.telegramAdminChatId);
     assignIfMissing("telegramOutputLanguage", settings.telegramOutputLanguage);
+    assignIfMissing("instagramAccountHandle", settings.instagramAccountHandle);
     assignIfMissing("youtubeChannelLabel", settings.youtubeChannelLabel);
     assignIfMissing("youtubePrivacyStatus", settings.youtubePrivacyStatus);
     assignIfMissing("youtubeCategoryId", settings.youtubeCategoryId);
@@ -187,11 +202,37 @@ export class ShortformWorkflowConfigService {
 
   private getDefaults(): ShortformWorkflowConfig {
     return {
+      inputMode: "auto",
+      processMode: "auto",
+      createMode: "auto",
+      outputMode: "auto",
+      inputProviderType: "builtin",
+      processProviderType: "builtin",
+      createProviderType: "builtin",
+      outputProviderType: "builtin",
+      inputAiConnection: "connection_1",
+      inputAiProvider: "openrouter_api",
+      inputAiModel: "openai/gpt-5.4-mini",
+      processAiConnection: "connection_1",
+      processAiProvider: "openrouter_api",
+      processAiModel: "openai/gpt-5.4-mini",
+      createAiConnection: "connection_1",
+      createAiProvider: "openrouter_api",
+      createAiModel: "openai/gpt-5.4-mini",
+      outputAiConnection: "connection_1",
+      outputAiProvider: "openrouter_api",
+      outputAiModel: "openai/gpt-5.4-mini",
+      inputAiSummaryEnabled: true,
+      processAiGenerationEnabled: true,
+      createAiGenerationEnabled: false,
+      outputAiGenerationEnabled: false,
       trendWindow: "24h",
+      createTargetDurationSec: 60,
+      createMinimumSceneCount: 3,
       scriptProvider: "openrouter_api",
-      openRouterModel: "openai/gpt-4o-mini",
-      openAiModel: "gpt-5-mini",
-      telegramOutputLanguage: "en",
+      openRouterModel: "openai/gpt-5.4-mini",
+      openAiModel: "gpt-5.4-mini",
+      telegramOutputLanguage: "ko",
       youtubePrivacyStatus: "private",
       youtubeCategoryId: "22",
       youtubeAudience: "not_made_for_kids",

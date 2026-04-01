@@ -2,6 +2,14 @@ import { BrowserWindow, dialog, ipcMain } from "electron";
 import type { OpenDialogOptions } from "electron";
 import type { ShortformWorkflowConfig } from "../../common/types/automation";
 import type { YouTubeUploadRequest } from "../../common/types/settings";
+import type {
+  ManualInputCheckpointPayload,
+  ManualCreateCheckpointPayload,
+  ManualOutputCheckpointPayload,
+  ManualProcessCheckpointPayload
+} from "../../common/types/slot-workflow";
+import { CheckpointWorkflowService } from "../services/automation/checkpoint-workflow-service";
+import { ProductionPackageService } from "../services/automation/production-package-service";
 import { TelegramControlService } from "../services/automation/telegram-control-service";
 import { ShortformWorkflowConfigService } from "../services/automation/shortform-workflow-config-service";
 import { YouTubeAuthService } from "../services/automation/youtube-auth-service";
@@ -9,7 +17,9 @@ import { YouTubeAuthService } from "../services/automation/youtube-auth-service"
 export function registerAutomationIpc(
   telegramControlService: TelegramControlService,
   youTubeAuthService: YouTubeAuthService,
-  workflowConfigService: ShortformWorkflowConfigService
+  workflowConfigService: ShortformWorkflowConfigService,
+  checkpointWorkflowService: CheckpointWorkflowService,
+  productionPackageService: ProductionPackageService
 ): void {
   ipcMain.handle("automation:workflow:getConfig", () => workflowConfigService.get());
   ipcMain.handle(
@@ -70,5 +80,31 @@ export function registerAutomationIpc(
   });
   ipcMain.handle("automation:youtube:uploadPackage", (_event, packagePath: string) =>
     youTubeAuthService.uploadPackage(packagePath)
+  );
+  ipcMain.handle("automation:workflow:inspectJob", (_event, jobId: string) =>
+    checkpointWorkflowService.inspectJob(jobId)
+  );
+  ipcMain.handle("automation:workflow:runCreatePipeline", (_event, jobId: string) =>
+    productionPackageService.runCreatePipeline(jobId)
+  );
+  ipcMain.handle(
+    "automation:workflow:saveManualInputCheckpoint",
+    (_event, payload: ManualInputCheckpointPayload) =>
+      checkpointWorkflowService.saveManualInputCheckpoint(payload)
+  );
+  ipcMain.handle(
+    "automation:workflow:saveManualProcessCheckpoint",
+    (_event, payload: ManualProcessCheckpointPayload) =>
+      checkpointWorkflowService.saveManualProcessCheckpoint(payload)
+  );
+  ipcMain.handle(
+    "automation:workflow:saveManualCreateCheckpoint",
+    (_event, payload: ManualCreateCheckpointPayload) =>
+      checkpointWorkflowService.saveManualCreateCheckpoint(payload)
+  );
+  ipcMain.handle(
+    "automation:workflow:saveManualOutputCheckpoint",
+    (_event, payload: ManualOutputCheckpointPayload) =>
+      checkpointWorkflowService.saveManualOutputCheckpoint(payload)
   );
 }

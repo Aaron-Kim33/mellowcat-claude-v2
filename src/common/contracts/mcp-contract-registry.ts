@@ -4,6 +4,9 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
   "telegram-control-mcp": {
     id: "telegram-control-mcp",
     name: "Telegram Control",
+    aiCapable: true,
+    builtinAvailable: true,
+    slot: "input",
     category: "control",
     compatibility: {
       inputs: [
@@ -18,11 +21,39 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       executionModes: ["interactive", "background_worker"]
     },
     dependencies: [],
-    configScopes: ["pack", "mcp"]
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      input: {
+        slot: "input",
+        title: "텔레그램 연결 설정",
+        description: "텔레그램 제어와 운영용 연결 정보를 관리합니다.",
+        fields: [
+          { id: "telegramBotToken", label: "텔레그램 봇 토큰", type: "secret", width: "half" },
+          { id: "telegramAdminChatId", label: "관리자 채팅 ID", type: "text", width: "half" },
+          {
+            id: "trendWindow",
+            label: "트렌드 조회 범위",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "최근 24시간", value: "24h" },
+              { label: "최근 3일", value: "3d" }
+            ]
+          }
+        ],
+        actions: [
+          { id: "save_telegram_config", label: "텔레그램 설정 저장", kind: "secondary" },
+          { id: "sync_telegram", label: "텔레그램 동기화", kind: "secondary" }
+        ]
+      }
+    }
   },
   "trend-discovery-mcp": {
     id: "trend-discovery-mcp",
     name: "Trend Discovery",
+    aiCapable: false,
+    builtinAvailable: true,
+    slot: "input",
     category: "discovery",
     compatibility: {
       inputs: [],
@@ -30,11 +61,59 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       executionModes: ["scheduled", "on_demand"]
     },
     dependencies: [],
-    configScopes: ["pack", "mcp"]
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      input: {
+        slot: "input",
+        title: "트렌드 수집 설정",
+        description: "자료 수집 범위와 후보 입력 방식을 정리합니다.",
+        fields: [
+          {
+            id: "trendWindow",
+            label: "트렌드 조회 범위",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "최근 24시간", value: "24h" },
+              { label: "최근 3일", value: "3d" }
+            ]
+          },
+          { id: "candidateTitle", label: "제목", type: "text", required: true },
+          { id: "candidateSourceLabel", label: "출처 라벨", type: "text" },
+          {
+            id: "candidateSummary",
+            label: "요약",
+            type: "textarea",
+            required: true,
+            width: "full"
+          },
+          {
+            id: "candidateSourceUrl",
+            label: "원문 링크",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "candidateFitReason",
+            label: "선정 이유",
+            type: "text",
+            width: "half"
+          }
+        ],
+        actions: [
+          { id: "add_candidate", label: "후보 추가", kind: "secondary" },
+          { id: "attach_files", label: "파일 첨부", kind: "secondary" },
+          { id: "save_checkpoint_1", label: "checkpoint-1 저장", kind: "primary" }
+        ]
+      }
+    }
   },
   "shortform-script-mcp": {
     id: "shortform-script-mcp",
     name: "Shortform Script",
+    aiCapable: true,
+    builtinAvailable: true,
+    slot: "process",
     category: "generation",
     compatibility: {
       inputs: [
@@ -51,11 +130,51 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
         required: true
       }
     ],
-    configScopes: ["pack", "mcp"]
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      process: {
+        slot: "process",
+        title: "자료 가공",
+        description:
+          "/shortlist에서 제시된 후보 중 하나를 골라서 요약본과 스크립트 초안을 승인하기 전까지 다듬는 단계입니다.",
+        fields: [
+          { id: "selectedCandidateId", label: "기준 후보", type: "select", required: true },
+          { id: "headline", label: "대표 제목", type: "text", required: true },
+          {
+            id: "processedSummary",
+            label: "가공 요약",
+            type: "textarea",
+            required: true,
+            width: "full"
+          },
+          {
+            id: "titleOptions",
+            label: "제목 후보",
+            type: "textarea",
+            required: true,
+            width: "full"
+          },
+          { id: "hook", label: "훅", type: "textarea", required: true },
+          { id: "callToAction", label: "CTA", type: "textarea" },
+          {
+            id: "narration",
+            label: "내레이션",
+            type: "textarea",
+            required: true,
+            width: "full"
+          },
+          { id: "reviewNotes", label: "검토 메모", type: "textarea", width: "full" }
+        ],
+        actions: [{ id: "save_checkpoint_2", label: "checkpoint-2 저장", kind: "primary" }]
+      }
+    }
   },
   "asset-packager-mcp": {
     id: "asset-packager-mcp",
     name: "Asset Packager",
+    aiCapable: false,
+    builtinAvailable: true,
+    slot: "create",
     category: "packaging",
     compatibility: {
       inputs: [{ contract: "script_draft_v1", required: true }],
@@ -69,11 +188,101 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
         required: true
       }
     ],
-    configScopes: ["pack", "mcp"]
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      create: {
+        slot: "create",
+        title: "소재 생성",
+        description: "영상 파일과 메타데이터를 묶어 업로드 가능한 제작 단위로 만듭니다.",
+        fields: [
+          {
+            id: "videoFilePath",
+            label: "영상 파일 경로",
+            type: "text",
+            required: true,
+            width: "full"
+          },
+          {
+            id: "thumbnailFilePath",
+            label: "썸네일 파일 경로",
+            type: "text",
+            width: "full"
+          },
+          {
+            id: "publishTitle",
+            label: "업로드 제목",
+            type: "text",
+            required: true,
+            width: "full"
+          },
+          { id: "publishDescription", label: "설명", type: "textarea", width: "full" },
+          { id: "hashtags", label: "해시태그", type: "text", width: "full" },
+          { id: "productionNotes", label: "제작 메모", type: "textarea", width: "full" }
+        ],
+        actions: [{ id: "save_checkpoint_3", label: "checkpoint-3 저장", kind: "primary" }]
+      }
+    }
+  },
+  "youtube-material-generator-mcp": {
+    id: "youtube-material-generator-mcp",
+    name: "YouTube Material Generator",
+    aiCapable: true,
+    builtinAvailable: true,
+    slot: "create",
+    category: "packaging",
+    compatibility: {
+      inputs: [{ contract: "script_draft_v1", required: true }],
+      outputs: [{ contract: "production_package_v1", required: true }],
+      executionModes: ["on_demand"]
+    },
+    dependencies: [
+      {
+        mcpId: "shortform-script-mcp",
+        reason: "Needs a script draft to build a timed scene plan and media package.",
+        required: true
+      }
+    ],
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      create: {
+        slot: "create",
+        title: "유튜브 소재 생성기",
+        description:
+          "스크립트를 장면 계획으로 변환하고, 검색·더빙·자막·합성으로 이어질 제작 패키지를 준비합니다.",
+        fields: [
+          {
+            id: "pexelsApiKey",
+            label: "Pexels API Key",
+            type: "secret",
+            width: "full"
+          },
+          {
+            id: "targetDurationSec",
+            label: "목표 길이(초)",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "minimumSceneCount",
+            label: "최소 씬 수",
+            type: "text",
+            width: "half"
+          }
+        ],
+        actions: [
+          { id: "run_create_pipeline", label: "소재 생성 실행", kind: "primary" },
+          { id: "generate_scene_plan", label: "씬 플랜 생성", kind: "secondary" },
+          { id: "save_checkpoint_3", label: "checkpoint-3 저장", kind: "primary" }
+        ]
+      }
+    }
   },
   "youtube-publish-mcp": {
     id: "youtube-publish-mcp",
     name: "YouTube Publisher",
+    aiCapable: false,
+    builtinAvailable: true,
+    slot: "output",
     category: "delivery",
     compatibility: {
       inputs: [
@@ -90,11 +299,53 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
         required: true
       }
     ],
-    configScopes: ["pack", "mcp"]
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      output: {
+        slot: "output",
+        title: "유튜브 연결과 업로드",
+        description:
+          "배포 슬롯에서 바로 연결 상태를 확인하고 업로드를 실행할 수 있습니다.",
+        fields: [
+          {
+            id: "youtubeOAuthClientId",
+            label: "OAuth Client ID",
+            type: "text",
+            required: true,
+            placeholder: "1234567890-xxxx.apps.googleusercontent.com",
+            width: "full"
+          },
+          {
+            id: "youtubeOAuthClientSecret",
+            label: "OAuth Client Secret",
+            type: "secret",
+            required: true,
+            placeholder: "GOCSPX-...",
+            width: "full"
+          },
+          {
+            id: "youtubeOAuthRedirectPort",
+            label: "리디렉션 포트",
+            type: "text",
+            placeholder: "45123",
+            width: "half"
+          }
+        ],
+        actions: [
+          { id: "save_youtube_config", label: "유튜브 설정 저장", kind: "secondary" },
+          { id: "refresh_youtube_status", label: "유튜브 상태 새로고침", kind: "secondary" },
+          { id: "connect_youtube", label: "유튜브 연결", kind: "primary" },
+          { id: "disconnect_youtube", label: "연결 해제", kind: "danger" },
+          { id: "upload_last_package", label: "유튜브에 업로드", kind: "primary" }
+        ]
+      }
+    }
   },
   "instagram-publish-mcp": {
     id: "instagram-publish-mcp",
     name: "Instagram Publisher",
+    aiCapable: false,
+    slot: "output",
     category: "delivery",
     compatibility: {
       inputs: [
@@ -111,10 +362,46 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
         required: true
       }
     ],
-    configScopes: ["pack", "mcp"]
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      output: {
+        slot: "output",
+        title: "인스타그램 연결과 업로드",
+        description: "배포 슬롯에서 인스타그램 릴스용 연결 상태와 mock 업로드 흐름을 확인합니다.",
+        fields: [
+          {
+            id: "instagramAccountHandle",
+            label: "인스타그램 계정",
+            type: "text",
+            required: true,
+            placeholder: "@mellowcat",
+            width: "full"
+          },
+          {
+            id: "instagramAccessToken",
+            label: "Instagram Access Token",
+            type: "secret",
+            required: true,
+            placeholder: "IGQVJ...",
+            width: "full"
+          }
+        ],
+        actions: [
+          { id: "save_instagram_config", label: "인스타그램 설정 저장", kind: "secondary" },
+          { id: "refresh_instagram_status", label: "인스타그램 상태 새로고침", kind: "secondary" },
+          { id: "connect_instagram", label: "인스타그램 연결", kind: "primary" },
+          { id: "disconnect_instagram", label: "연결 해제", kind: "danger" },
+          { id: "upload_instagram_mock", label: "인스타그램 mock 업로드", kind: "primary" }
+        ]
+      }
+    }
   }
 };
 
 export function getMcpRuntimeContract(mcpId: string): MCPRuntimeContract | undefined {
   return MCP_CONTRACT_REGISTRY[mcpId];
+}
+
+export function listMcpRuntimeContracts(): MCPRuntimeContract[] {
+  return Object.values(MCP_CONTRACT_REGISTRY);
 }

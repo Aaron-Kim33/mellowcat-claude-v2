@@ -29,7 +29,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -221,6 +222,8 @@ select {
 .workflow-config-layout,
 .workflow-config-section,
 .workflow-status-block,
+.workflow-slot-pipeline,
+.workflow-slot-manual-box,
 .account-panel,
 .account-library-list,
 .developer-access-content,
@@ -236,6 +239,176 @@ select {
 
 .workflow-config-layout {
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.workflow-slot-pipeline {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.workflow-slot-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e7e2d7;
+  background: #fbfbfa;
+  height: fit-content;
+  min-height: 0;
+}
+
+.workflow-slot-card.ready {
+  background: #f5f9f4;
+  border-color: #dce8d9;
+}
+
+.workflow-slot-card.running {
+  background: #f6f8fb;
+  border-color: #dbe4ef;
+}
+
+.workflow-slot-card.waiting {
+  background: #fbfaf7;
+  border-color: #ece5d7;
+}
+
+.workflow-slot-card.error {
+  background: #fff4f2;
+  border-color: #f2d3cc;
+}
+
+.workflow-slot-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-slot-step,
+.workflow-slot-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflow-slot-step {
+  background: #efede8;
+  color: #555149;
+}
+
+.workflow-slot-status {
+  background: #f2f1ed;
+  color: #5a564f;
+}
+
+.workflow-slot-status.ready {
+  background: #e9f4e6;
+  color: #2b6a3d;
+}
+
+.workflow-slot-status.running {
+  background: #e9f1fb;
+  color: #315f98;
+}
+
+.workflow-slot-status.waiting {
+  background: #f6efe2;
+  color: #8b6429;
+}
+
+.workflow-slot-status.error {
+  background: #fde7e3;
+  color: #b04433;
+}
+
+.workflow-slot-card h4 {
+  margin: 0;
+}
+
+.workflow-slot-card p {
+  font-size: 12px;
+  color: #5f5a53;
+}
+
+.workflow-slot-mode-row,
+.workflow-slot-preview {
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-slot-mode-hint,
+.workflow-slot-detail {
+  font-size: 12px;
+  color: #7a746b;
+  word-break: break-word;
+}
+
+.workflow-slot-preview {
+  padding-top: 8px;
+  border-top: 1px solid #ece8df;
+}
+
+.workflow-slot-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-slot-provider-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.workflow-slot-dropzone {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed #d6ccbc;
+  background: #fffdfa;
+}
+
+.workflow-slot-attachment-list,
+.workflow-slot-candidate-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-slot-attachment-item,
+.workflow-slot-candidate-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #ece8df;
+  background: #ffffff;
+}
+
+.workflow-slot-command-guide {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #fffdfa;
+  border: 1px solid #ece8df;
+}
+
+.workflow-slot-preview strong {
+  font-size: 11px;
+  color: #726d64;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .workflow-config-section,
@@ -276,6 +449,11 @@ select {
   padding: 9px 11px;
   background: #fffefc;
   color: #202124;
+}
+
+.textarea-input {
+  min-height: 92px;
+  resize: vertical;
 }
 
 .secret-toggle {
@@ -569,5 +747,15 @@ code {
 
   .content {
     padding: 18px 16px 22px;
+  }
+
+  .workflow-slot-pipeline {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .workflow-slot-pipeline {
+    grid-template-columns: 1fr;
   }
 }

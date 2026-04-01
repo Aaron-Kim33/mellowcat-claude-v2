@@ -107,7 +107,19 @@ const automationBridge: MellowCatAPI["automation"] = {
   pickYouTubeThumbnailFile: (): Promise<string | undefined> =>
     ipcRenderer.invoke("automation:youtube:pickThumbnailFile"),
   uploadYouTubePackage: (packagePath: string): Promise<YouTubeUploadResult> =>
-    ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath)
+    ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath),
+  inspectWorkflowJob: (jobId: string) =>
+    ipcRenderer.invoke("automation:workflow:inspectJob", jobId),
+  runCreatePipeline: (jobId: string) =>
+    ipcRenderer.invoke("automation:workflow:runCreatePipeline", jobId),
+  saveManualInputCheckpoint: (payload) =>
+    ipcRenderer.invoke("automation:workflow:saveManualInputCheckpoint", payload),
+  saveManualProcessCheckpoint: (payload) =>
+    ipcRenderer.invoke("automation:workflow:saveManualProcessCheckpoint", payload),
+  saveManualCreateCheckpoint: (payload) =>
+    ipcRenderer.invoke("automation:workflow:saveManualCreateCheckpoint", payload),
+  saveManualOutputCheckpoint: (payload) =>
+    ipcRenderer.invoke("automation:workflow:saveManualOutputCheckpoint", payload)
 };
 
 const api: MellowCatAPI = {

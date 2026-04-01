@@ -55,9 +55,45 @@ export interface TelegramControlStatus {
   activeJob?: AutomationJobSnapshot;
 }
 
+export type WorkflowAiProvider =
+  | "claude_cli"
+  | "openrouter_api"
+  | "openai_api"
+  | "mock";
+
+export type WorkflowAiConnectionRef = "connection_1" | "connection_2";
+
 export interface ShortformWorkflowConfig {
+  inputMode?: "auto" | "manual";
+  processMode?: "auto" | "manual";
+  createMode?: "auto" | "manual";
+  outputMode?: "auto" | "manual";
+  inputProviderType?: "builtin" | "module";
+  processProviderType?: "builtin" | "module";
+  createProviderType?: "builtin" | "module";
+  outputProviderType?: "builtin" | "module";
+  inputModuleId?: string;
+  processModuleId?: string;
+  createModuleId?: string;
+  outputModuleId?: string;
+  inputAiConnection?: WorkflowAiConnectionRef;
+  inputAiProvider?: WorkflowAiProvider;
+  inputAiModel?: string;
+  processAiConnection?: WorkflowAiConnectionRef;
+  processAiProvider?: WorkflowAiProvider;
+  processAiModel?: string;
+  createAiConnection?: WorkflowAiConnectionRef;
+  createAiProvider?: WorkflowAiProvider;
+  createAiModel?: string;
+  outputAiConnection?: WorkflowAiConnectionRef;
+  outputAiProvider?: WorkflowAiProvider;
+  outputAiModel?: string;
+  inputAiSummaryEnabled?: boolean;
+  processAiGenerationEnabled?: boolean;
+  createAiGenerationEnabled?: boolean;
+  outputAiGenerationEnabled?: boolean;
   trendWindow: "24h" | "3d";
-  scriptProvider: "claude_cli" | "openrouter_api" | "openai_api" | "mock";
+  scriptProvider: WorkflowAiProvider;
   openRouterApiKey?: string;
   openRouterModel?: string;
   openAiApiKey?: string;
@@ -65,6 +101,11 @@ export interface ShortformWorkflowConfig {
   telegramBotToken?: string;
   telegramAdminChatId?: string;
   telegramOutputLanguage?: "en" | "ko";
+  instagramAccountHandle?: string;
+  instagramAccessToken?: string;
+  pexelsApiKey?: string;
+  createTargetDurationSec?: number;
+  createMinimumSceneCount?: number;
   youtubeChannelLabel?: string;
   youtubePrivacyStatus?: "private" | "unlisted" | "public";
   youtubeCategoryId?: string;

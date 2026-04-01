@@ -31,6 +31,13 @@ import { ShortformScriptService } from "../services/automation/shortform-script-
 import { TrendDiscoveryService } from "../services/automation/trend-discovery-service";
 import { YouTubeAuthService } from "../services/automation/youtube-auth-service";
 import { ShortformWorkflowConfigService } from "../services/automation/shortform-workflow-config-service";
+import { CheckpointWorkflowService } from "../services/automation/checkpoint-workflow-service";
+import { PexelsAssetService } from "../services/automation/pexels-asset-service";
+import { ScenePlanService } from "../services/automation/scene-plan-service";
+import { SubtitleService } from "../services/automation/subtitle-service";
+import { VoiceoverService } from "../services/automation/voiceover-service";
+import { MediaCompositionService } from "../services/automation/media-composition-service";
+import type { AppSettings } from "../../common/types/settings";
 
 export async function bootstrap(): Promise<void> {
   const pathService = new PathService();
@@ -45,26 +52,44 @@ export async function bootstrap(): Promise<void> {
   const claudeEngine = new ClaudeEngine(settingsRepository, pathService);
   const appUpdateService = new AppUpdateService();
   const trendDiscoveryService = new TrendDiscoveryService();
+  const checkpointWorkflowService = new CheckpointWorkflowService(pathService, fileService);
   const shortformScriptService = new ShortformScriptService(
     settingsRepository,
     workflowConfigService
   );
+  const pexelsAssetService = new PexelsAssetService();
+  const scenePlanService = new ScenePlanService(settingsRepository, workflowConfigService);
+  const subtitleService = new SubtitleService();
+  const voiceoverService = new VoiceoverService(
+    settingsRepository,
+    workflowConfigService,
+    fileService
+  );
+  const mediaCompositionService = new MediaCompositionService(fileService, pathService);
   const youTubeAuthService = new YouTubeAuthService(
     workflowConfigService,
     secretsStore,
-    pathService
+    pathService,
+    checkpointWorkflowService
   );
   const productionPackageService = new ProductionPackageService(
     pathService,
     fileService,
-    workflowConfigService
+    workflowConfigService,
+    checkpointWorkflowService,
+    scenePlanService,
+    pexelsAssetService,
+    subtitleService,
+    voiceoverService,
+    mediaCompositionService
   );
   const telegramControlService = new TelegramControlService(
     workflowConfigService,
     pathService,
     trendDiscoveryService,
     shortformScriptService,
-    productionPackageService
+    productionPackageService,
+    checkpointWorkflowService
   );
   const authService = new AuthService(
     apiClient,
@@ -105,7 +130,29 @@ export async function bootstrap(): Promise<void> {
   app.whenReady().then(() => {
     settingsRepository.refreshSecrets();
     workflowConfigService.migrateFromLegacySettings(settingsRepository.get());
-    workflowConfigService.refreshSecrets();
+    const workflowConfig = workflowConfigService.refreshSecrets();
+    const settings = settingsRepository.get();
+    const aiConnectionPatch: Partial<AppSettings> = {};
+
+    if (!settings.scriptProvider && workflowConfig.scriptProvider) {
+      aiConnectionPatch.scriptProvider = workflowConfig.scriptProvider;
+    }
+    if (!settings.openRouterApiKey && workflowConfig.openRouterApiKey) {
+      aiConnectionPatch.openRouterApiKey = workflowConfig.openRouterApiKey;
+    }
+    if (!settings.openRouterModel && workflowConfig.openRouterModel) {
+      aiConnectionPatch.openRouterModel = workflowConfig.openRouterModel;
+    }
+    if (!settings.openAiApiKey && workflowConfig.openAiApiKey) {
+      aiConnectionPatch.openAiApiKey = workflowConfig.openAiApiKey;
+    }
+    if (!settings.openAiModel && workflowConfig.openAiModel) {
+      aiConnectionPatch.openAiModel = workflowConfig.openAiModel;
+    }
+
+    if (Object.keys(aiConnectionPatch).length > 0) {
+      settingsRepository.set(aiConnectionPatch);
+    }
     manifestRepository.ensureManifest();
     appUpdateService.initialize();
     telegramControlService.startPolling();
@@ -129,7 +176,9 @@ export async function bootstrap(): Promise<void> {
     registerAutomationIpc(
       telegramControlService,
       youTubeAuthService,
-      workflowConfigService
+      workflowConfigService,
+      checkpointWorkflowService,
+      productionPackageService
     );
 
     new WindowManager().createMainWindow();

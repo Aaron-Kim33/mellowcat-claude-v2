@@ -20,6 +20,13 @@ import type {
   YouTubeUploadResult
 } from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
+import type {
+  ManualInputCheckpointPayload,
+  ManualCreateCheckpointPayload,
+  ManualOutputCheckpointPayload,
+  ManualProcessCheckpointPayload,
+  WorkflowJobSnapshot
+} from "./slot-workflow";
 
 export interface MellowCatAPI {
   app: {
@@ -87,5 +94,19 @@ export interface MellowCatAPI {
     pickYouTubeVideoFile: () => Promise<string | undefined>;
     pickYouTubeThumbnailFile: () => Promise<string | undefined>;
     uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
+    inspectWorkflowJob: (jobId: string) => Promise<WorkflowJobSnapshot>;
+    runCreatePipeline: (jobId: string) => Promise<WorkflowJobSnapshot>;
+    saveManualInputCheckpoint: (
+      payload: ManualInputCheckpointPayload
+    ) => Promise<WorkflowJobSnapshot>;
+    saveManualProcessCheckpoint: (
+      payload: ManualProcessCheckpointPayload
+    ) => Promise<WorkflowJobSnapshot>;
+    saveManualCreateCheckpoint: (
+      payload: ManualCreateCheckpointPayload
+    ) => Promise<WorkflowJobSnapshot>;
+    saveManualOutputCheckpoint: (
+      payload: ManualOutputCheckpointPayload
+    ) => Promise<WorkflowJobSnapshot>;
   };
 }

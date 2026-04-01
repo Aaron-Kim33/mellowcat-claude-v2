@@ -12,6 +12,7 @@ import { ProductionPackageService } from "./production-package-service";
 import { ShortformScriptService } from "./shortform-script-service";
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 import { TrendDiscoveryService } from "./trend-discovery-service";
+import { CheckpointWorkflowService } from "./checkpoint-workflow-service";
 
 interface TelegramControlStateFile {
   updateOffset?: number;
@@ -43,7 +44,8 @@ export class TelegramControlService {
     private readonly pathService: PathService,
     private readonly trendDiscoveryService: TrendDiscoveryService,
     private readonly shortformScriptService: ShortformScriptService,
-    private readonly productionPackageService: ProductionPackageService
+    private readonly productionPackageService: ProductionPackageService,
+    private readonly checkpointWorkflowService: CheckpointWorkflowService
   ) {}
 
   startPolling(): void {
@@ -196,14 +198,13 @@ export class TelegramControlService {
       limit: 4,
       timeWindow: workflowConfig.trendWindow ?? "24h"
     });
-    const enrichedGlobalCandidates = await this.enrichShortlistSummaries(
-      trendResult.globalCandidates,
-      2
-    );
-    const enrichedDomesticCandidates = await this.enrichShortlistSummaries(
-      trendResult.domesticCandidates,
-      2
-    );
+    const shouldUseAiSummary = workflowConfig.inputAiSummaryEnabled !== false;
+    const enrichedGlobalCandidates = shouldUseAiSummary
+      ? await this.enrichShortlistSummaries(trendResult.globalCandidates, 2)
+      : trendResult.globalCandidates;
+    const enrichedDomesticCandidates = shouldUseAiSummary
+      ? await this.enrichShortlistSummaries(trendResult.domesticCandidates, 2)
+      : trendResult.domesticCandidates;
     const shortlistSelection = this.buildNumberedShortlist(
       language,
       enrichedGlobalCandidates,
@@ -229,6 +230,19 @@ export class TelegramControlService {
         updatedAt: now
       }
     };
+
+    if (nextState.activeJob) {
+      this.checkpointWorkflowService.writeInputCheckpoint({
+        job: nextState.activeJob,
+        request: {
+          regions: ["global", "domestic"],
+          limit: 4,
+          timeWindow: workflowConfig.trendWindow ?? "24h"
+        },
+        candidates: shortlistSelection.combinedCandidates,
+        sourceDebug: trendResult.sourceDebug
+      });
+    }
 
     if (workflowConfig.telegramBotToken?.trim() && workflowConfig.telegramAdminChatId?.trim()) {
       try {
@@ -493,6 +507,16 @@ export class TelegramControlService {
         lastDraft: draftResult.draft,
         lastPackagePath: undefined
       };
+      if (nextState.activeJob) {
+        this.checkpointWorkflowService.writeProcessCheckpoint({
+          job: nextState.activeJob,
+          selectedCandidateId: currentState.activeCandidates?.[Number(selection) - 1]?.id,
+          selectedCandidate: currentState.activeCandidates?.[Number(selection) - 1],
+          draft: draftResult.draft,
+          source: draftResult.source,
+          error: draftResult.error
+        });
+      }
       await this.sendTelegramScriptReview(
         botToken,
         chatId,
@@ -535,7 +559,7 @@ export class TelegramControlService {
 
       let packagePath: string | undefined;
       if (nextState.activeJob && nextState.lastDraft) {
-        packagePath = this.productionPackageService.createPackage(
+        packagePath = await this.productionPackageService.createPackage(
           nextState.activeJob,
           nextState.lastDraft
         );
@@ -670,6 +694,21 @@ export class TelegramControlService {
           updatedAt: new Date().toISOString()
         }
       };
+      if (nextState.activeJob) {
+        this.checkpointWorkflowService.writeProcessCheckpoint({
+          job: nextState.activeJob,
+          selectedCandidateId: currentState.activeCandidates?.find(
+            (candidate) => candidate.title === currentState.activeJob?.title
+          )?.id,
+          selectedCandidate: currentState.activeCandidates?.find(
+            (candidate) => candidate.title === currentState.activeJob?.title
+          ),
+          draft: draftResult.draft,
+          revisionRequest,
+          source: draftResult.source,
+          error: draftResult.error
+        });
+      }
       this.writeState(nextState);
       await this.sendTelegramScriptReview(
         botToken,
@@ -1053,7 +1092,7 @@ export class TelegramControlService {
     workflowConfig: ShortformWorkflowConfig,
     state: TelegramControlStateFile
   ): "en" | "ko" {
-    return state.telegramOutputLanguage ?? workflowConfig.telegramOutputLanguage ?? "en";
+    return state.telegramOutputLanguage ?? workflowConfig.telegramOutputLanguage ?? "ko";
   }
 
   private formatSectionTitle(
