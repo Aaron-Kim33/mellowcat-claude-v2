@@ -2,6 +2,7 @@ export type AutomationJobStage =
   | "idle"
   | "shortlisted"
   | "selected"
+  | "awaiting_script_category"
   | "scripting"
   | "awaiting_review"
   | "awaiting_revision_input"
@@ -25,6 +26,8 @@ export interface ShortformScriptDraft {
   narration: string;
   callToAction: string;
 }
+
+export type ShortformScriptCategory = "horror" | "romance" | "community";
 
 export interface ShortformScriptResult {
   source: "claude" | "openrouter" | "openai" | "mock";
@@ -104,8 +107,11 @@ export interface ShortformWorkflowConfig {
   instagramAccountHandle?: string;
   instagramAccessToken?: string;
   pexelsApiKey?: string;
+  createBackgroundSourceType?: "preset" | "custom";
   createTargetDurationSec?: number;
   createMinimumSceneCount?: number;
+  createBackgroundMediaPath?: string;
+  createSubtitleTheme?: "clean_dark" | "clean_light" | "story_bold";
   youtubeChannelLabel?: string;
   youtubePrivacyStatus?: "private" | "unlisted" | "public";
   youtubeCategoryId?: string;

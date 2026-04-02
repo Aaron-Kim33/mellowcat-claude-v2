@@ -1,7 +1,8 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 import type {
   AutomationJobSnapshot,
+  ShortformScriptCategory,
   ShortformWorkflowConfig,
   ShortformScriptDraft,
   TelegramControlStatus
@@ -13,6 +14,7 @@ import { ShortformScriptService } from "./shortform-script-service";
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 import { TrendDiscoveryService } from "./trend-discovery-service";
 import { CheckpointWorkflowService } from "./checkpoint-workflow-service";
+import { YouTubeAuthService } from "./youtube-auth-service";
 
 interface TelegramControlStateFile {
   updateOffset?: number;
@@ -24,6 +26,7 @@ interface TelegramControlStateFile {
   lastDraftSource?: "claude" | "openrouter" | "openai" | "mock";
   lastDraftError?: string;
   lastDraft?: ShortformScriptDraft;
+  lastScriptCategory?: ShortformScriptCategory;
   lastRevisionRequest?: string;
   lastPackagePath?: string;
   activeCandidates?: TrendCandidate[];
@@ -33,6 +36,8 @@ interface TelegramControlStateFile {
   domesticCandidateCount?: number;
   trendSourceDebug?: TelegramControlStatus["trendSourceDebug"];
   activeJob?: AutomationJobSnapshot;
+  selectedCandidateId?: string;
+  selectedCandidateSelection?: string;
 }
 
 export class TelegramControlService {
@@ -45,7 +50,8 @@ export class TelegramControlService {
     private readonly trendDiscoveryService: TrendDiscoveryService,
     private readonly shortformScriptService: ShortformScriptService,
     private readonly productionPackageService: ProductionPackageService,
-    private readonly checkpointWorkflowService: CheckpointWorkflowService
+    private readonly checkpointWorkflowService: CheckpointWorkflowService,
+    private readonly youTubeAuthService: YouTubeAuthService
   ) {}
 
   startPolling(): void {
@@ -428,6 +434,10 @@ export class TelegramControlService {
         ].join("\n"),
         reply_markup: {
           inline_keyboard: [
+            draft.titleOptions.map((item, index) => ({
+              text: this.formatTitleChoiceLabel(language, index, item),
+              callback_data: `script:title:${jobId}:${index}`
+            })),
             [
               { text: this.t(language, "approve"), callback_data: `script:approve:${jobId}` },
               { text: this.t(language, "revise"), callback_data: `script:revise:${jobId}` }
@@ -444,6 +454,57 @@ export class TelegramControlService {
 
     const payload = (await response.json()) as { ok?: boolean; description?: string };
 
+    if (!payload.ok) {
+      throw new Error(payload.description ?? "Unknown Telegram API error");
+    }
+  }
+
+  private async sendTelegramCategoryPicker(
+    botToken: string,
+    chatId: string,
+    jobId: string,
+    language: "en" | "ko",
+    selection: string,
+    context?: {
+      title?: string;
+      summary?: string;
+    }
+  ): Promise<void> {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: [
+          language === "ko" ? "스크립트 장르 선택" : "Choose script category",
+          ...(context?.title ? ["", `${this.t(language, "selectedTopic")}: ${context.title}`] : []),
+          ...(context?.summary ? [`${this.t(language, "selectedSummary")}: ${context.summary}`] : []),
+          "",
+          language === "ko"
+            ? "이 후보를 어떤 프롬프트 위주로 작성할지 골라주세요."
+            : "Pick which prompt style should be used for this story."
+        ].join("\n"),
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: language === "ko" ? "무서운썰" : "Scary story", callback_data: `script:category:${jobId}:${selection}:horror` },
+              { text: language === "ko" ? "연애썰" : "Romance story", callback_data: `script:category:${jobId}:${selection}:romance` }
+            ],
+            [
+              { text: language === "ko" ? "실화/커뮤썰" : "Community/real story", callback_data: `script:category:${jobId}:${selection}:community` }
+            ]
+          ]
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as { ok?: boolean; description?: string };
     if (!payload.ok) {
       throw new Error(payload.description ?? "Unknown Telegram API error");
     }
@@ -481,49 +542,33 @@ export class TelegramControlService {
 
       nextState = {
         ...nextState,
+        selectedCandidateSelection: selection,
+        selectedCandidateId: currentState.activeCandidates?.[Number(selection) - 1]?.id,
+        lastDraft: undefined,
+        lastDraftSource: undefined,
+        lastDraftError: undefined,
+        lastScriptCategory: undefined,
         activeJob: currentState.activeJob
           ? {
               ...currentState.activeJob,
               title: this.resolveSelectedCandidateTitle(currentState.activeCandidates, selection),
-              stage: "awaiting_review",
+              stage: "awaiting_script_category",
               updatedAt: now
             }
           : {
               id: this.createJobId(now),
               title: this.resolveSelectedCandidateTitle(currentState.activeCandidates, selection),
-              stage: "awaiting_review",
+              stage: "awaiting_script_category",
               createdAt: now,
               updatedAt: now
             }
       };
-
-      const draftResult = await this.shortformScriptService.generateDraft(
-        nextState.activeJob?.title ?? `Candidate ${selection} for Korean shortform review`
-      );
-      nextState = {
-        ...nextState,
-        lastDraftSource: draftResult.source,
-        lastDraftError: draftResult.error,
-        lastDraft: draftResult.draft,
-        lastPackagePath: undefined
-      };
-      if (nextState.activeJob) {
-        this.checkpointWorkflowService.writeProcessCheckpoint({
-          job: nextState.activeJob,
-          selectedCandidateId: currentState.activeCandidates?.[Number(selection) - 1]?.id,
-          selectedCandidate: currentState.activeCandidates?.[Number(selection) - 1],
-          draft: draftResult.draft,
-          source: draftResult.source,
-          error: draftResult.error
-        });
-      }
-      await this.sendTelegramScriptReview(
+      await this.sendTelegramCategoryPicker(
         botToken,
         chatId,
         nextState.activeJob?.id ?? jobId,
         language,
         selection,
-        draftResult.draft,
         {
           title: nextState.activeJob?.title,
           summary: this.localizeCandidateSummary(
@@ -548,6 +593,86 @@ export class TelegramControlService {
           )
         }
       );
+      await this.answerCallbackQuery(botToken, callbackId, language === "ko" ? "장르를 골라주세요." : "Choose a script category.");
+      return nextState;
+    }
+
+    if (callbackData.startsWith("script:category:")) {
+      const [, , jobId, selection = "?", category = "community"] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const normalizedCategory = this.normalizeScriptCategory(category);
+      const draftResult = await this.shortformScriptService.generateDraft(
+        nextState.activeJob?.title ?? `Candidate ${selection} for Korean shortform review`,
+        undefined,
+        normalizedCategory
+      );
+      nextState = {
+        ...nextState,
+        lastDraftSource: draftResult.source,
+        lastDraftError: draftResult.error,
+        lastDraft: draftResult.draft,
+        lastScriptCategory: normalizedCategory,
+        lastPackagePath: undefined,
+        activeJob: nextState.activeJob
+          ? {
+              ...nextState.activeJob,
+              stage: "awaiting_review",
+              updatedAt: now
+            }
+          : undefined
+      };
+      if (nextState.activeJob) {
+        this.checkpointWorkflowService.writeProcessCheckpoint({
+          job: nextState.activeJob,
+          selectedCandidateId: nextState.selectedCandidateId,
+          selectedCandidate: currentState.activeCandidates?.find((candidate) => candidate.id === nextState.selectedCandidateId),
+          draft: draftResult.draft,
+          scriptCategory: normalizedCategory,
+          source: draftResult.source,
+          error: draftResult.error
+        });
+      }
+      await this.sendTelegramScriptReview(
+        botToken,
+        chatId,
+        nextState.activeJob?.id ?? jobId,
+        language,
+        selection,
+        draftResult.draft,
+        {
+          title: nextState.activeJob?.title,
+          summary: this.localizeCandidateSummary(
+            currentState.activeCandidates?.find((candidate) => candidate.id === nextState.selectedCandidateId) ?? {
+              id: "selected",
+              title: nextState.activeJob?.title ?? "",
+              summary: nextState.activeJob?.title ?? "",
+              operatorSummary: "",
+              contentAngle: "",
+              media: {
+                hasMedia: false,
+                imageUrls: [],
+                analysisPolicy: "text_only"
+              },
+              sourceKind: "mock",
+              sourceRegion: "global",
+              sourceLabel: "",
+              score: 0,
+              fitReason: ""
+            },
+            language
+          )
+        }
+      );
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko" ? "선택한 장르로 스크립트를 생성했습니다." : "Generated a draft for that category."
+      );
+      return nextState;
     }
 
     if (callbackData.startsWith("script:approve:")) {
@@ -557,33 +682,233 @@ export class TelegramControlService {
         return nextState;
       }
 
-      let packagePath: string | undefined;
-      if (nextState.activeJob && nextState.lastDraft) {
-        packagePath = await this.productionPackageService.createPackage(
-          nextState.activeJob,
-          nextState.lastDraft
-        );
-      }
-
       nextState = {
         ...nextState,
         activeJob: nextState.activeJob
           ? {
               ...nextState.activeJob,
-              stage: packagePath ? "ready" : "approved",
+              stage: "approved",
               updatedAt: now
             }
           : undefined,
-        lastPackagePath: packagePath
+        lastPackagePath: undefined
       };
 
-      await this.sendTelegramText(
+      if (nextState.activeJob) {
+        this.checkpointWorkflowService.markProcessCheckpointApproved(nextState.activeJob.id);
+      }
+
+      await this.sendTelegramActionMessage(
         botToken,
         chatId,
-        packagePath
-          ? `${this.t(language, "packageReady")}\n\nPath: ${packagePath}`
-          : this.t(language, "packageMissing")
+        language === "ko"
+          ? "스크립트 승인이 완료되었습니다. 준비가 되면 여기서 바로 3번 소재 생성을 실행할 수 있습니다."
+          : "Script approval is complete. When you're ready, you can start Slot 03 create right here.",
+        [
+          [
+            {
+              text: language === "ko" ? "3번 소재 생성 실행" : "Run Slot 03 create",
+              callback_data: `create:run:${jobId}`
+            }
+          ]
+        ]
       );
+    }
+
+    if (callbackData.startsWith("script:title:")) {
+      const [, , jobId, rawIndex = "-1"] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const selectedIndex = Number(rawIndex);
+      const currentDraft = nextState.lastDraft;
+      const titleOptions = currentDraft?.titleOptions ?? [];
+      if (!currentDraft || !Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= titleOptions.length) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "선택할 수 없는 제목입니다." : "That title option is no longer available."
+        );
+        return nextState;
+      }
+
+      const reorderedTitles = [
+        titleOptions[selectedIndex],
+        ...titleOptions.filter((_, index) => index !== selectedIndex)
+      ];
+
+      nextState = {
+        ...nextState,
+        lastDraft: {
+          ...currentDraft,
+          titleOptions: reorderedTitles
+        }
+      };
+
+      if (nextState.activeJob) {
+        this.checkpointWorkflowService.selectProcessCheckpointTitle(nextState.activeJob.id, selectedIndex);
+      }
+
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko"
+          ? `대표 제목을 ${selectedIndex + 1}번으로 선택했습니다.`
+          : `Selected title option ${selectedIndex + 1}.`
+      );
+      return nextState;
+    }
+
+    if (callbackData.startsWith("create:run:")) {
+      const [, , jobId] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      if (!nextState.activeJob) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "활성 작업이 없습니다." : "No active job was found."
+        );
+        return nextState;
+      }
+
+      const activeJob = nextState.activeJob;
+
+      nextState = {
+        ...nextState,
+        activeJob: {
+          ...activeJob,
+          stage: "packaging",
+          updatedAt: now
+        }
+      };
+
+      try {
+        const snapshot = await this.productionPackageService.runCreatePipeline(jobId);
+        const packagePath =
+          snapshot.resolvedPackagePath ??
+          this.pathService.getAutomationJobPath(jobId);
+
+        nextState = {
+          ...nextState,
+          activeJob: {
+            ...activeJob,
+            stage: "ready",
+            updatedAt: now
+          },
+          lastPackagePath: packagePath
+        };
+
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `3번 소재 생성을 완료했습니다.\n\nPath: ${packagePath}`
+            : `Slot 03 create finished.\n\nPath: ${packagePath}`
+        );
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "4번 업로드 대상을 골라주세요."
+            : "Choose where to publish Slot 04.",
+          [
+            [
+              {
+                text: language === "ko" ? "유튜브 영상 업로드" : "Upload as YouTube video",
+                callback_data: `upload:run:${jobId}:video`
+              }
+            ],
+            [
+              {
+                text: language === "ko" ? "유튜브 쇼츠 업로드" : "Upload as YouTube Shorts",
+                callback_data: `upload:run:${jobId}:shorts`
+              }
+            ]
+          ]
+        );
+      } catch (error) {
+        nextState = {
+          ...nextState,
+          activeJob: {
+            ...activeJob,
+            stage: "error",
+            updatedAt: now
+          }
+        };
+
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `3번 소재 생성에 실패했습니다.\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Slot 03 create failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+    }
+
+    if (callbackData.startsWith("upload:run:")) {
+      const [, , jobId, publishTarget = "video"] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const packagePath =
+        nextState.lastPackagePath?.trim() || this.pathService.getAutomationPackagePath(jobId);
+
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "업로드할 패키지를 찾지 못했습니다." : "Package path for upload was not found."
+        );
+        return nextState;
+      }
+
+      try {
+        this.youTubeAuthService.setPublishTarget(
+          packagePath,
+          publishTarget === "shorts" ? "shorts" : "video"
+        );
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko"
+            ? publishTarget === "shorts"
+              ? "유튜브 쇼츠 업로드를 시작합니다."
+              : "유튜브 영상 업로드를 시작합니다."
+            : publishTarget === "shorts"
+              ? "Starting YouTube Shorts upload."
+              : "Starting YouTube video upload."
+        );
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? publishTarget === "shorts"
+              ? "유튜브 쇼츠 업로드를 진행합니다."
+              : "유튜브 영상 업로드를 진행합니다."
+            : publishTarget === "shorts"
+              ? "Uploading to YouTube Shorts."
+              : "Uploading to YouTube video."
+        );
+        await this.youTubeAuthService.uploadPackage(packagePath);
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `4번 업로드에 실패했습니다.\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Slot 04 upload failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return nextState;
     }
 
     if (callbackData.startsWith("script:revise:")) {
@@ -679,7 +1004,8 @@ export class TelegramControlService {
       const revisionRequest = messageText.trim();
       const draftResult = await this.shortformScriptService.generateDraft(
         currentState.activeJob.title,
-        revisionRequest
+        revisionRequest,
+        currentState.lastScriptCategory ?? "community"
       );
       const nextState: TelegramControlStateFile = {
         ...currentState,
@@ -694,21 +1020,22 @@ export class TelegramControlService {
           updatedAt: new Date().toISOString()
         }
       };
-      if (nextState.activeJob) {
-        this.checkpointWorkflowService.writeProcessCheckpoint({
-          job: nextState.activeJob,
-          selectedCandidateId: currentState.activeCandidates?.find(
-            (candidate) => candidate.title === currentState.activeJob?.title
-          )?.id,
-          selectedCandidate: currentState.activeCandidates?.find(
-            (candidate) => candidate.title === currentState.activeJob?.title
-          ),
-          draft: draftResult.draft,
-          revisionRequest,
-          source: draftResult.source,
-          error: draftResult.error
-        });
-      }
+        if (nextState.activeJob) {
+          this.checkpointWorkflowService.writeProcessCheckpoint({
+            job: nextState.activeJob,
+            selectedCandidateId: currentState.activeCandidates?.find(
+              (candidate) => candidate.title === currentState.activeJob?.title
+            )?.id,
+            selectedCandidate: currentState.activeCandidates?.find(
+              (candidate) => candidate.title === currentState.activeJob?.title
+            ),
+            draft: draftResult.draft,
+            scriptCategory: currentState.lastScriptCategory ?? "community",
+            revisionRequest,
+            source: draftResult.source,
+            error: draftResult.error
+          });
+        }
       this.writeState(nextState);
       await this.sendTelegramScriptReview(
         botToken,
@@ -773,6 +1100,51 @@ export class TelegramControlService {
       return currentState;
     }
 
+    if (normalized === "/upload_video" || normalized === "/upload_shorts") {
+      const publishTarget = normalized === "/upload_shorts" ? "shorts" : "video";
+      const packagePath =
+        currentState.lastPackagePath?.trim() ||
+        currentState.activeJob?.id?.trim()
+          ? this.pathService.getAutomationPackagePath(currentState.activeJob?.id?.trim() ?? "")
+          : undefined;
+
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "업로드할 최근 패키지를 찾지 못했습니다. 먼저 3번 소재 생성을 완료해 주세요."
+            : "No recent package was found for upload. Finish Slot 03 create first."
+        );
+        return currentState;
+      }
+
+      try {
+        this.youTubeAuthService.setPublishTarget(packagePath, publishTarget);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? publishTarget === "shorts"
+              ? "최근 패키지로 유튜브 쇼츠 업로드를 시작합니다."
+              : "최근 패키지로 유튜브 영상 업로드를 시작합니다."
+            : publishTarget === "shorts"
+              ? "Starting YouTube Shorts upload from the latest package."
+              : "Starting YouTube video upload from the latest package."
+        );
+        await this.youTubeAuthService.uploadPackage(packagePath);
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `업로드에 실패했습니다.\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Upload failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return currentState;
+    }
+
     if (normalized === "/help") {
       await this.sendTelegramText(
         botToken,
@@ -799,6 +1171,15 @@ export class TelegramControlService {
     chatId: string,
     text: string
   ): Promise<void> {
+    await this.sendTelegramActionMessage(botToken, chatId, text);
+  }
+
+  private async sendTelegramActionMessage(
+    botToken: string,
+    chatId: string,
+    text: string,
+    inlineKeyboard?: Array<Array<{ text: string; callback_data: string }>>
+  ): Promise<void> {
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: {
@@ -806,7 +1187,14 @@ export class TelegramControlService {
       },
       body: JSON.stringify({
         chat_id: chatId,
-        text
+        text,
+        ...(inlineKeyboard
+          ? {
+              reply_markup: {
+                inline_keyboard: inlineKeyboard
+              }
+            }
+          : {})
       })
     });
 
@@ -840,9 +1228,11 @@ export class TelegramControlService {
       typeof state?.globalCandidateCount === "number" || typeof state?.domesticCandidateCount === "number"
         ? ` Global ${state?.globalCandidateCount ?? 0} / Domestic ${state?.domesticCandidateCount ?? 0}.`
         : "";
-    switch (job.stage) {
-      case "awaiting_revision_input":
-        return `Revision feedback is waiting in Telegram for ${job.title}.${candidateSummary}`;
+      switch (job.stage) {
+        case "awaiting_script_category":
+          return `Script category selection is waiting in Telegram for ${job.title}.${candidateSummary}`;
+        case "awaiting_revision_input":
+          return `Revision feedback is waiting in Telegram for ${job.title}.${candidateSummary}`;
       case "awaiting_review":
         return `Script review is waiting in Telegram for ${job.title}.${candidateSummary}`;
       case "approved":
@@ -1253,6 +1643,20 @@ export class TelegramControlService {
     return value;
   }
 
+  private formatTitleChoiceLabel(language: "en" | "ko", index: number, title: string): string {
+    const prefix = language === "ko" ? `${index + 1}번` : `Title ${index + 1}`;
+    const compactTitle = title.length > 22 ? `${title.slice(0, 22)}...` : title;
+    return `${prefix} ${compactTitle}`.trim();
+  }
+
+  private normalizeScriptCategory(value: string): ShortformScriptCategory {
+    if (value === "horror" || value === "romance") {
+      return value;
+    }
+
+    return "community";
+  }
+
   private t(language: "en" | "ko", key: string): string {
     const ko: Record<string, string> = {
       shortlistTitle: "MellowCat 트렌드 후보",
@@ -1281,7 +1685,7 @@ export class TelegramControlService {
       selectedTopic: "선택한 주제",
       selectedSummary: "주제 요약",
       revisionRequest: "수정 요청",
-      revisePrompt: "어떤 방향으로 수정할지 한 줄로 보내주세요. 예: 더 자극적으로, 20대 여성 톤으로, 훅을 더 짧게",
+      revisePrompt: "원하는 방향을 요청해주세요.",
       shortlistInactive: "이 후보 목록은 더 이상 활성 상태가 아닙니다.",
       reviewInactive: "이 검토 항목은 더 이상 활성 상태가 아닙니다.",
       received: "반영됐습니다",
@@ -1302,6 +1706,8 @@ export class TelegramControlService {
       helpShortlist: "/shortlist - 새 트렌드 후보 보내기",
       helpMoreGlobal: "/more_global - 글로벌 후보 더 보기",
       helpMoreDomestic: "/more_domestic - 국내 커뮤니티 후보 더 보기",
+      helpUploadVideo: "/upload_video - 최근 패키지를 유튜브 영상으로 업로드",
+      helpUploadShorts: "/upload_shorts - 최근 패키지를 유튜브 쇼츠로 업로드",
       helpStatus: "/status - 현재 상태 보기",
       helpLang: "/lang ko|en - 출력 언어 변경",
       helpHelp: "/help - 명령어 목록 보기",
@@ -1343,7 +1749,7 @@ export class TelegramControlService {
       selectedTopic: "Selected topic",
       selectedSummary: "Topic summary",
       revisionRequest: "Revision request",
-      revisePrompt: "Send one short message describing how to revise it. Example: make it more provocative, target women in their 20s, shorten the hook",
+      revisePrompt: "Tell me the direction you want.",
       shortlistInactive: "This shortlist is no longer active.",
       reviewInactive: "This review is no longer active.",
       received: "Received",
@@ -1364,6 +1770,8 @@ export class TelegramControlService {
       helpShortlist: "/shortlist - send a fresh trend shortlist",
       helpMoreGlobal: "/more_global - show more global candidates",
       helpMoreDomestic: "/more_domestic - show more Korean community candidates",
+      helpUploadVideo: "/upload_video - upload the latest package as a YouTube video",
+      helpUploadShorts: "/upload_shorts - upload the latest package as YouTube Shorts",
       helpStatus: "/status - show the current assistant status",
       helpLang: "/lang ko|en - switch output language",
       helpHelp: "/help - show this command list",
@@ -1381,3 +1789,4 @@ export class TelegramControlService {
     return (language === "ko" ? ko : en)[key] ?? key;
   }
 }
+

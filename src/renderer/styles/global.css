@@ -257,6 +257,11 @@ textarea {
   background: #fbfbfa;
   height: fit-content;
   min-height: 0;
+  min-width: 0;
+}
+
+.workflow-slot-card > * {
+  min-width: 0;
 }
 
 .workflow-slot-card.ready {
@@ -346,6 +351,7 @@ textarea {
   font-size: 12px;
   color: #7a746b;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .workflow-slot-preview {
@@ -363,6 +369,7 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .file-button {
@@ -444,6 +451,7 @@ textarea {
 .text-input,
 .secret-toggle {
   width: min(100%, 420px);
+  max-width: 100%;
   border: 1px solid #ddd8ce;
   border-radius: 9px;
   padding: 9px 11px;
@@ -471,6 +479,10 @@ textarea {
   border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
+  max-width: 100%;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .primary-button {
@@ -638,10 +650,43 @@ textarea {
   color: #8b8780;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .meta-code {
   word-break: break-all;
+}
+
+.workflow-slot-card .button-row > * {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.workflow-slot-card .text-input,
+.workflow-slot-card .secret-field,
+.workflow-slot-card .file-picker-field,
+.workflow-slot-card .meta-list,
+.workflow-slot-card .workflow-slot-manual-box,
+.workflow-slot-card .workflow-slot-command-guide {
+  min-width: 0;
+}
+
+.file-picker-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-picker-field .text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-picker-field .secondary-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .text-input::placeholder {

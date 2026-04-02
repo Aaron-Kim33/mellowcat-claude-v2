@@ -15,6 +15,7 @@ import type {
   YouTubeUploadResult
 } from "@common/types/settings";
 import type {
+  CreateReadinessSnapshot,
   ManualInputCheckpointPayload,
   ManualCreateCheckpointPayload,
   ManualOutputCheckpointPayload,
@@ -30,6 +31,7 @@ interface AppState {
   settings?: AppSettings;
   workflowConfig?: ShortformWorkflowConfig;
   workflowJobSnapshot?: WorkflowJobSnapshot;
+  createReadiness?: CreateReadinessSnapshot;
   appUpdateStatus?: AppUpdateStatus;
   youTubeAuthStatus?: YouTubeAuthStatus;
   youTubeUploadRequest?: YouTubeUploadRequest;
@@ -57,6 +59,7 @@ interface AppState {
   disconnectYouTube: () => Promise<void>;
   refreshYouTubeUploadRequest: () => Promise<void>;
   saveYouTubeUploadRequest: (patch: Partial<YouTubeUploadRequest>) => Promise<void>;
+  pickCreateBackgroundFile: () => Promise<string | undefined>;
   pickYouTubeVideoFile: () => Promise<string | undefined>;
   pickYouTubeThumbnailFile: () => Promise<string | undefined>;
   uploadLastPackageToYouTube: () => Promise<void>;
@@ -72,6 +75,7 @@ interface AppState {
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
   saveWorkflowConfig: (patch: Partial<ShortformWorkflowConfig>) => Promise<void>;
   refreshWorkflowJobSnapshot: (jobId: string) => Promise<void>;
+  refreshCreateReadiness: (jobId: string) => Promise<void>;
   runCreatePipeline: (jobId: string) => Promise<void>;
   saveManualInputCheckpoint: (payload: ManualInputCheckpointPayload) => Promise<void>;
   saveManualProcessCheckpoint: (payload: ManualProcessCheckpointPayload) => Promise<void>;
@@ -298,6 +302,7 @@ export const useAppStore = create<AppState>((set) => ({
       await window.mellowcat.automation.updateYouTubeUploadRequest(packagePath, patch);
     set({ youTubeUploadRequest });
   },
+  pickCreateBackgroundFile: async () => window.mellowcat.automation.pickCreateBackgroundFile(),
   pickYouTubeVideoFile: async () => window.mellowcat.automation.pickYouTubeVideoFile(),
   pickYouTubeThumbnailFile: async () =>
     window.mellowcat.automation.pickYouTubeThumbnailFile(),
@@ -503,8 +508,13 @@ export const useAppStore = create<AppState>((set) => ({
     const workflowJobSnapshot = await window.mellowcat.automation.inspectWorkflowJob(jobId);
     set({ workflowJobSnapshot });
   },
+  refreshCreateReadiness: async (jobId: string) => {
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
+    set({ createReadiness });
+  },
   runCreatePipeline: async (jobId: string) => {
     const workflowJobSnapshot = await window.mellowcat.automation.runCreatePipeline(jobId);
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
     const packagePath =
       workflowJobSnapshot.resolvedPackagePath ??
       useAppStore.getState().telegramStatus?.lastPackagePath;
@@ -518,6 +528,7 @@ export const useAppStore = create<AppState>((set) => ({
     ]);
     set({
       workflowJobSnapshot,
+      createReadiness,
       youTubeAuthStatus,
       youTubeUploadRequest
     });

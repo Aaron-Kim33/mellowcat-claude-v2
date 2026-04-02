@@ -78,11 +78,31 @@ export function registerAutomationIpc(
 
     return result.canceled ? undefined : result.filePaths[0];
   });
+  ipcMain.handle("automation:create:pickBackgroundFile", async (event) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Media files",
+          extensions: ["mp4", "mov", "webm", "mkv", "png", "jpg", "jpeg", "webp"]
+        }
+      ]
+    };
+    const result = ownerWindow
+      ? await dialog.showOpenDialog(ownerWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    return result.canceled ? undefined : result.filePaths[0];
+  });
   ipcMain.handle("automation:youtube:uploadPackage", (_event, packagePath: string) =>
     youTubeAuthService.uploadPackage(packagePath)
   );
   ipcMain.handle("automation:workflow:inspectJob", (_event, jobId: string) =>
     checkpointWorkflowService.inspectJob(jobId)
+  );
+  ipcMain.handle("automation:workflow:getCreateReadiness", (_event, jobId: string) =>
+    productionPackageService.getCreateReadiness(jobId)
   );
   ipcMain.handle("automation:workflow:runCreatePipeline", (_event, jobId: string) =>
     productionPackageService.runCreatePipeline(jobId)

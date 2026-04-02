@@ -229,6 +229,7 @@ export function InstalledPage() {
     settings,
     workflowConfig,
     workflowJobSnapshot,
+    createReadiness,
     telegramStatus,
     youTubeAuthStatus,
     youTubeUploadRequest,
@@ -243,6 +244,7 @@ export function InstalledPage() {
     mcpOutputById,
     saveWorkflowConfig,
     refreshWorkflowJobSnapshot,
+    refreshCreateReadiness,
     runCreatePipeline,
     saveManualInputCheckpoint,
     saveManualProcessCheckpoint,
@@ -254,6 +256,7 @@ export function InstalledPage() {
     disconnectYouTube,
     refreshYouTubeUploadRequest,
     saveYouTubeUploadRequest,
+    pickCreateBackgroundFile,
     pickYouTubeVideoFile,
     pickYouTubeThumbnailFile,
     uploadLastPackageToYouTube
@@ -306,8 +309,13 @@ export function InstalledPage() {
   const [instagramAccountHandle, setInstagramAccountHandle] = useState("");
   const [instagramAccessToken, setInstagramAccessToken] = useState("");
   const [pexelsApiKey, setPexelsApiKey] = useState("");
+  const [createBackgroundSourceType, setCreateBackgroundSourceType] = useState<"preset" | "custom">("preset");
+  const [createBackgroundMediaPath, setCreateBackgroundMediaPath] = useState("");
   const [createTargetDurationSec, setCreateTargetDurationSec] = useState("60");
   const [createMinimumSceneCount, setCreateMinimumSceneCount] = useState("3");
+  const [createSubtitleTheme, setCreateSubtitleTheme] = useState<
+    "clean_dark" | "clean_light" | "story_bold"
+  >("story_bold");
   const [instagramConnected, setInstagramConnected] = useState(false);
   const [instagramStatusMessage, setInstagramStatusMessage] = useState("");
   const [youtubeVideoFilePath, setYoutubeVideoFilePath] = useState("");
@@ -749,6 +757,57 @@ export function InstalledPage() {
       );
     }
 
+    if (field.id === "backgroundSourceType") {
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <select
+            className="text-input"
+            value={createBackgroundSourceType}
+            onChange={(event) => setCreateBackgroundSourceType(event.target.value as "preset" | "custom")}
+          >
+            <option value="preset">{isKorean ? "기본 배경 사용" : "Use preset background"}</option>
+            <option value="custom">{isKorean ? "직접 파일 선택" : "Choose custom file"}</option>
+          </select>
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
+    if (field.id === "backgroundMediaPath") {
+      if (createModuleId === "background-subtitle-composer-mcp" && createBackgroundSourceType !== "custom") {
+        return null;
+      }
+
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <div className="secret-field">
+            <input
+              className="text-input"
+              value={createBackgroundMediaPath}
+              readOnly
+              placeholder={field.placeholder}
+            />
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                void pickCreateBackgroundFile().then((selectedPath) => {
+                  if (selectedPath) {
+                    setCreateBackgroundMediaPath(selectedPath);
+                  }
+                });
+              }}
+            >
+              {isKorean ? "찾아보기" : "Browse"}
+            </button>
+          </div>
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
     if (field.id === "targetDurationSec") {
       return (
         <label key={field.id} className={fieldClassName}>
@@ -762,6 +821,30 @@ export function InstalledPage() {
             onChange={(event) => setCreateTargetDurationSec(event.target.value)}
             placeholder={field.placeholder}
           />
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
+    if (field.id === "subtitleTheme") {
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <select
+            className="text-input"
+            value={createSubtitleTheme}
+            onChange={(event) =>
+              setCreateSubtitleTheme(
+                event.target.value as "clean_dark" | "clean_light" | "story_bold"
+              )
+            }
+          >
+            {(field.options ?? []).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           {field.helpText && <span className="subtle">{field.helpText}</span>}
         </label>
       );
@@ -1084,6 +1167,14 @@ export function InstalledPage() {
         value: pexelsApiKey,
         setValue: setPexelsApiKey
       },
+      backgroundSourceType: {
+        value: createBackgroundSourceType,
+        setValue: (value: string) => setCreateBackgroundSourceType(value as "preset" | "custom")
+      },
+      backgroundMediaPath: {
+        value: createBackgroundMediaPath,
+        setValue: setCreateBackgroundMediaPath
+      },
       targetDurationSec: {
         value: createTargetDurationSec,
         setValue: setCreateTargetDurationSec
@@ -1091,6 +1182,11 @@ export function InstalledPage() {
       minimumSceneCount: {
         value: createMinimumSceneCount,
         setValue: setCreateMinimumSceneCount
+      },
+      subtitleTheme: {
+        value: createSubtitleTheme,
+        setValue: (value: string) =>
+          setCreateSubtitleTheme(value as "clean_dark" | "clean_light" | "story_bold")
       },
       videoFilePath: {
         value: manualCreateVideoPath,
@@ -1125,6 +1221,57 @@ export function InstalledPage() {
       return null;
     }
 
+    if (field.id === "backgroundSourceType") {
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <select
+            className="text-input"
+            value={binding.value}
+            onChange={(event) => binding.setValue(event.target.value)}
+          >
+            <option value="preset">{isKorean ? "기본 배경 사용" : "Use preset background"}</option>
+            <option value="custom">{isKorean ? "직접 파일 선택" : "Choose custom file"}</option>
+          </select>
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
+    if (field.id === "backgroundMediaPath") {
+      if (createModuleId === "background-subtitle-composer-mcp" && createBackgroundSourceType !== "custom") {
+        return null;
+      }
+
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <div className="file-picker-field">
+            <input
+              className="text-input"
+              value={binding.value}
+              readOnly
+              placeholder={field.placeholder}
+            />
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                void pickCreateBackgroundFile().then((selectedPath) => {
+                  if (selectedPath) {
+                    binding.setValue(selectedPath);
+                  }
+                });
+              }}
+            >
+              {isKorean ? "찾아보기" : "Browse"}
+            </button>
+          </div>
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
     if (field.type === "textarea") {
       return (
         <label key={field.id} className={fieldClassName}>
@@ -1136,6 +1283,26 @@ export function InstalledPage() {
             onChange={(event) => binding.setValue(event.target.value)}
             placeholder={field.placeholder}
           />
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
+    if (field.type === "select") {
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <select
+            className="text-input"
+            value={binding.value}
+            onChange={(event) => binding.setValue(event.target.value)}
+          >
+            {(field.options ?? []).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           {field.helpText && <span className="subtle">{field.helpText}</span>}
         </label>
       );
@@ -1359,10 +1526,13 @@ export function InstalledPage() {
     setTelegramBotToken(workflowConfig?.telegramBotToken ?? "");
     setTelegramAdminChatId(workflowConfig?.telegramAdminChatId ?? "");
     setInstagramAccountHandle(workflowConfig?.instagramAccountHandle ?? "");
-    setInstagramAccessToken(workflowConfig?.instagramAccessToken ?? "");
-    setPexelsApiKey(workflowConfig?.pexelsApiKey ?? "");
+      setInstagramAccessToken(workflowConfig?.instagramAccessToken ?? "");
+      setPexelsApiKey(workflowConfig?.pexelsApiKey ?? "");
+      setCreateBackgroundSourceType(workflowConfig?.createBackgroundSourceType ?? "preset");
+      setCreateBackgroundMediaPath(workflowConfig?.createBackgroundMediaPath ?? "");
     setCreateTargetDurationSec(String(workflowConfig?.createTargetDurationSec ?? 60));
     setCreateMinimumSceneCount(String(workflowConfig?.createMinimumSceneCount ?? 3));
+    setCreateSubtitleTheme(workflowConfig?.createSubtitleTheme ?? "story_bold");
     setYoutubeChannelLabel(workflowConfig?.youtubeChannelLabel ?? "");
     setYoutubePrivacyStatus(workflowConfig?.youtubePrivacyStatus ?? "private");
     setYoutubeCategoryId(workflowConfig?.youtubeCategoryId ?? "22");
@@ -1391,17 +1561,18 @@ export function InstalledPage() {
   const activePackagePath =
     telegramStatus?.lastPackagePath ?? workflowJobSnapshot?.resolvedPackagePath ?? undefined;
   const createPipelineWarning =
-    createModuleId === "youtube-material-generator-mcp"
+    ["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(createModuleId)
       ? [
-          !pexelsApiKey.trim()
+          ...((createReadiness?.items ?? [])
+            .filter((item) => !item.ok)
+            .map((item) => item.detail)),
+          !createReadiness &&
+          ["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(
+            createModuleId
+          )
             ? isKorean
-              ? "Pexels API Key가 없어 장면별 영상 검색을 할 수 없습니다. 03 슬롯의 모듈 설정에 입력해 주세요."
-              : "Pexels API Key is missing. Add it in the Slot 03 module settings."
-            : null,
-          !hasVoiceoverCredentials(settings)
-            ? isKorean
-              ? "Azure Speech Key/Region 또는 OpenAI TTS 키가 없어 한국어 더빙을 만들 수 없습니다. 설정 탭의 Azure Speech 더빙 또는 AI 연결에서 입력해 주세요."
-              : "No Azure Speech or OpenAI TTS credentials are configured. Add them in Settings."
+              ? "3번 슬롯 준비 상태를 확인하는 중입니다."
+              : "Checking Slot 03 readiness..."
             : null
         ]
           .filter(Boolean)
@@ -1414,7 +1585,32 @@ export function InstalledPage() {
     }
 
     void refreshWorkflowJobSnapshot(currentWorkflowJobId);
-  }, [currentWorkflowJobId, refreshWorkflowJobSnapshot]);
+    void refreshCreateReadiness(currentWorkflowJobId);
+  }, [currentWorkflowJobId, refreshCreateReadiness, refreshWorkflowJobSnapshot]);
+
+  useEffect(() => {
+    if (
+      !currentWorkflowJobId ||
+      !["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(
+        createModuleId
+      )
+    ) {
+      return;
+    }
+
+    void refreshCreateReadiness(currentWorkflowJobId);
+  }, [
+      currentWorkflowJobId,
+      createModuleId,
+      pexelsApiKey,
+      createBackgroundSourceType,
+      createBackgroundMediaPath,
+    settings?.azureSpeechKey,
+    settings?.azureSpeechRegion,
+    settings?.openAiApiKey,
+    settings?.secondaryOpenAiApiKey,
+    refreshCreateReadiness
+  ]);
 
   useEffect(() => {
     const inputCheckpoint = workflowJobSnapshot?.checkpoints[1];
@@ -1623,6 +1819,8 @@ export function InstalledPage() {
       instagramAccountHandle: instagramAccountHandle.trim() || undefined,
       instagramAccessToken: instagramAccessToken.trim() || undefined,
       pexelsApiKey: pexelsApiKey.trim() || undefined,
+      createBackgroundSourceType,
+      createBackgroundMediaPath: createBackgroundMediaPath.trim() || undefined,
       createTargetDurationSec:
         Number.isFinite(parsedCreateTargetDurationSec) && parsedCreateTargetDurationSec > 0
           ? parsedCreateTargetDurationSec
@@ -1631,6 +1829,7 @@ export function InstalledPage() {
         Number.isFinite(parsedCreateMinimumSceneCount) && parsedCreateMinimumSceneCount > 0
           ? parsedCreateMinimumSceneCount
           : undefined,
+      createSubtitleTheme,
       youtubeChannelLabel: youtubeChannelLabel.trim() || undefined,
       youtubePrivacyStatus,
       youtubeCategoryId,
@@ -1963,6 +2162,19 @@ export function InstalledPage() {
       );
       return;
     }
+    const processReviewStatus = ((processCheckpoint.payload as {
+      review?: {
+        status?: "pending" | "approved";
+      };
+    })?.review?.status ?? "pending");
+    if (processReviewStatus !== "approved") {
+      setManualCreateError(
+        isKorean
+          ? "2번 단계가 아직 승인되지 않아 3번 소재 생성을 시작할 수 없습니다."
+          : "Slot 02 is not approved yet, so create generation cannot start."
+      );
+      return;
+    }
 
     setCreatePipelineBusy(true);
     setSavedMessage(
@@ -2242,7 +2454,11 @@ export function InstalledPage() {
                 );
                 const processFields = processSlotUi?.fields ?? [];
                 const processActions = processSlotUi?.actions ?? [];
-                const createFields = createSlotUi?.fields ?? [];
+                const createFields = (createSlotUi?.fields ?? []).filter((field) =>
+                  createModuleId === "background-subtitle-composer-mcp"
+                    ? field.id !== "targetDurationSec" && field.id !== "minimumSceneCount"
+                    : true
+                );
                 const createActions = createSlotUi?.actions ?? [];
                 const slotCards = [
                   {
@@ -2604,12 +2820,37 @@ export function InstalledPage() {
                             </span>
                           </div>
                         )}
-                        {slot.id === "create" && createPipelineWarning && (
-                          <div className="workflow-slot-manual-box">
-                            <strong>{isKorean ? "생성 전 확인" : "Before generate"}</strong>
-                            <span className="warning-text">{createPipelineWarning}</span>
-                          </div>
-                        )}
+                        {slot.id === "create" &&
+                          ["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(
+                            createModuleId
+                          ) &&
+                          (createReadiness?.items?.length || createPipelineWarning) && (
+                            <div className="workflow-slot-manual-box">
+                              <strong>{isKorean ? "생성 전 확인" : "Before generate"}</strong>
+                              {createReadiness?.items?.length ? (
+                                <div className="meta-list">
+                                  {createReadiness.items.map((item) => (
+                                    <div className="meta-item" key={item.id}>
+                                      <span>{item.label}</span>
+                                      <strong className={item.ok ? "" : "warning-text"}>
+                                        {item.ok
+                                          ? isKorean
+                                            ? "준비됨"
+                                            : "Ready"
+                                          : isKorean
+                                            ? "필요"
+                                            : "Needed"}
+                                      </strong>
+                                      <span className="subtle">{item.detail}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {createPipelineWarning ? (
+                                <span className="warning-text">{createPipelineWarning}</span>
+                              ) : null}
+                            </div>
+                          )}
                         {slot.id === "create" && createPipelineBusy && (
                           <div className="workflow-slot-manual-box">
                             <strong>{isKorean ? "소재 생성 중" : "Generating assets"}</strong>

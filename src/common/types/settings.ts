@@ -23,6 +23,7 @@ export interface AppSettings {
   instagramAccountHandle?: string;
   instagramAccessToken?: string;
   pexelsApiKey?: string;
+  createBackgroundSourceType?: "preset" | "custom";
   azureSpeechKey?: string;
   azureSpeechRegion?: string;
   azureSpeechVoice?: string;
@@ -63,6 +64,7 @@ export interface YouTubeAuthStatus {
 
 export interface YouTubeUploadRequest {
   platform: "youtube";
+  publishTarget?: "video" | "shorts";
   status: "draft" | "ready" | "uploaded" | "error";
   videoFilePath: string;
   thumbnailFilePath: string;

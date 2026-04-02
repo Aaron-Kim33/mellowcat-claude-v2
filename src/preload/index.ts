@@ -102,6 +102,8 @@ const automationBridge: MellowCatAPI["automation"] = {
     patch: Partial<YouTubeUploadRequest>
   ): Promise<YouTubeUploadRequest> =>
     ipcRenderer.invoke("automation:youtube:updateUploadRequest", packagePath, patch),
+  pickCreateBackgroundFile: (): Promise<string | undefined> =>
+    ipcRenderer.invoke("automation:create:pickBackgroundFile"),
   pickYouTubeVideoFile: (): Promise<string | undefined> =>
     ipcRenderer.invoke("automation:youtube:pickVideoFile"),
   pickYouTubeThumbnailFile: (): Promise<string | undefined> =>
@@ -110,6 +112,8 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath),
   inspectWorkflowJob: (jobId: string) =>
     ipcRenderer.invoke("automation:workflow:inspectJob", jobId),
+  getCreateReadiness: (jobId: string) =>
+    ipcRenderer.invoke("automation:workflow:getCreateReadiness", jobId),
   runCreatePipeline: (jobId: string) =>
     ipcRenderer.invoke("automation:workflow:runCreatePipeline", jobId),
   saveManualInputCheckpoint: (payload) =>

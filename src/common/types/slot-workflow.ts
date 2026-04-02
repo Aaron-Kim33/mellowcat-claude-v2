@@ -40,6 +40,25 @@ export interface WorkflowJobSnapshot {
   checkpoints: Partial<Record<1 | 2 | 3 | 4, WorkflowCheckpointEnvelope>>;
 }
 
+export interface CreateReadinessItem {
+  id:
+    | "job"
+    | "checkpoint_2"
+    | "approval"
+    | "pexels"
+    | "tts"
+    | "ffmpeg";
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface CreateReadinessSnapshot {
+  jobId?: string;
+  canRun: boolean;
+  items: CreateReadinessItem[];
+}
+
 export interface ManualInputCandidateDraft {
   id?: string;
   title: string;
@@ -78,6 +97,14 @@ export interface ManualProcessCheckpointPayload {
     callToAction: string;
   };
   reviewNotes?: string;
+}
+
+export interface ProcessCheckpointReviewState {
+  status?: "pending" | "approved";
+  notes?: string;
+  selectedTitleIndex?: number;
+  selectedTitle?: string;
+  scriptCategory?: "horror" | "romance" | "community";
 }
 
 export interface ManualCreateCheckpointPayload {

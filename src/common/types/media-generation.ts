@@ -88,7 +88,7 @@ export interface GeneratedMediaArtifacts {
 export interface GeneratedMediaPackageManifest {
   schemaVersion: 1;
   generatedAt: string;
-  provider: "youtube-material-generator-mcp";
+  provider: "youtube-material-generator-mcp" | "background-subtitle-composer-mcp";
   language: "ko";
   totalDurationSec: number;
   scenes: SceneAssetSelection[];

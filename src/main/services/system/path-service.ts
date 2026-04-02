@@ -80,6 +80,10 @@ export class PathService {
     return path.join(this.getBundledResourcesPath(), "dev", toolName);
   }
 
+  getBundledBackgroundPath(backgroundId: "horror" | "romance" | "community"): string {
+    return path.join(this.getBundledResourcesPath(), "backgrounds", `${backgroundId}.png`);
+  }
+
   getInstalledRootPath(mcpId: string): string {
     return path.join(this.getDefaultVaultPath(), "installed", mcpId);
   }

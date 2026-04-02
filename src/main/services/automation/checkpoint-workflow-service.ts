@@ -8,6 +8,7 @@ import type {
   ManualCreateCheckpointPayload,
   ManualOutputCheckpointPayload,
   ManualProcessCheckpointPayload,
+  ProcessCheckpointReviewState,
   WorkflowCheckpointEnvelope,
   WorkflowCheckpointStatus,
   WorkflowJobRecord,
@@ -59,6 +60,7 @@ export class CheckpointWorkflowService {
     selectedCandidateId?: string;
     selectedCandidate?: TrendCandidate;
     draft: ShortformScriptDraft;
+    scriptCategory?: "horror" | "romance" | "community";
     revisionRequest?: string;
     source: "claude" | "openrouter" | "openai" | "mock";
     error?: string;
@@ -81,7 +83,10 @@ export class CheckpointWorkflowService {
         scriptDraft: input.draft,
         review: {
           status: input.job.stage === "approved" ? "approved" : "pending",
-          notes: input.revisionRequest ?? ""
+          notes: input.revisionRequest ?? "",
+          selectedTitleIndex: 0,
+          selectedTitle: input.draft.titleOptions[0] ?? "",
+          scriptCategory: input.scriptCategory ?? "community"
         },
         generator: {
           source: input.source,
@@ -89,6 +94,72 @@ export class CheckpointWorkflowService {
         }
       }
     });
+  }
+
+  markProcessCheckpointApproved(jobId: string): void {
+    const checkpointPath = this.pathService.getAutomationCheckpointPath(jobId, 2);
+    const checkpoint = this.tryRead<WorkflowCheckpointEnvelope<{
+      review?: ProcessCheckpointReviewState;
+    }>>(checkpointPath);
+
+    if (!checkpoint) {
+      return;
+    }
+
+    this.fileService.writeJsonFile(checkpointPath, {
+      ...checkpoint,
+      status: "completed",
+      updatedAt: new Date().toISOString(),
+      payload: {
+        ...checkpoint.payload,
+        review: {
+          ...(checkpoint.payload?.review ?? {}),
+          status: "approved"
+        }
+      }
+    });
+  }
+
+  selectProcessCheckpointTitle(jobId: string, titleIndex: number): string | null {
+    const checkpointPath = this.pathService.getAutomationCheckpointPath(jobId, 2);
+    const checkpoint = this.tryRead<WorkflowCheckpointEnvelope<{
+      scriptDraft?: ShortformScriptDraft;
+      review?: ProcessCheckpointReviewState;
+    }>>(checkpointPath);
+
+    const titleOptions = checkpoint?.payload?.scriptDraft?.titleOptions;
+    if (!checkpoint || !titleOptions?.length) {
+      return null;
+    }
+
+    if (titleIndex < 0 || titleIndex >= titleOptions.length) {
+      return null;
+    }
+
+    const selectedTitle = titleOptions[titleIndex];
+    const reorderedTitles = [
+      selectedTitle,
+      ...titleOptions.filter((_, index) => index !== titleIndex)
+    ];
+
+    this.fileService.writeJsonFile(checkpointPath, {
+      ...checkpoint,
+      updatedAt: new Date().toISOString(),
+      payload: {
+        ...checkpoint.payload,
+        scriptDraft: {
+          ...checkpoint.payload.scriptDraft,
+          titleOptions: reorderedTitles
+        },
+        review: {
+          ...(checkpoint.payload?.review ?? {}),
+          selectedTitleIndex: 0,
+          selectedTitle
+        }
+      }
+    });
+
+    return selectedTitle;
   }
 
   writeCreateCheckpoint(input: {

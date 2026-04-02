@@ -37,6 +37,7 @@ import { ScenePlanService } from "../services/automation/scene-plan-service";
 import { SubtitleService } from "../services/automation/subtitle-service";
 import { VoiceoverService } from "../services/automation/voiceover-service";
 import { MediaCompositionService } from "../services/automation/media-composition-service";
+import { TelegramOperatorChannelService } from "../services/automation/telegram-operator-channel-service";
 import type { AppSettings } from "../../common/types/settings";
 
 export async function bootstrap(): Promise<void> {
@@ -60,28 +61,33 @@ export async function bootstrap(): Promise<void> {
   const pexelsAssetService = new PexelsAssetService();
   const scenePlanService = new ScenePlanService(settingsRepository, workflowConfigService);
   const subtitleService = new SubtitleService();
+  const telegramOperatorChannelService = new TelegramOperatorChannelService(workflowConfigService);
   const voiceoverService = new VoiceoverService(
     settingsRepository,
     workflowConfigService,
-    fileService
+    fileService,
+    pathService
   );
   const mediaCompositionService = new MediaCompositionService(fileService, pathService);
   const youTubeAuthService = new YouTubeAuthService(
     workflowConfigService,
     secretsStore,
     pathService,
-    checkpointWorkflowService
+    checkpointWorkflowService,
+    telegramOperatorChannelService
   );
   const productionPackageService = new ProductionPackageService(
     pathService,
     fileService,
+    settingsRepository,
     workflowConfigService,
     checkpointWorkflowService,
     scenePlanService,
     pexelsAssetService,
     subtitleService,
     voiceoverService,
-    mediaCompositionService
+    mediaCompositionService,
+    telegramOperatorChannelService
   );
   const telegramControlService = new TelegramControlService(
     workflowConfigService,
@@ -89,7 +95,8 @@ export async function bootstrap(): Promise<void> {
     trendDiscoveryService,
     shortformScriptService,
     productionPackageService,
-    checkpointWorkflowService
+    checkpointWorkflowService,
+    youTubeAuthService
   );
   const authService = new AuthService(
     apiClient,

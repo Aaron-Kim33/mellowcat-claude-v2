@@ -13,6 +13,9 @@ export interface MediaCompositionResult {
 }
 
 export class MediaCompositionService {
+  private static readonly FFMPEG_TIMEOUT_MS = 3 * 60 * 1000;
+  private static readonly BACKGROUND_COMPOSER_SPEED = 1.1;
+
   constructor(
     private readonly fileService: FileService,
     private readonly pathService: PathService
@@ -60,13 +63,16 @@ export class MediaCompositionService {
         1,
         scene.trim.sourceEndSec - scene.trim.sourceStartSec || 1
       );
+      const sourceAssetPath = path.resolve(packagePath, resolvedAsset.localPath);
+      const inputArgs =
+        resolvedAsset.assetType === "image"
+          ? ["-loop", "1", "-i", sourceAssetPath]
+          : ["-stream_loop", "-1", "-i", sourceAssetPath];
 
-      await this.runFfmpeg([
+      await this.runFfmpeg(
+        [
         "-y",
-        "-stream_loop",
-        "-1",
-        "-i",
-        path.resolve(packagePath, resolvedAsset.localPath),
+        ...inputArgs,
         "-t",
         durationSec.toString(),
         "-vf",
@@ -76,10 +82,19 @@ export class MediaCompositionService {
         "-an",
         "-c:v",
         "libx264",
+        "-crf",
+        "18",
+        "-preset",
+        "medium",
         "-pix_fmt",
         "yuv420p",
         preparedClipPath
-      ]);
+        ],
+        {
+          packagePath,
+          logName: `ffmpeg-scene-${scene.sceneIndex.toString().padStart(2, "0")}.log`
+        }
+      );
 
       preparedScenes.push(preparedClipPath);
       updatedScenes.push({
@@ -119,28 +134,73 @@ export class MediaCompositionService {
     ];
 
     const hasSubtitle = Boolean(subtitlePath && fs.existsSync(subtitlePath));
+    const burnSubtitles =
+      hasSubtitle && manifest.provider === "background-subtitle-composer-mcp";
+    const speedAdjusted = manifest.provider === "background-subtitle-composer-mcp";
     if (hasSubtitle) {
       ffmpegArgs.push("-i", subtitlePath);
     }
 
-    ffmpegArgs.push("-map", "0:v:0", "-map", "1:a:0");
-    if (hasSubtitle) {
-      ffmpegArgs.push("-map", "2:0");
+    if (speedAdjusted) {
+      const videoFilters: string[] = [];
+      if (burnSubtitles) {
+        const escapedSubtitlePath = subtitlePath
+          .replace(/\\/g, "/")
+          .replace(/:/g, "\\:")
+          .replace(/,/g, "\\,")
+          .replace(/'/g, "\\'");
+        videoFilters.push(
+          `subtitles='${escapedSubtitlePath}'`
+        );
+      }
+      videoFilters.push(`setpts=PTS/${MediaCompositionService.BACKGROUND_COMPOSER_SPEED}`);
+      ffmpegArgs.push(
+        "-filter_complex",
+        `[0:v]${videoFilters.join(",")}[v];[1:a]atempo=${MediaCompositionService.BACKGROUND_COMPOSER_SPEED}[a]`,
+        "-map",
+        "[v]",
+        "-map",
+        "[a]"
+      );
+    } else {
+      ffmpegArgs.push("-map", "0:v:0", "-map", "1:a:0");
+      if (hasSubtitle && !burnSubtitles) {
+        ffmpegArgs.push("-map", "2:0");
+      }
     }
+
     ffmpegArgs.push(
       "-c:v",
       "libx264",
+      "-crf",
+      "18",
+      "-preset",
+      "medium",
       "-pix_fmt",
       "yuv420p",
       "-c:a",
       "aac"
     );
-    if (hasSubtitle) {
+
+    if (burnSubtitles && !speedAdjusted) {
+      const escapedSubtitlePath = subtitlePath
+        .replace(/\\/g, "/")
+        .replace(/:/g, "\\:")
+        .replace(/,/g, "\\,")
+        .replace(/'/g, "\\'");
+      ffmpegArgs.push(
+        "-vf",
+        `subtitles='${escapedSubtitlePath}'`
+      );
+    } else if (hasSubtitle && !speedAdjusted) {
       ffmpegArgs.push("-c:s", "mov_text");
     }
     ffmpegArgs.push("-shortest", finalVideoPath);
 
-    await this.runFfmpeg(ffmpegArgs);
+    await this.runFfmpeg(ffmpegArgs, {
+      packagePath,
+      logName: "ffmpeg-compose.log"
+    });
 
     return {
       source: "ffmpeg",
@@ -197,7 +257,13 @@ export class MediaCompositionService {
     };
   }
 
-  private runFfmpeg(args: string[]): Promise<void> {
+  private runFfmpeg(
+    args: string[],
+    options: {
+      packagePath: string;
+      logName: string;
+    }
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       const ffmpegExecutable = this.resolveFfmpegExecutable();
       if (!ffmpegExecutable) {
@@ -209,6 +275,12 @@ export class MediaCompositionService {
         return;
       }
 
+      const logPath = path.join(options.packagePath, options.logName);
+      this.fileService.writeTextFile(
+        logPath,
+        [`[start] ${new Date().toISOString()}`, ffmpegExecutable, ...args].join("\n")
+      );
+
       const child = spawn(ffmpegExecutable, args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"]
@@ -216,6 +288,25 @@ export class MediaCompositionService {
 
       let stderr = "";
       let stdout = "";
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        child.kill("SIGKILL");
+        fs.appendFileSync(
+          logPath,
+          `\n[timeout] ${new Date().toISOString()}\nFFmpeg timed out after ${MediaCompositionService.FFMPEG_TIMEOUT_MS}ms.\n`,
+          "utf-8"
+        );
+        reject(
+          new Error(
+            `FFmpeg timed out after ${Math.round(MediaCompositionService.FFMPEG_TIMEOUT_MS / 1000)} seconds.`
+          )
+        );
+      }, MediaCompositionService.FFMPEG_TIMEOUT_MS);
 
       child.stdout.on("data", (chunk: Buffer | string) => {
         stdout += chunk.toString();
@@ -226,10 +317,31 @@ export class MediaCompositionService {
       });
 
       child.on("error", (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        fs.appendFileSync(
+          logPath,
+          `\n[error] ${new Date().toISOString()}\n${error.message}\n`,
+          "utf-8"
+        );
         reject(error);
       });
 
       child.on("close", (code) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        const combinedOutput = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n\n");
+        fs.appendFileSync(
+          logPath,
+          `\n[close] ${new Date().toISOString()}\nexit=${code}\n${combinedOutput}\n`,
+          "utf-8"
+        );
         if (code !== 0) {
           reject(new Error(stderr.trim() || stdout.trim() || `ffmpeg exited with code ${code}`));
           return;

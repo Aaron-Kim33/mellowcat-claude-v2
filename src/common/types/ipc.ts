@@ -21,6 +21,7 @@ import type {
 } from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 import type {
+  CreateReadinessSnapshot,
   ManualInputCheckpointPayload,
   ManualCreateCheckpointPayload,
   ManualOutputCheckpointPayload,
@@ -91,10 +92,12 @@ export interface MellowCatAPI {
       packagePath: string,
       patch: Partial<YouTubeUploadRequest>
     ) => Promise<YouTubeUploadRequest>;
+    pickCreateBackgroundFile: () => Promise<string | undefined>;
     pickYouTubeVideoFile: () => Promise<string | undefined>;
     pickYouTubeThumbnailFile: () => Promise<string | undefined>;
     uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
     inspectWorkflowJob: (jobId: string) => Promise<WorkflowJobSnapshot>;
+    getCreateReadiness: (jobId: string) => Promise<CreateReadinessSnapshot>;
     runCreatePipeline: (jobId: string) => Promise<WorkflowJobSnapshot>;
     saveManualInputCheckpoint: (
       payload: ManualInputCheckpointPayload

@@ -277,6 +277,82 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       }
     }
   },
+  "background-subtitle-composer-mcp": {
+    id: "background-subtitle-composer-mcp",
+    name: "Background Subtitle Composer",
+    aiCapable: true,
+    builtinAvailable: true,
+    slot: "create",
+    category: "packaging",
+    compatibility: {
+      inputs: [{ contract: "script_draft_v1", required: true }],
+      outputs: [{ contract: "production_package_v1", required: true }],
+      executionModes: ["on_demand"]
+    },
+    dependencies: [
+      {
+        mcpId: "shortform-script-mcp",
+        reason: "Needs a script draft to build a subtitle-driven background composition package.",
+        required: true
+      }
+    ],
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      create: {
+        slot: "create",
+        title: "배경 자막 합성기",
+        description:
+          "미리 준비한 배경 영상이나 이미지를 반복 사용하고, 자막을 하드코딩한 썰형 숏폼 패키지를 만듭니다.",
+          fields: [
+            {
+              id: "backgroundSourceType",
+              label: "배경 소스",
+              type: "select",
+              width: "half",
+              options: [
+                { label: "기본 배경 사용", value: "preset" },
+                { label: "직접 파일 선택", value: "custom" }
+              ]
+            },
+            {
+              id: "backgroundMediaPath",
+              label: "배경 파일 경로",
+              type: "text",
+              required: false,
+              width: "full"
+            },
+          {
+            id: "targetDurationSec",
+            label: "목표 길이(초)",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "minimumSceneCount",
+            label: "최소 씬 수",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "subtitleTheme",
+            label: "자막 스타일",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "스토리 볼드", value: "story_bold" },
+              { label: "클린 다크", value: "clean_dark" },
+              { label: "클린 라이트", value: "clean_light" }
+            ]
+          }
+        ],
+        actions: [
+          { id: "run_create_pipeline", label: "소재 생성 실행", kind: "primary" },
+          { id: "generate_scene_plan", label: "씬 플랜 생성", kind: "secondary" },
+          { id: "save_checkpoint_3", label: "checkpoint-3 저장", kind: "primary" }
+        ]
+      }
+    }
+  },
   "youtube-publish-mcp": {
     id: "youtube-publish-mcp",
     name: "YouTube Publisher",

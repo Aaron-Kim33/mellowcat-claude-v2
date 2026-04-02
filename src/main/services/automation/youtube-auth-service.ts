@@ -12,6 +12,7 @@ import { ShortformWorkflowConfigService } from "./shortform-workflow-config-serv
 import { SecretsStore } from "../storage/secrets-store";
 import { PathService } from "../system/path-service";
 import { CheckpointWorkflowService } from "./checkpoint-workflow-service";
+import type { OperatorChannelService } from "./operator-channel-service";
 
 interface YouTubeAuthStateFile {
   connectedAt?: string;
@@ -26,7 +27,8 @@ export class YouTubeAuthService {
     private readonly workflowConfigService: ShortformWorkflowConfigService,
     private readonly secretsStore: SecretsStore,
     private readonly pathService: PathService,
-    private readonly checkpointWorkflowService: CheckpointWorkflowService
+    private readonly checkpointWorkflowService: CheckpointWorkflowService,
+    private readonly operatorChannelService?: OperatorChannelService
   ) {}
 
   getStatus(): YouTubeAuthStatus {
@@ -181,13 +183,42 @@ export class YouTubeAuthService {
     return next;
   }
 
+  setPublishTarget(
+    packagePath: string,
+    publishTarget: "video" | "shorts"
+  ): YouTubeUploadRequest {
+    const current = this.inspectUploadRequest(packagePath);
+    const nextTags = [...current.metadata.tags];
+    const nextDescription = current.metadata.description ?? "";
+
+    if (publishTarget === "shorts") {
+      if (!nextTags.some((tag) => tag.toLowerCase() === "#shorts" || tag.toLowerCase() === "shorts")) {
+        nextTags.unshift("#shorts");
+      }
+    }
+
+    const nextDescriptionNormalized =
+      publishTarget === "shorts" && !/#shorts/i.test(nextDescription)
+        ? `${nextDescription.trim()}\n\n#shorts`.trim()
+        : nextDescription;
+
+    return this.updateUploadRequest(packagePath, {
+      publishTarget,
+      metadata: {
+        ...current.metadata,
+        tags: nextTags,
+        description: nextDescriptionNormalized
+      }
+    });
+  }
+
   async uploadPackage(packagePath: string): Promise<YouTubeUploadResult> {
     const requestPath = path.join(packagePath, "youtube-upload-request.json");
     const resultPath = path.join(packagePath, "youtube-upload-result.json");
     const uploadRequest = this.inspectUploadRequest(packagePath);
 
     if (!fs.existsSync(uploadRequest.videoFilePath)) {
-      return this.writeUploadResult(
+      const result = this.writeUploadResult(
         resultPath,
         requestPath,
         packagePath,
@@ -198,6 +229,8 @@ export class YouTubeAuthService {
         },
         uploadRequest
       );
+      await this.safeNotifyUploadResult(result, uploadRequest);
+      return result;
     }
 
     const accessToken = await this.getValidAccessToken();
@@ -248,7 +281,7 @@ export class YouTubeAuthService {
 
     if (!uploadResponse.ok) {
       const errorText = await uploadResponse.text();
-      return this.writeUploadResult(
+      const result = this.writeUploadResult(
         resultPath,
         requestPath,
         packagePath,
@@ -259,13 +292,15 @@ export class YouTubeAuthService {
         },
         uploadRequest
       );
+      await this.safeNotifyUploadResult(result, uploadRequest);
+      return result;
     }
 
     const uploadPayload = (await uploadResponse.json()) as { id?: string };
     const videoId = uploadPayload.id;
 
     if (!videoId) {
-      return this.writeUploadResult(
+      const result = this.writeUploadResult(
         resultPath,
         requestPath,
         packagePath,
@@ -276,6 +311,8 @@ export class YouTubeAuthService {
         },
         uploadRequest
       );
+      await this.safeNotifyUploadResult(result, uploadRequest);
+      return result;
     }
 
     if (uploadRequest.thumbnailFilePath && fs.existsSync(uploadRequest.thumbnailFilePath)) {
@@ -285,7 +322,7 @@ export class YouTubeAuthService {
     uploadRequest.status = "uploaded";
     fs.writeFileSync(requestPath, JSON.stringify(uploadRequest, null, 2), "utf-8");
 
-    return this.writeUploadResult(
+    const result = this.writeUploadResult(
       resultPath,
       requestPath,
       packagePath,
@@ -298,6 +335,8 @@ export class YouTubeAuthService {
       },
       uploadRequest
     );
+    await this.safeNotifyUploadResult(result, uploadRequest);
+    return result;
   }
 
   private waitForAuthorizationCode(port: number, authUrl: string): Promise<string> {
@@ -516,5 +555,34 @@ export class YouTubeAuthService {
 
   private createCodeChallenge(verifier: string): string {
     return createHash("sha256").update(verifier).digest("base64url");
+  }
+
+  private async safeNotifyUploadResult(
+    result: YouTubeUploadResult,
+    uploadRequest: YouTubeUploadRequest
+  ) {
+    if (!this.operatorChannelService) {
+      return;
+    }
+
+    try {
+      await this.operatorChannelService.notify(
+        result.ok
+          ? {
+              type: "upload_succeeded",
+              jobId: path.basename(result.packagePath),
+              title: uploadRequest.metadata.title,
+              videoUrl: result.videoUrl
+            }
+          : {
+              type: "upload_failed",
+              jobId: path.basename(result.packagePath),
+              title: uploadRequest.metadata.title,
+              error: result.message
+            }
+      );
+    } catch (error) {
+      console.warn("Operator channel upload notify failed:", error);
+    }
   }
 }

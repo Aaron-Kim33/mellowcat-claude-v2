@@ -1,12 +1,16 @@
+import fs from "node:fs";
+import { spawn } from "node:child_process";
 import type { WorkflowAiConnectionRef } from "../../../common/types/automation";
 import type { VoiceoverCue } from "../../../common/types/media-generation";
 import { SettingsRepository } from "../storage/settings-repository";
 import { FileService } from "../system/file-service";
+import { PathService } from "../system/path-service";
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 
 export interface VoiceoverGenerationResult {
   source: "azure" | "openai" | "none";
   relativePath?: string;
+  durationSec?: number;
   error?: string;
 }
 
@@ -14,7 +18,8 @@ export class VoiceoverService {
   constructor(
     private readonly settingsRepository: SettingsRepository,
     private readonly workflowConfigService: ShortformWorkflowConfigService,
-    private readonly fileService: FileService
+    private readonly fileService: FileService,
+    private readonly pathService: PathService
   ) {}
 
   async generateVoiceover(
@@ -36,7 +41,7 @@ export class VoiceoverService {
     const azureSpeechVoice = settings.azureSpeechVoice?.trim() || "ko-KR-SunHiNeural";
 
     if (azureSpeechKey && azureSpeechRegion) {
-      return this.generateWithAzure(input, packagePath, azureSpeechKey, azureSpeechRegion, azureSpeechVoice);
+      return this.generateWithAzure(cues, input, packagePath, azureSpeechKey, azureSpeechRegion, azureSpeechVoice);
     }
 
     if (!apiKey) {
@@ -76,13 +81,16 @@ export class VoiceoverService {
       Buffer.from(arrayBuffer)
     );
 
+    const durationSec = await this.probeDurationSec(`${packagePath}\\${relativePath}`);
     return {
       source: "openai",
-      relativePath
+      relativePath,
+      durationSec
     };
   }
 
   private async generateWithAzure(
+    cues: VoiceoverCue[],
     input: string,
     packagePath: string,
     speechKey: string,
@@ -90,8 +98,7 @@ export class VoiceoverService {
     speechVoice: string
   ): Promise<VoiceoverGenerationResult> {
     const endpoint = `https://${speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
-    const ssml = this.buildAzureSsml(input, speechVoice);
-    const response = await fetch(endpoint, {
+    const styledResponse = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Ocp-Apim-Subscription-Key": speechKey,
@@ -99,8 +106,22 @@ export class VoiceoverService {
         "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
         "User-Agent": "MellowCat Launcher"
       },
-      body: ssml
+      body: this.buildAzureSsml(cues, input, speechVoice, true)
     });
+
+    let response = styledResponse;
+    if (!styledResponse.ok) {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Ocp-Apim-Subscription-Key": speechKey,
+          "Content-Type": "application/ssml+xml",
+          "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
+          "User-Agent": "MellowCat Launcher"
+        },
+        body: this.buildAzureSsml(cues, input, speechVoice, false)
+      });
+    }
 
     if (!response.ok) {
       return {
@@ -116,9 +137,11 @@ export class VoiceoverService {
       Buffer.from(arrayBuffer)
     );
 
+    const durationSec = await this.probeDurationSec(`${packagePath}\\${relativePath}`);
     return {
       source: "azure",
-      relativePath
+      relativePath,
+      durationSec
     };
   }
 
@@ -150,14 +173,42 @@ export class VoiceoverService {
     return settings.openAiApiKey?.trim();
   }
 
-  private buildAzureSsml(input: string, voice: string): string {
+  private buildAzureSsml(
+    cues: VoiceoverCue[],
+    input: string,
+    voice: string,
+    useStyle: boolean
+  ): string {
+    const paragraphs = (cues.length > 0 ? cues.map((cue) => cue.text) : [input])
+      .map((text) => this.normalizeSpeechText(text))
+      .filter(Boolean)
+      .map((text) => `<p><s>${this.escapeXml(text)}</s></p>`);
+
+    const body = paragraphs.length > 0
+      ? paragraphs.join("<break time='350ms'/>")
+      : `<p><s>${this.escapeXml(this.normalizeSpeechText(input))}</s></p>`;
+
     return [
-      "<speak version='1.0' xml:lang='ko-KR'>",
+      "<speak version='1.0' xml:lang='ko-KR' xmlns:mstts='https://www.w3.org/2001/mstts'>",
       `<voice name='${this.escapeXml(voice)}'>`,
-      this.escapeXml(input),
+      useStyle ? "<mstts:express-as style='calm'>" : "",
+      body,
+      useStyle ? "</mstts:express-as>" : "",
       "</voice>",
       "</speak>"
     ].join("");
+  }
+
+  private normalizeSpeechText(value: string): string {
+    return value
+      .replace(/\r?\n+/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/[“”"']/g, "")
+      .replace(/&/g, " 그리고 ")
+      .replace(/\//g, " ")
+      .replace(/[:;]/g, ", ")
+      .replace(/[()]/g, " ")
+      .trim();
   }
 
   private escapeXml(value: string): string {
@@ -167,5 +218,52 @@ export class VoiceoverService {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&apos;");
+  }
+
+  private async probeDurationSec(audioPath: string): Promise<number | undefined> {
+    const ffmpegExecutable = this.resolveFfmpegExecutable();
+    if (!ffmpegExecutable || !fs.existsSync(audioPath)) {
+      return undefined;
+    }
+
+    return new Promise((resolve) => {
+      const child = spawn(ffmpegExecutable, ["-i", audioPath], {
+        windowsHide: true,
+        stdio: ["ignore", "ignore", "pipe"]
+      });
+
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer | string) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", () => resolve(undefined));
+      child.on("close", () => {
+        const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+        if (!match) {
+          resolve(undefined);
+          return;
+        }
+
+        const hours = Number(match[1] ?? 0);
+        const minutes = Number(match[2] ?? 0);
+        const seconds = Number(match[3] ?? 0);
+        resolve(hours * 3600 + minutes * 60 + seconds);
+      });
+    });
+  }
+
+  private resolveFfmpegExecutable(): string | undefined {
+    const candidates = process.platform === "win32"
+      ? [
+          this.pathService.getBundledToolPath("ffmpeg.exe"),
+          this.pathService.getBundledToolPath("ffmpeg")
+        ]
+      : [
+          this.pathService.getBundledToolPath("ffmpeg"),
+          this.pathService.getBundledToolPath("ffmpeg.exe")
+        ];
+
+    return candidates.find((candidate) => fs.existsSync(candidate));
   }
 }
