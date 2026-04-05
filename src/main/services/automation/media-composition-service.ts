@@ -144,14 +144,7 @@ export class MediaCompositionService {
     if (speedAdjusted) {
       const videoFilters: string[] = [];
       if (burnSubtitles) {
-        const escapedSubtitlePath = subtitlePath
-          .replace(/\\/g, "/")
-          .replace(/:/g, "\\:")
-          .replace(/,/g, "\\,")
-          .replace(/'/g, "\\'");
-        videoFilters.push(
-          `subtitles='${escapedSubtitlePath}'`
-        );
+        videoFilters.push(this.buildSubtitleFilter(subtitlePath));
       }
       videoFilters.push(`setpts=PTS/${MediaCompositionService.BACKGROUND_COMPOSER_SPEED}`);
       ffmpegArgs.push(
@@ -183,15 +176,7 @@ export class MediaCompositionService {
     );
 
     if (burnSubtitles && !speedAdjusted) {
-      const escapedSubtitlePath = subtitlePath
-        .replace(/\\/g, "/")
-        .replace(/:/g, "\\:")
-        .replace(/,/g, "\\,")
-        .replace(/'/g, "\\'");
-      ffmpegArgs.push(
-        "-vf",
-        `subtitles='${escapedSubtitlePath}'`
-      );
+      ffmpegArgs.push("-vf", this.buildSubtitleFilter(subtitlePath));
     } else if (hasSubtitle && !speedAdjusted) {
       ffmpegArgs.push("-c:s", "mov_text");
     }
@@ -363,5 +348,25 @@ export class MediaCompositionService {
         ];
 
     return candidates.find((candidate) => fs.existsSync(candidate));
+  }
+
+  private buildSubtitleFilter(subtitlePath: string): string {
+    const escapedSubtitlePath = subtitlePath
+      .replace(/\\/g, "/")
+      .replace(/:/g, "\\:")
+      .replace(/,/g, "\\,")
+      .replace(/'/g, "\\'");
+    const bundledFontsPath = this.pathService.getBundledFontsPath();
+
+    if (fs.existsSync(bundledFontsPath)) {
+      const escapedFontsPath = bundledFontsPath
+        .replace(/\\/g, "/")
+        .replace(/:/g, "\\:")
+        .replace(/,/g, "\\,")
+        .replace(/'/g, "\\'");
+      return `subtitles='${escapedSubtitlePath}':fontsdir='${escapedFontsPath}'`;
+    }
+
+    return `subtitles='${escapedSubtitlePath}'`;
   }
 }

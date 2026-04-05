@@ -889,20 +889,26 @@ export class ShortformScriptService {
 
     return [
       "Write exactly 3 title ideas in Korean.",
-      "Each title should be about 12 to 28 Korean characters when possible.",
+      "Each title should be about 10 to 24 Korean characters when possible.",
       "The 3 titles must clearly differ in angle: one situation-led, one emotion/reversal-led, and one comment-bait or curiosity-led.",
       categoryHint,
       "Ban generic filler patterns like '한눈에 정리', '진짜 이유', '왜 다들', '사람들이 몰린 이유', '요약', '정리'.",
       "Do not sound like a news headline, blog title, or article summary.",
       "Do not repeat the same noun phrase or ending across all three titles.",
-      "Prefer native Korean shortform phrasing that feels clickable but not cheap."
+      "Prefer native Korean shortform phrasing that feels clickable but not cheap.",
+      ...(scriptCategory === "community"
+        ? [
+            "For community/real-story titles, prefer conflict, hypocrisy, absurdity, or anger points over bland summaries.",
+            "Examples of stronger angles: '맞벌이 월 팔백인데 밥으로 싸움', '돈보다 더 정떨어진 한마디', '이 말 듣고 진짜 정 떨어졌어요'."
+          ]
+        : [])
     ].join("\n");
   }
 
   private buildCategorySystemHint(scriptCategory: ShortformScriptCategory): string {
     switch (scriptCategory) {
       case "horror":
-        return "Write with realistic dread, short lines, and lingering unease. Avoid fantasy, purple prose, or campy horror tropes.";
+        return "Write with realistic dread, short lines, lingering unease, and blunt banmal Korean. Avoid fantasy, purple prose, campy horror tropes, polite endings, or a soft explanatory tone.";
       case "romance":
         return "Write like a real relationship story told by a close friend. Keep it conversational, emotionally readable, and grounded.";
       default:
@@ -916,6 +922,7 @@ export class ShortformScriptService {
         return [
           "Write a shortform scary-story narration.",
           "It must feel realistic, like a real event told quietly to a friend.",
+          "Use Korean banmal only. Do not use polite endings like 요 or 습니다.",
           "No news style, no novel style, no theatrical prose.",
           "Use short rhythmic Korean sentences that work as subtitles.",
           "Start immediately with something eerie or off-putting.",
@@ -930,6 +937,7 @@ export class ShortformScriptService {
         return [
           "Write a shortform romance-story narration.",
           "It should sound like a friend telling a real dating story.",
+          "Use Korean banmal only. Do not use polite endings like 요 or 습니다.",
           "Use casual, realistic Korean speech.",
           "Do not make it cheesy or overly dramatic.",
           "Use short subtitle-friendly sentences.",
@@ -984,9 +992,9 @@ export class ShortformScriptService {
       case "horror":
         return "Write with realistic dread, short lines, and lingering unease. Avoid fantasy, purple prose, or campy horror tropes.";
       case "romance":
-        return "Write like a real relationship story told by a close friend. Keep it conversational, emotionally readable, grounded, and not cheesy.";
+        return "Write like a real relationship story told by a close friend in blunt banmal Korean. Keep it conversational, emotionally readable, grounded, not cheesy, and never polite or overly nice.";
       default:
-        return "Write like a real community or true-story retelling told naturally by a person, not like a news anchor, recap thread, or article summary.";
+        return "Write like a blunt first-person retelling of a real community story, with direct speech, emotional friction, and spoken banmal Korean that sounds like an actual person venting to a friend, not a recap bot.";
     }
   }
 
@@ -996,14 +1004,19 @@ export class ShortformScriptService {
         return [
           "Write a shortform scary-story narration.",
           "It must feel realistic, like a real event told quietly to a friend.",
+          "Use direct spoken Korean, like someone lowering their voice and saying '근데 그때부터 좀 이상했어요' before telling the rest.",
           "No news style, no novel style, no theatrical prose.",
           "Use short rhythmic Korean sentences that work as subtitles.",
-          "Open immediately with the weirdest or creepiest moment instead of explaining the background first.",
+          "Open immediately with the weirdest, creepiest, or most off-feeling moment instead of explaining the background first.",
           "Then fill in only the minimum context needed to follow the story.",
-          "Let the unease pile up one detail at a time.",
-          "End with lingering discomfort rather than a neat explanation.",
+          "Let the unease pile up one detail at a time, like you are remembering what got weirder and weirder.",
+          "If a creepy line or sound matters, quote it naturally instead of explaining it blandly.",
+          "The middle should make the listener think '잠깐, 이거 진짜 이상한데?'",
+          "End with lingering discomfort, 찝찝함, or a small chilling aftertaste rather than a neat explanation.",
           "Avoid fantasy, childish twists, English-heavy wording, hard-to-pronounce tokens, symbols, and repetitive phrasing.",
           "Replace digits or English words with Korean-friendly spoken phrasing when possible.",
+          "Good example: '처음엔 그냥 착각인 줄 알았어요. 근데 그 소리가 세 번째 들렸을 때 진짜 소름이 확 돋았어요.'",
+          "Bad example: '해당 사연은 한밤중에 발생한 이상 현상을 다루며 공포감을 조성한다.'",
           "Output a final-ready script that fits one shortform clip.",
           "Each paragraph should be one or two subtitle lines."
         ].join("\n");
@@ -1011,32 +1024,42 @@ export class ShortformScriptService {
         return [
           "Write a shortform romance-story narration.",
           "It should sound like a friend telling a real dating story.",
-          "Use casual, realistic Korean speech.",
+          "Use casual, realistic Korean speech with direct emotional reactions.",
           "Do not make it cheesy or overly dramatic.",
           "Use short subtitle-friendly sentences.",
-          "Open with a line that immediately makes people curious or uneasy about the relationship.",
-          "Explain the relationship and situation quickly, then show emotional change in the middle.",
-          "Make the listener feel the shift in mood, not just the facts.",
-          "End with one of: twist, regret, catharsis, or emptiness.",
+          "Open with the line, moment, or behavior that made the relationship suddenly feel weird, hurtful, or suspicious.",
+          "Explain the relationship and situation quickly, then move fast into the emotional shift.",
+          "Make the listener feel the change in mood, disappointment, or 정 떨어짐, not just the facts.",
+          "If a line the other person said matters, quote it naturally.",
+          "The middle should build with one or two specific moments that make the listener think '아 이건 좀 별론데'.",
+          "End with one of: twist, regret, catharsis, emptiness, or a blunt question that invites people to take sides.",
           "Avoid hard-to-pronounce English, symbols, emojis, and slangy abbreviations.",
           "Keep it natural and directly understandable on first listen.",
+          "Good example: '근데 그 말 듣는 순간 좀 확 식었어요. 아, 이 사람은 진짜 아니구나 싶더라고요.'",
+          "Bad example: '두 사람의 관계는 점차 변화했고 감정선에도 전환점이 생겼다.'",
           "Output a final-ready script that fits one shortform clip.",
           "Each paragraph should be one or two subtitle lines."
         ].join("\n");
       default:
         return [
           "Write a shortform community/real-story narration.",
-          "It should feel like I personally organized and retold the story, not like I am reading a forum post aloud.",
-          "Use natural, plain Korean speech with immersion but not broadcast-style exaggeration.",
-          "Start with the strongest hook first, even if that means not following the original order exactly.",
-          "You are allowed to adapt and rearrange details to improve retention as long as the core meaning stays intact.",
-          "Explain the background briefly and clearly once the hook lands.",
-          "Let curiosity grow as the incident unfolds.",
-          "End with one of: twist, absurdity, anger point, or eerie aftertaste.",
-          "Keep sentences short and subtitle-friendly.",
-          "Avoid hard-to-pronounce English, symbols, or meme-heavy wording.",
-          "Compress for shortform length but preserve important details.",
-          "Do not sound like a recap account or forum summary bot.",
+          "Make it feel like I am personally telling the story in first-person spoken Korean, not reading a community post aloud.",
+          "Use Korean banmal only. Do not use polite endings like 요 or 습니다.",
+          "Use direct, lived-in phrasing such as '이러는 거 아님?', '꿈에도 몰랐다', '너무 어이없더라' when it fits naturally.",
+          "Use natural, plain Korean speech with immersion, but not broadcast-style exaggeration or article-summary tone.",
+          "Start with the strongest conflict, absurdity, or emotionally unfair moment first, even if that means not following the original order exactly.",
+          "You are allowed to adapt, compress, and rearrange details to improve retention as long as the core meaning stays intact.",
+          "Do not spend too long on background setup. Land the situation fast, then move straight into the line or moment that makes people react.",
+          "Show who said what and why it was infuriating, absurd, unfair, creepy, or emotionally jarring.",
+          "If a quoted line matters, include it in a natural spoken way instead of paraphrasing it blandly.",
+          "The middle should escalate with sharper specifics, emotional reactions, and one extra detail that makes the listener go '와 이건 좀 아닌데'.",
+          "End with one of: anger point, absurdity, humiliation, twist, or a question that naturally invites comments.",
+          "Keep sentences short, subtitle-friendly, and easy for Korean TTS to read.",
+          "Avoid hard-to-pronounce English, symbols, meme-heavy wording, and detached summary phrases.",
+          "Do not sound like a recap account, forum summary bot, or counseling article.",
+          "Good example: '우린 맞벌이로 합쳐서 팔백이야. 근데 갑자기 나보고 식비를 아껴야 하지 않냐는 거 아님?'",
+          "Good example: '돈이 없어서 싸운 게 아니라, 누가 밥 하냐로 엄청 싸웠어.'",
+          "Bad example: '해당 사연은 맞벌이 부부의 식비 갈등을 다룬 글로, 많은 반응을 불러왔다.'",
           "Output a final-ready script that fits one shortform clip.",
           "Each paragraph should be one or two subtitle lines."
         ].join("\n");

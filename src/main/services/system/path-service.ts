@@ -80,6 +80,10 @@ export class PathService {
     return path.join(this.getBundledResourcesPath(), "dev", toolName);
   }
 
+  getBundledFontsPath(): string {
+    return path.join(this.getBundledResourcesPath(), "fonts");
+  }
+
   getBundledBackgroundPath(backgroundId: "horror" | "romance" | "community"): string {
     return path.join(this.getBundledResourcesPath(), "backgrounds", `${backgroundId}.png`);
   }
