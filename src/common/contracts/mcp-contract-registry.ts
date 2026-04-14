@@ -108,6 +108,116 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       }
     }
   },
+  "youtube-breakout-crawler-mcp": {
+    id: "youtube-breakout-crawler-mcp",
+    name: "YouTube Breakout Crawler",
+    aiCapable: false,
+    builtinAvailable: true,
+    slot: "input",
+    category: "discovery",
+    compatibility: {
+      inputs: [],
+      outputs: [{ contract: "trend_candidates_v1", required: true }],
+      executionModes: ["scheduled", "on_demand"]
+    },
+    dependencies: [],
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      input: {
+        slot: "input",
+        title: "유튜브 비율 크롤링",
+        description:
+          "구독자 대비 조회수 비율이 높은 영상만 걸러서 숏폼 후보로 가져옵니다.",
+        fields: [
+          {
+            id: "youtubeCountry",
+            label: "국가",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "대한민국 (KR)", value: "KR" },
+              { label: "미국 (US)", value: "US" },
+              { label: "일본 (JP)", value: "JP" },
+              { label: "영국 (GB)", value: "GB" },
+              { label: "인도 (IN)", value: "IN" }
+            ]
+          },
+          {
+            id: "youtubeBreakoutPeriod",
+            label: "기간",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "최근 24시간", value: "24h" },
+              { label: "최근 3일", value: "3d" },
+              { label: "최근 7일", value: "7d" }
+            ]
+          },
+          {
+            id: "youtubeBreakoutRatioPercent",
+            label: "구독자 대비 조회수 %",
+            type: "text",
+            width: "half",
+            placeholder: "예: 120"
+          },
+          {
+            id: "youtubeSubscriberRange",
+            label: "구독자 수 구간",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "0 ~ 1만", value: "0_10k" },
+              { label: "1만 ~ 5만", value: "10k_50k" },
+              { label: "5만 ~ 10만", value: "50k_100k" },
+              { label: "10만 ~ 20만", value: "100k_200k" },
+              { label: "20만 ~ 30만", value: "200k_300k" },
+              { label: "30만 ~ 50만", value: "300k_500k" },
+              { label: "50만+", value: "500k_plus" }
+            ]
+          },
+          {
+            id: "youtubeCategoryId",
+            label: "카테고리",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "엔터테인먼트", value: "24" },
+              { label: "사람/블로그", value: "22" },
+              { label: "뉴스/정치", value: "25" },
+              { label: "코미디", value: "23" },
+              { label: "게임", value: "20" },
+              { label: "음악", value: "10" }
+            ]
+          },
+          {
+            id: "youtubeBreakoutLimit",
+            label: "결과 개수",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "10", value: "10" },
+              { label: "20", value: "20" },
+              { label: "30", value: "30" },
+              { label: "50", value: "50" }
+            ]
+          },
+          {
+            id: "youtubeDataApiKey",
+            label: "YouTube Data API Key",
+            type: "secret",
+            width: "half",
+            placeholder: "AIza..."
+          }
+        ],
+        actions: [
+          { id: "fetch_youtube_breakouts", label: "유튜브 후보 조회", kind: "primary" },
+          { id: "save_checkpoint_1", label: "checkpoint-1 저장", kind: "secondary" }
+        ]
+      }
+    }
+  },
   "shortform-script-mcp": {
     id: "shortform-script-mcp",
     name: "Shortform Script",
@@ -231,7 +341,10 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
     slot: "create",
     category: "packaging",
     compatibility: {
-      inputs: [{ contract: "script_draft_v1", required: true }],
+      inputs: [
+        { contract: "script_draft_v1", required: true },
+        { contract: "scene_script_v1", required: false }
+      ],
       outputs: [{ contract: "production_package_v1", required: true }],
       executionModes: ["on_demand"]
     },
@@ -251,10 +364,38 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
           "스크립트를 장면 계획으로 변환하고, 검색·더빙·자막·합성으로 이어질 제작 패키지를 준비합니다.",
         fields: [
           {
+            id: "assetSource",
+            label: "Asset Source",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "Pexels", value: "pexels" },
+              { label: "Flux", value: "flux" }
+            ]
+          },
+          {
             id: "pexelsApiKey",
             label: "Pexels API Key",
             type: "secret",
-            width: "full"
+            width: "half"
+          },
+          {
+            id: "fluxApiKey",
+            label: "Flux API Key",
+            type: "secret",
+            width: "half"
+          },
+          {
+            id: "fluxApiBaseUrl",
+            label: "Flux API Base URL",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "fluxModel",
+            label: "Flux Model",
+            type: "text",
+            width: "half"
           },
           {
             id: "targetDurationSec",
@@ -277,6 +418,122 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       }
     }
   },
+  "video-production-mcp": {
+    id: "video-production-mcp",
+    name: "Video Production",
+    aiCapable: true,
+    builtinAvailable: true,
+    slot: "create",
+    category: "packaging",
+    compatibility: {
+      inputs: [
+        { contract: "script_draft_v1", required: true },
+        { contract: "scene_script_v1", required: false }
+      ],
+      outputs: [{ contract: "production_package_v1", required: true }],
+      executionModes: ["on_demand"]
+    },
+    dependencies: [
+      {
+        mcpId: "shortform-script-mcp",
+        reason: "Needs a script draft to build production-ready media packages.",
+        required: true
+      }
+    ],
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      create: {
+        slot: "create",
+        title: "Video Production",
+        description:
+          "Transforms a script into scene plan, asset search, dubbing, subtitles, and final composition.",
+        fields: [
+          {
+            id: "assetSource",
+            label: "Asset Source",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "Pexels", value: "pexels" },
+              { label: "Flux", value: "flux" }
+            ]
+          },
+          {
+            id: "pexelsApiKey",
+            label: "Pexels API Key",
+            type: "secret",
+            width: "half"
+          },
+          {
+            id: "fluxApiKey",
+            label: "Flux API Key",
+            type: "secret",
+            width: "half"
+          },
+          {
+            id: "fluxApiBaseUrl",
+            label: "Flux API Base URL",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "fluxModel",
+            label: "Flux Model",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "videoSubtitleMode",
+            label: "Subtitle Output",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "Hard burn-in", value: "hard" },
+              { label: "Soft subtitle track", value: "soft" }
+            ]
+          },
+          {
+            id: "videoRenderQuality",
+            label: "Render Quality",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "High 1080p", value: "high" },
+              { label: "Standard", value: "standard" }
+            ]
+          },
+          {
+            id: "targetDurationSec",
+            label: "Target Duration (sec)",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "minimumSceneCount",
+            label: "Minimum Scenes",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "rerenderSceneIndexes",
+            label: "Re-render Scenes (e.g. 1,3)",
+            type: "text",
+            width: "full"
+          }
+        ],
+        actions: [
+          { id: "run_create_pipeline", label: "Run Production", kind: "primary" },
+          { id: "rerender_create_composition", label: "Re-render Final Video", kind: "secondary" },
+          { id: "rerender_selected_scenes", label: "Re-render Selected Scenes", kind: "secondary" },
+          { id: "refresh_create_assets", label: "Refresh Selected Assets", kind: "secondary" },
+          { id: "refresh_create_voiceover", label: "Refresh Voiceover", kind: "secondary" },
+          { id: "refresh_create_subtitles", label: "Refresh Subtitles", kind: "secondary" },
+          { id: "generate_scene_plan", label: "Generate Scene Plan", kind: "secondary" },
+          { id: "save_checkpoint_3", label: "Save checkpoint-3", kind: "primary" }
+        ]
+      }
+    }
+  },
   "background-subtitle-composer-mcp": {
     id: "background-subtitle-composer-mcp",
     name: "Background Subtitle Composer",
@@ -285,7 +542,10 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
     slot: "create",
     category: "packaging",
     compatibility: {
-      inputs: [{ contract: "script_draft_v1", required: true }],
+      inputs: [
+        { contract: "script_draft_v1", required: true },
+        { contract: "scene_script_v1", required: false }
+      ],
       outputs: [{ contract: "production_package_v1", required: true }],
       executionModes: ["on_demand"]
     },
@@ -297,6 +557,68 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       }
     ],
     configScopes: ["pack", "mcp"],
+    sceneStylePresets: [
+      {
+        id: "horror",
+        label: "무서운 썰",
+        subtitleStyle: {
+          mode: "outline",
+          fontFamily: "Gmarket Sans",
+          fontSize: 29,
+          outline: 5,
+          color: "#ffffff",
+          outlineColor: "#000000"
+        },
+        voiceProfile: {
+          provider: "elevenlabs",
+          modelId: "eleven_multilingual_v2",
+          stability: 0.38,
+          similarityBoost: 0.8,
+          style: 0.12,
+          useSpeakerBoost: true
+        }
+      },
+      {
+        id: "romance",
+        label: "연애썰",
+        subtitleStyle: {
+          mode: "outline",
+          fontFamily: "Gmarket Sans",
+          fontSize: 28,
+          outline: 4,
+          color: "#ffffff",
+          outlineColor: "#1f1f1f"
+        },
+        voiceProfile: {
+          provider: "elevenlabs",
+          modelId: "eleven_multilingual_v2",
+          stability: 0.5,
+          similarityBoost: 0.75,
+          style: 0.08,
+          useSpeakerBoost: true
+        }
+      },
+      {
+        id: "community",
+        label: "커뮤/실화",
+        subtitleStyle: {
+          mode: "outline",
+          fontFamily: "Gmarket Sans",
+          fontSize: 27,
+          outline: 4,
+          color: "#ffffff",
+          outlineColor: "#000000"
+        },
+        voiceProfile: {
+          provider: "elevenlabs",
+          modelId: "eleven_multilingual_v2",
+          stability: 0.56,
+          similarityBoost: 0.72,
+          style: 0.05,
+          useSpeakerBoost: true
+        }
+      }
+    ],
     slotUi: {
       create: {
         slot: "create",

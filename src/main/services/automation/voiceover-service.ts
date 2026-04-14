@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
 import type { WorkflowAiConnectionRef } from "../../../common/types/automation";
-import type { VoiceoverCue } from "../../../common/types/media-generation";
+import type { SceneScriptVoiceProfile, VoiceoverCue } from "../../../common/types/media-generation";
 import { SettingsRepository } from "../storage/settings-repository";
 import { FileService } from "../system/file-service";
 import { PathService } from "../system/path-service";
@@ -24,7 +24,8 @@ export class VoiceoverService {
 
   async generateVoiceover(
     cues: VoiceoverCue[],
-    packagePath: string
+    packagePath: string,
+    voiceProfile?: SceneScriptVoiceProfile
   ): Promise<VoiceoverGenerationResult> {
     const input = cues.map((cue) => cue.text.trim()).filter(Boolean).join("\n\n");
     if (!input) {
@@ -38,19 +39,54 @@ export class VoiceoverService {
     const settings = this.settingsRepository.get();
     const azureSpeechKey = settings.azureSpeechKey?.trim();
     const azureSpeechRegion = settings.azureSpeechRegion?.trim();
-    const azureSpeechVoice = settings.azureSpeechVoice?.trim() || "ko-KR-SunHiNeural";
+    const azureSpeechVoice =
+      voiceProfile?.provider === "azure"
+        ? voiceProfile.voiceId?.trim() ||
+          settings.azureSpeechVoice?.trim() ||
+          "ko-KR-SunHiNeural"
+        : settings.azureSpeechVoice?.trim() || "ko-KR-SunHiNeural";
+    const preferredProvider = voiceProfile?.provider;
+    const openAiVoice = voiceProfile?.voiceId?.trim() || "alloy";
+    const openAiModel = voiceProfile?.modelId?.trim() || "gpt-4o-mini-tts";
+    const canUseAzure = Boolean(azureSpeechKey && azureSpeechRegion);
+    const canUseOpenAi = Boolean(apiKey);
 
-    if (azureSpeechKey && azureSpeechRegion) {
-      return this.generateWithAzure(cues, input, packagePath, azureSpeechKey, azureSpeechRegion, azureSpeechVoice);
+    if (preferredProvider === "azure" && canUseAzure) {
+      return this.generateWithAzure(
+        cues,
+        input,
+        packagePath,
+        azureSpeechKey!,
+        azureSpeechRegion!,
+        azureSpeechVoice
+      );
     }
 
-    if (!apiKey) {
+    if ((preferredProvider === "openai" || preferredProvider === "elevenlabs") && canUseOpenAi) {
+      return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice);
+    }
+
+    if (canUseAzure) {
+      return this.generateWithAzure(cues, input, packagePath, azureSpeechKey!, azureSpeechRegion!, azureSpeechVoice);
+    }
+
+    if (!canUseOpenAi) {
       return {
         source: "none",
         error: "No Azure Speech or OpenAI TTS credentials were available."
       };
     }
 
+    return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice);
+  }
+
+  private async generateWithOpenAi(
+    input: string,
+    packagePath: string,
+    apiKey: string,
+    model: string,
+    voice: string
+  ): Promise<VoiceoverGenerationResult> {
     const response = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -58,8 +94,8 @@ export class VoiceoverService {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini-tts",
-        voice: "alloy",
+        model,
+        voice,
         input,
         response_format: "mp3",
         instructions:

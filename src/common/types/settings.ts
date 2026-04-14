@@ -23,6 +23,7 @@ export interface AppSettings {
   instagramAccountHandle?: string;
   instagramAccessToken?: string;
   pexelsApiKey?: string;
+  fluxApiKey?: string;
   createBackgroundSourceType?: "preset" | "custom";
   azureSpeechKey?: string;
   azureSpeechRegion?: string;
@@ -32,6 +33,7 @@ export interface AppSettings {
   youtubePrivacyStatus?: "private" | "unlisted" | "public";
   youtubeCategoryId?: string;
   youtubeAudience?: "not_made_for_kids" | "made_for_kids";
+  youtubeDataApiKey?: string;
   youtubeOAuthClientId?: string;
   youtubeOAuthClientSecret?: string;
   youtubeOAuthRedirectPort?: string;

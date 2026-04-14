@@ -9,6 +9,7 @@ type LauncherCopy = {
     accountLabel: string;
     tabs: {
       launcher: string;
+      generation: string;
       store: string;
       installed: string;
       settings: string;
@@ -21,6 +22,45 @@ type LauncherCopy = {
       eyebrow: string;
       title: string;
       subtitle: string;
+    };
+    generation: {
+      eyebrow: string;
+      title: string;
+      subtitle: string;
+      packagePath: string;
+      noPackage: string;
+      emptyState: string;
+      sceneList: string;
+      sceneLabel: string;
+      selectScene: string;
+      text: string;
+      fluxPrompt: string;
+      assetSearchQuery: string;
+      motion: string;
+      durationSec: string;
+      reload: string;
+      save: string;
+      saving: string;
+      saved: string;
+      saveError: string;
+      subtitleStyleTitle: string;
+      subtitleMode: string;
+      fontFamily: string;
+      fontSize: string;
+      outline: string;
+      textColor: string;
+      outlineColor: string;
+      voiceProfileTitle: string;
+      voiceProvider: string;
+      voiceModelId: string;
+      voiceId: string;
+      stability: string;
+      similarityBoost: string;
+      voiceStyle: string;
+      useSpeakerBoost: string;
+      presetTitle: string;
+      presetSubtitle: string;
+      presetEmpty: string;
     };
     store: {
       eyebrow: string;
@@ -92,6 +132,7 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
       accountLabel: "Account",
       tabs: {
         launcher: "Home",
+        generation: "Create",
         store: "Marketplace",
         installed: "Installed",
         settings: "Settings",
@@ -104,6 +145,45 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
         eyebrow: "Home",
         title: "Automation workspace",
         subtitle: "Check Claude status, MCP readiness, and launch controls in one compact view."
+      },
+      generation: {
+        eyebrow: "Create",
+        title: "Scene script editor",
+        subtitle: "Edit scene text, Flux prompts, motion, and duration before expensive generation.",
+        packagePath: "Package path",
+        noPackage: "No active package",
+        emptyState: "No scene script available yet. Run slot 3 create first.",
+        sceneList: "Scenes",
+        sceneLabel: "Scene",
+        selectScene: "Select a scene to edit.",
+        text: "Narration text",
+        fluxPrompt: "Flux prompt",
+        assetSearchQuery: "Asset search query",
+        motion: "Motion",
+        durationSec: "Duration (sec)",
+        reload: "Reload",
+        save: "Save",
+        saving: "Saving...",
+        saved: "Scene script saved.",
+        saveError: "Failed to save scene script.",
+        subtitleStyleTitle: "Subtitle style",
+        subtitleMode: "Mode",
+        fontFamily: "Font family",
+        fontSize: "Font size",
+        outline: "Outline",
+        textColor: "Text color",
+        outlineColor: "Outline color",
+        voiceProfileTitle: "Voice profile",
+        voiceProvider: "Provider",
+        voiceModelId: "Model ID",
+        voiceId: "Voice ID",
+        stability: "Stability",
+        similarityBoost: "Similarity boost",
+        voiceStyle: "Style",
+        useSpeakerBoost: "Use speaker boost",
+        presetTitle: "Genre presets",
+        presetSubtitle: "Preset buttons are loaded from the selected MCP module metadata.",
+        presetEmpty: "No presets are declared for the selected module."
       },
       store: {
         eyebrow: "Marketplace",
@@ -173,6 +253,7 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
       accountLabel: "계정",
       tabs: {
         launcher: "홈",
+        generation: "생성",
         store: "마켓",
         installed: "설치됨",
         settings: "설정",
@@ -185,6 +266,45 @@ const copy: Record<LauncherLanguage, LauncherCopy> = {
         eyebrow: "홈",
         title: "자동화 작업 공간",
         subtitle: "Claude 상태, MCP 준비 상태, 실행 제어를 한 화면에서 차분하게 확인합니다."
+      },
+      generation: {
+        eyebrow: "생성",
+        title: "씬 스크립트 에디터",
+        subtitle: "비용이 드는 생성 전에 씬 문장, Flux 프롬프트, 모션, 길이를 수정합니다.",
+        packagePath: "패키지 경로",
+        noPackage: "활성 패키지가 없습니다",
+        emptyState: "scene-script.json이 없습니다. 3번 생성을 먼저 실행해 주세요.",
+        sceneList: "씬 목록",
+        sceneLabel: "씬",
+        selectScene: "수정할 씬을 선택해 주세요.",
+        text: "내레이션 문장",
+        fluxPrompt: "Flux 프롬프트",
+        assetSearchQuery: "소재 검색 키워드",
+        motion: "모션",
+        durationSec: "길이(초)",
+        reload: "다시 불러오기",
+        save: "저장",
+        saving: "저장 중...",
+        saved: "scene-script.json을 저장했습니다.",
+        saveError: "scene-script.json 저장에 실패했습니다.",
+        subtitleStyleTitle: "자막 스타일",
+        subtitleMode: "모드",
+        fontFamily: "폰트",
+        fontSize: "폰트 크기",
+        outline: "외곽선",
+        textColor: "글자 색상",
+        outlineColor: "외곽선 색상",
+        voiceProfileTitle: "보이스 프로필",
+        voiceProvider: "제공자",
+        voiceModelId: "모델 ID",
+        voiceId: "보이스 ID",
+        stability: "Stability",
+        similarityBoost: "Similarity Boost",
+        voiceStyle: "Style",
+        useSpeakerBoost: "스피커 부스트 사용",
+        presetTitle: "장르 프리셋",
+        presetSubtitle: "선택한 MCP 모듈 메타데이터에서 프리셋을 불러옵니다.",
+        presetEmpty: "선택한 모듈에 선언된 프리셋이 없습니다."
       },
       store: {
         eyebrow: "마켓",

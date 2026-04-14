@@ -1,8 +1,14 @@
+import type {
+  SceneScriptSubtitleStyle,
+  SceneScriptVoiceProfile
+} from "./media-generation";
+
 export type MCPDataContract =
   | "trend_candidates_v1"
   | "candidate_selection_v1"
   | "script_draft_v1"
   | "revision_request_v1"
+  | "scene_script_v1"
   | "scene_plan_v1"
   | "production_package_v1"
   | "publish_request_v1"
@@ -93,6 +99,12 @@ export interface MCPRuntimeContract {
   dependencies: MCPDependencyRule[];
   configScopes: Array<"global" | "pack" | "mcp">;
   slotUi?: Partial<Record<MCPSlotId, MCPSlotUiSchema>>;
+  sceneStylePresets?: Array<{
+    id: string;
+    label: string;
+    subtitleStyle: SceneScriptSubtitleStyle;
+    voiceProfile: SceneScriptVoiceProfile;
+  }>;
 }
 
 export interface MCPWorkflowEdge {

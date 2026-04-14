@@ -33,6 +33,7 @@ import { YouTubeAuthService } from "../services/automation/youtube-auth-service"
 import { ShortformWorkflowConfigService } from "../services/automation/shortform-workflow-config-service";
 import { CheckpointWorkflowService } from "../services/automation/checkpoint-workflow-service";
 import { PexelsAssetService } from "../services/automation/pexels-asset-service";
+import { FluxAssetService } from "../services/automation/flux-asset-service";
 import { ScenePlanService } from "../services/automation/scene-plan-service";
 import { SubtitleService } from "../services/automation/subtitle-service";
 import { VoiceoverService } from "../services/automation/voiceover-service";
@@ -59,6 +60,7 @@ export async function bootstrap(): Promise<void> {
     workflowConfigService
   );
   const pexelsAssetService = new PexelsAssetService();
+  const fluxAssetService = new FluxAssetService();
   const scenePlanService = new ScenePlanService(settingsRepository, workflowConfigService);
   const subtitleService = new SubtitleService();
   const telegramOperatorChannelService = new TelegramOperatorChannelService(workflowConfigService);
@@ -84,6 +86,7 @@ export async function bootstrap(): Promise<void> {
     checkpointWorkflowService,
     scenePlanService,
     pexelsAssetService,
+    fluxAssetService,
     subtitleService,
     voiceoverService,
     mediaCompositionService,
@@ -182,10 +185,13 @@ export async function bootstrap(): Promise<void> {
     registerSystemIpc(appUpdateService);
     registerAutomationIpc(
       telegramControlService,
+      trendDiscoveryService,
       youTubeAuthService,
       workflowConfigService,
       checkpointWorkflowService,
-      productionPackageService
+      productionPackageService,
+      shortformScriptService,
+      pathService
     );
 
     new WindowManager().createMainWindow();

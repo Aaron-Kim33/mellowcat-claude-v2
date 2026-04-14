@@ -3,7 +3,9 @@ import { getLauncherCopy } from "../../lib/launcher-copy";
 import { useAppStore } from "../../store/app-store";
 
 type LauncherPageProps = {
-  onNavigate: (tab: "launcher" | "store" | "installed" | "settings" | "login") => void;
+  onNavigate: (
+    tab: "launcher" | "crawling" | "generation" | "store" | "installed" | "settings" | "login"
+  ) => void;
 };
 
 export function LauncherPage({ onNavigate }: LauncherPageProps) {

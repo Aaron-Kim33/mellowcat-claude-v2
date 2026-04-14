@@ -7,6 +7,7 @@ import type {
 import type { ClaudeInstallationStatus, ClaudeOutputEvent } from "../common/types/claude";
 import type { MellowCatAPI } from "../common/types/ipc";
 import type { MCPOutputEvent } from "../common/types/mcp";
+import type { SceneScriptDocument } from "../common/types/media-generation";
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -89,6 +90,10 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:telegram:sync"),
   sendMockShortlist: (): Promise<TelegramControlStatus> =>
     ipcRenderer.invoke("automation:telegram:sendMockShortlist"),
+  discoverYouTubeBreakoutCandidates: (request) =>
+    ipcRenderer.invoke("automation:crawl:discoverYouTubeBreakouts", request),
+  analyzeYouTubeCandidate: (request) =>
+    ipcRenderer.invoke("automation:crawl:analyzeYouTubeCandidate", request),
   getYouTubeStatus: (): Promise<YouTubeAuthStatus> =>
     ipcRenderer.invoke("automation:youtube:getStatus"),
   connectYouTube: (): Promise<YouTubeAuthStatus> =>
@@ -104,22 +109,43 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:youtube:updateUploadRequest", packagePath, patch),
   pickCreateBackgroundFile: (): Promise<string | undefined> =>
     ipcRenderer.invoke("automation:create:pickBackgroundFile"),
+  pickYouTubePackageFolder: (): Promise<string | undefined> =>
+    ipcRenderer.invoke("automation:youtube:pickPackageFolder"),
   pickYouTubeVideoFile: (): Promise<string | undefined> =>
     ipcRenderer.invoke("automation:youtube:pickVideoFile"),
   pickYouTubeThumbnailFile: (): Promise<string | undefined> =>
     ipcRenderer.invoke("automation:youtube:pickThumbnailFile"),
   uploadYouTubePackage: (packagePath: string): Promise<YouTubeUploadResult> =>
     ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath),
+  inspectSceneScript: (packagePath: string): Promise<SceneScriptDocument> =>
+    ipcRenderer.invoke("automation:create:inspectSceneScript", packagePath),
+  updateSceneScript: (
+    packagePath: string,
+    document: SceneScriptDocument
+  ): Promise<SceneScriptDocument> =>
+    ipcRenderer.invoke("automation:create:updateSceneScript", packagePath, document),
   inspectWorkflowJob: (jobId: string) =>
     ipcRenderer.invoke("automation:workflow:inspectJob", jobId),
   getCreateReadiness: (jobId: string) =>
     ipcRenderer.invoke("automation:workflow:getCreateReadiness", jobId),
   runCreatePipeline: (jobId: string) =>
     ipcRenderer.invoke("automation:workflow:runCreatePipeline", jobId),
+  rerenderCreateComposition: (jobId: string) =>
+    ipcRenderer.invoke("automation:workflow:rerenderCreateComposition", jobId),
+  rerenderCreateScenes: (jobId: string, sceneIndexes: number[]) =>
+    ipcRenderer.invoke("automation:workflow:rerenderCreateScenes", jobId, sceneIndexes),
+  refreshCreateAssets: (jobId: string, sceneIndexes: number[]) =>
+    ipcRenderer.invoke("automation:workflow:refreshCreateAssets", jobId, sceneIndexes),
+  refreshCreateVoiceover: (jobId: string) =>
+    ipcRenderer.invoke("automation:workflow:refreshCreateVoiceover", jobId),
+  refreshCreateSubtitles: (jobId: string) =>
+    ipcRenderer.invoke("automation:workflow:refreshCreateSubtitles", jobId),
   saveManualInputCheckpoint: (payload) =>
     ipcRenderer.invoke("automation:workflow:saveManualInputCheckpoint", payload),
   saveManualProcessCheckpoint: (payload) =>
     ipcRenderer.invoke("automation:workflow:saveManualProcessCheckpoint", payload),
+  generateProcessDraft: (payload) =>
+    ipcRenderer.invoke("automation:workflow:generateProcessDraft", payload),
   saveManualCreateCheckpoint: (payload) =>
     ipcRenderer.invoke("automation:workflow:saveManualCreateCheckpoint", payload),
   saveManualOutputCheckpoint: (payload) =>

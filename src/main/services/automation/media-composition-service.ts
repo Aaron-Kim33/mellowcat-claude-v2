@@ -12,8 +12,12 @@ export interface MediaCompositionResult {
   error?: string;
 }
 
+export interface MediaCompositionOptions {
+  rerenderSceneIndexes?: number[];
+}
+
 export class MediaCompositionService {
-  private static readonly FFMPEG_TIMEOUT_MS = 3 * 60 * 1000;
+  private static readonly FFMPEG_TIMEOUT_MS = 12 * 60 * 1000;
   private static readonly BACKGROUND_COMPOSER_SPEED = 1.1;
 
   constructor(
@@ -23,7 +27,8 @@ export class MediaCompositionService {
 
   async composeFinalVideo(
     manifest: GeneratedMediaPackageManifest,
-    packagePath: string
+    packagePath: string,
+    options?: MediaCompositionOptions
   ): Promise<MediaCompositionResult> {
     const voiceoverPath = manifest.artifacts.voiceoverPath
       ? path.join(packagePath, manifest.artifacts.voiceoverPath)
@@ -45,11 +50,22 @@ export class MediaCompositionService {
     this.fileService.ensureDir(assetsDir);
     this.fileService.ensureDir(renderDir);
 
-    const preparedScenes = [];
-    const updatedScenes = [];
+    const rerenderSceneIndexSet =
+      options?.rerenderSceneIndexes && options.rerenderSceneIndexes.length > 0
+        ? new Set(options.rerenderSceneIndexes)
+        : undefined;
+    const preparedScenes: string[] = [];
+    const updatedScenes: GeneratedMediaPackageManifest["scenes"] = [];
 
     for (const scene of manifest.scenes) {
-      const resolvedAsset = await this.resolveSceneAsset(scene, packagePath, assetsDir);
+      const shouldRerender =
+        !rerenderSceneIndexSet || rerenderSceneIndexSet.has(scene.sceneIndex);
+      const resolvedAsset = await this.resolveSceneAsset(
+        scene,
+        packagePath,
+        assetsDir,
+        shouldRerender
+      );
       if (!resolvedAsset?.localPath) {
         updatedScenes.push(scene);
         continue;
@@ -59,11 +75,22 @@ export class MediaCompositionService {
         renderDir,
         `scene-${scene.sceneIndex.toString().padStart(2, "0")}.mp4`
       );
+      const canReusePreparedClip = !shouldRerender && fs.existsSync(preparedClipPath);
+      if (canReusePreparedClip) {
+        preparedScenes.push(preparedClipPath);
+        updatedScenes.push({
+          ...scene,
+          selectedAsset: resolvedAsset
+        });
+        continue;
+      }
+
       const durationSec = Math.max(
         1,
         scene.trim.sourceEndSec - scene.trim.sourceStartSec || 1
       );
       const sourceAssetPath = path.resolve(packagePath, resolvedAsset.localPath);
+      const sceneFilter = this.buildSceneFilter(scene.motion, durationSec);
       const inputArgs =
         resolvedAsset.assetType === "image"
           ? ["-loop", "1", "-i", sourceAssetPath]
@@ -76,7 +103,7 @@ export class MediaCompositionService {
         "-t",
         durationSec.toString(),
         "-vf",
-        "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
+        sceneFilter,
         "-r",
         "30",
         "-an",
@@ -134,9 +161,21 @@ export class MediaCompositionService {
     ];
 
     const hasSubtitle = Boolean(subtitlePath && fs.existsSync(subtitlePath));
+    const compositionOptions = manifest.compositionOptions;
     const burnSubtitles =
-      hasSubtitle && manifest.provider === "background-subtitle-composer-mcp";
-    const speedAdjusted = manifest.provider === "background-subtitle-composer-mcp";
+      hasSubtitle &&
+      (manifest.provider === "background-subtitle-composer-mcp" ||
+        compositionOptions?.burnSubtitles === true);
+    const speedFactor =
+      manifest.provider === "background-subtitle-composer-mcp"
+        ? MediaCompositionService.BACKGROUND_COMPOSER_SPEED
+        : compositionOptions?.speedFactor;
+    const speedAdjusted = typeof speedFactor === "number" && Number.isFinite(speedFactor) && speedFactor > 0;
+    const outputCrf =
+      typeof compositionOptions?.videoCrf === "number" && Number.isFinite(compositionOptions.videoCrf)
+        ? String(compositionOptions.videoCrf)
+        : "18";
+    const outputPreset = compositionOptions?.videoPreset ?? "medium";
     if (hasSubtitle) {
       ffmpegArgs.push("-i", subtitlePath);
     }
@@ -146,10 +185,10 @@ export class MediaCompositionService {
       if (burnSubtitles) {
         videoFilters.push(this.buildSubtitleFilter(subtitlePath));
       }
-      videoFilters.push(`setpts=PTS/${MediaCompositionService.BACKGROUND_COMPOSER_SPEED}`);
+      videoFilters.push(`setpts=PTS/${speedFactor}`);
       ffmpegArgs.push(
         "-filter_complex",
-        `[0:v]${videoFilters.join(",")}[v];[1:a]atempo=${MediaCompositionService.BACKGROUND_COMPOSER_SPEED}[a]`,
+        `[0:v]${videoFilters.join(",")}[v];[1:a]atempo=${speedFactor}[a]`,
         "-map",
         "[v]",
         "-map",
@@ -166,9 +205,9 @@ export class MediaCompositionService {
       "-c:v",
       "libx264",
       "-crf",
-      "18",
+      outputCrf,
       "-preset",
-      "medium",
+      outputPreset,
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -204,14 +243,18 @@ export class MediaCompositionService {
   private async resolveSceneAsset(
     scene: GeneratedMediaPackageManifest["scenes"][number],
     packagePath: string,
-    assetsDir: string
+    assetsDir: string,
+    forceRefresh: boolean
   ) {
-    const selectedAsset = scene.selectedAsset;
+    let selectedAsset = scene.selectedAsset;
     if (!selectedAsset) {
       return undefined;
     }
 
-    if (selectedAsset.localPath) {
+    if (
+      selectedAsset.localPath &&
+      (!forceRefresh || !selectedAsset.sourceUrl || selectedAsset.provider === "local")
+    ) {
       return selectedAsset;
     }
 
@@ -226,20 +269,99 @@ export class MediaCompositionService {
     );
     const absolutePath = path.join(packagePath, relativePath);
 
-    if (!fs.existsSync(absolutePath)) {
-      const response = await fetch(selectedAsset.sourceUrl);
+    if (!forceRefresh && fs.existsSync(absolutePath)) {
+      return {
+        ...selectedAsset,
+        localPath: relativePath
+      };
+    }
+
+    const decodedDataImage = this.decodeDataImageSource(selectedAsset.sourceUrl);
+    if (decodedDataImage) {
+      this.fileService.writeBinaryFile(path.join(assetsDir, path.basename(absolutePath)), decodedDataImage);
+    } else {
+      let response = await fetch(selectedAsset.sourceUrl);
+      let resolvedSourceUrl = selectedAsset.sourceUrl;
+
+      if (!response.ok && selectedAsset.provider === "flux") {
+        const fallbackUrl = this.buildFluxFallbackUrl(selectedAsset.sourceUrl);
+        if (fallbackUrl) {
+          response = await fetch(fallbackUrl);
+          if (response.ok) {
+            resolvedSourceUrl = fallbackUrl;
+          }
+        }
+      }
+
       if (!response.ok) {
         throw new Error(`Asset download failed: HTTP ${response.status}`);
       }
 
       const buffer = Buffer.from(await response.arrayBuffer());
       this.fileService.writeBinaryFile(path.join(assetsDir, path.basename(absolutePath)), buffer);
+      selectedAsset = {
+        ...selectedAsset,
+        sourceUrl: resolvedSourceUrl
+      };
     }
 
     return {
       ...selectedAsset,
       localPath: relativePath
     };
+  }
+
+  private decodeDataImageSource(sourceUrl?: string): Buffer | undefined {
+    if (!sourceUrl || !sourceUrl.startsWith("data:image/")) {
+      return undefined;
+    }
+
+    const splitIndex = sourceUrl.indexOf(",");
+    if (splitIndex <= 0) {
+      return undefined;
+    }
+
+    const header = sourceUrl.slice(0, splitIndex).toLowerCase();
+    if (!header.includes(";base64")) {
+      return undefined;
+    }
+
+    try {
+      const encoded = sourceUrl.slice(splitIndex + 1);
+      const buffer = Buffer.from(encoded, "base64");
+      return buffer.length ? buffer : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private buildFluxFallbackUrl(sourceUrl: string): string | undefined {
+    try {
+      const url = new URL(sourceUrl);
+      if (!url.hostname.includes("pollinations.ai")) {
+        return undefined;
+      }
+
+      const promptPrefix = "/prompt/";
+      const pathName = url.pathname;
+      const promptIndex = pathName.indexOf(promptPrefix);
+      if (promptIndex === -1) {
+        return undefined;
+      }
+
+      const encodedPrompt = pathName.slice(promptIndex + promptPrefix.length);
+      const decodedPrompt = decodeURIComponent(encodedPrompt)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 140);
+      if (!decodedPrompt) {
+        return undefined;
+      }
+
+      return `https://image.pollinations.ai/prompt/${encodeURIComponent(decodedPrompt)}?width=1080&height=1920&seed=${Date.now()}&nologo=true`;
+    } catch {
+      return undefined;
+    }
   }
 
   private runFfmpeg(
@@ -254,7 +376,7 @@ export class MediaCompositionService {
       if (!ffmpegExecutable) {
         reject(
           new Error(
-            "Bundled FFmpeg was not found. Expected it under resources/bundled/dev/ffmpeg(.exe)."
+            "Bundled FFmpeg was not found. Please place ffmpeg in the launcher bundled tools directory."
           )
         );
         return;
@@ -368,5 +490,43 @@ export class MediaCompositionService {
     }
 
     return `subtitles='${escapedSubtitlePath}'`;
+  }
+
+  private buildSceneFilter(
+    motion: GeneratedMediaPackageManifest["scenes"][number]["motion"] | undefined,
+    durationSec: number
+  ): string {
+    const safeDuration = Math.max(1, Number(durationSec) || 1);
+    const base = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1";
+
+    if (!motion || motion === "none") {
+      return base;
+    }
+
+    if (motion === "zoom-in") {
+      return `scale='1080+160*(t/${safeDuration})':'1920+284*(t/${safeDuration})':eval=frame,crop=1080:1920,setsar=1`;
+    }
+
+    if (motion === "zoom-out") {
+      return `scale='1240-160*(t/${safeDuration})':'2204-284*(t/${safeDuration})':eval=frame,crop=1080:1920,setsar=1`;
+    }
+
+    if (motion === "pan-left") {
+      return `scale=1240:2204,crop=1080:1920:x='(in_w-out_w)/2-100*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
+    }
+
+    if (motion === "pan-right") {
+      return `scale=1240:2204,crop=1080:1920:x='(in_w-out_w)/2+100*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
+    }
+
+    if (motion === "shake") {
+      return "scale=1160:2062,crop=1080:1920:x='(in_w-out_w)/2+14*sin(25*t)':y='(in_h-out_h)/2+10*sin(33*t)',setsar=1";
+    }
+
+    if (motion === "wipe-transition") {
+      return `scale=1240:2204,crop=1080:1920:x='(in_w-out_w)*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
+    }
+
+    return base;
   }
 }

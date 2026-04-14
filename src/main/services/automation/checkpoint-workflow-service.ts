@@ -61,6 +61,9 @@ export class CheckpointWorkflowService {
     selectedCandidate?: TrendCandidate;
     draft: ShortformScriptDraft;
     scriptCategory?: "horror" | "romance" | "community";
+    ideaStrategy?: "pattern_remix" | "comment_gap" | "series_ip";
+    lengthMode?: "auto" | "shortform" | "longform";
+    draftMode?: "auto_generate" | "manual_polish";
     revisionRequest?: string;
     source: "claude" | "openrouter" | "openai" | "mock";
     error?: string;
@@ -86,7 +89,10 @@ export class CheckpointWorkflowService {
           notes: input.revisionRequest ?? "",
           selectedTitleIndex: 0,
           selectedTitle: input.draft.titleOptions[0] ?? "",
-          scriptCategory: input.scriptCategory ?? "community"
+          scriptCategory: input.scriptCategory ?? "community",
+          ideaStrategy: input.ideaStrategy ?? "comment_gap",
+          lengthMode: input.lengthMode ?? "auto",
+          draftMode: input.draftMode ?? "manual_polish"
         },
         generator: {
           source: input.source,

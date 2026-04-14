@@ -1,5 +1,6 @@
 import type { AppMeta } from "./app";
 import type { ShortformWorkflowConfig, TelegramControlStatus } from "./automation";
+import type { SceneScriptDocument } from "./media-generation";
 import type {
   AuthSession,
   ChangeEmailResponse,
@@ -21,6 +22,13 @@ import type {
 } from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 import type {
+  YouTubeBreakoutDiscoveryRequest,
+  YouTubeBreakoutDiscoveryResult,
+  YouTubeCandidateAnalysisRequest,
+  YouTubeCandidateAnalysisResult
+} from "./trend";
+import type {
+  AutoProcessDraftPayload,
   CreateReadinessSnapshot,
   ManualInputCheckpointPayload,
   ManualCreateCheckpointPayload,
@@ -84,6 +92,12 @@ export interface MellowCatAPI {
     getTelegramStatus: () => Promise<TelegramControlStatus>;
     syncTelegram: () => Promise<TelegramControlStatus>;
     sendMockShortlist: () => Promise<TelegramControlStatus>;
+    discoverYouTubeBreakoutCandidates: (
+      request: YouTubeBreakoutDiscoveryRequest
+    ) => Promise<YouTubeBreakoutDiscoveryResult>;
+    analyzeYouTubeCandidate: (
+      request: YouTubeCandidateAnalysisRequest
+    ) => Promise<YouTubeCandidateAnalysisResult>;
     getYouTubeStatus: () => Promise<YouTubeAuthStatus>;
     connectYouTube: () => Promise<YouTubeAuthStatus>;
     disconnectYouTube: () => Promise<YouTubeAuthStatus>;
@@ -93,17 +107,31 @@ export interface MellowCatAPI {
       patch: Partial<YouTubeUploadRequest>
     ) => Promise<YouTubeUploadRequest>;
     pickCreateBackgroundFile: () => Promise<string | undefined>;
+    pickYouTubePackageFolder: () => Promise<string | undefined>;
     pickYouTubeVideoFile: () => Promise<string | undefined>;
     pickYouTubeThumbnailFile: () => Promise<string | undefined>;
     uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
+    inspectSceneScript: (packagePath: string) => Promise<SceneScriptDocument>;
+    updateSceneScript: (
+      packagePath: string,
+      document: SceneScriptDocument
+    ) => Promise<SceneScriptDocument>;
     inspectWorkflowJob: (jobId: string) => Promise<WorkflowJobSnapshot>;
     getCreateReadiness: (jobId: string) => Promise<CreateReadinessSnapshot>;
     runCreatePipeline: (jobId: string) => Promise<WorkflowJobSnapshot>;
+    rerenderCreateComposition: (jobId: string) => Promise<WorkflowJobSnapshot>;
+    rerenderCreateScenes: (jobId: string, sceneIndexes: number[]) => Promise<WorkflowJobSnapshot>;
+    refreshCreateAssets: (jobId: string, sceneIndexes: number[]) => Promise<WorkflowJobSnapshot>;
+    refreshCreateVoiceover: (jobId: string) => Promise<WorkflowJobSnapshot>;
+    refreshCreateSubtitles: (jobId: string) => Promise<WorkflowJobSnapshot>;
     saveManualInputCheckpoint: (
       payload: ManualInputCheckpointPayload
     ) => Promise<WorkflowJobSnapshot>;
     saveManualProcessCheckpoint: (
       payload: ManualProcessCheckpointPayload
+    ) => Promise<WorkflowJobSnapshot>;
+    generateProcessDraft: (
+      payload: AutoProcessDraftPayload
     ) => Promise<WorkflowJobSnapshot>;
     saveManualCreateCheckpoint: (
       payload: ManualCreateCheckpointPayload

@@ -7,6 +7,7 @@ import type {
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
+import type { SceneScriptDocument } from "@common/types/media-generation";
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -15,6 +16,13 @@ import type {
   YouTubeUploadResult
 } from "@common/types/settings";
 import type {
+  YouTubeBreakoutDiscoveryRequest,
+  YouTubeBreakoutDiscoveryResult,
+  YouTubeCandidateAnalysisRequest,
+  YouTubeCandidateAnalysisResult
+} from "@common/types/trend";
+import type {
+  AutoProcessDraftPayload,
   CreateReadinessSnapshot,
   ManualInputCheckpointPayload,
   ManualCreateCheckpointPayload,
@@ -32,6 +40,8 @@ interface AppState {
   workflowConfig?: ShortformWorkflowConfig;
   workflowJobSnapshot?: WorkflowJobSnapshot;
   createReadiness?: CreateReadinessSnapshot;
+  sceneScript?: SceneScriptDocument;
+  sceneScriptPackagePath?: string;
   appUpdateStatus?: AppUpdateStatus;
   youTubeAuthStatus?: YouTubeAuthStatus;
   youTubeUploadRequest?: YouTubeUploadRequest;
@@ -54,15 +64,27 @@ interface AppState {
   installClaudeCode: () => Promise<void>;
   refreshTelegramStatus: () => Promise<void>;
   sendMockShortlist: () => Promise<void>;
+  discoverYouTubeBreakoutCandidates: (
+    request: YouTubeBreakoutDiscoveryRequest
+  ) => Promise<YouTubeBreakoutDiscoveryResult>;
+  analyzeYouTubeCandidate: (
+    request: YouTubeCandidateAnalysisRequest
+  ) => Promise<YouTubeCandidateAnalysisResult>;
   refreshYouTubeStatus: () => Promise<void>;
   connectYouTube: () => Promise<void>;
   disconnectYouTube: () => Promise<void>;
-  refreshYouTubeUploadRequest: () => Promise<void>;
-  saveYouTubeUploadRequest: (patch: Partial<YouTubeUploadRequest>) => Promise<void>;
+  refreshYouTubeUploadRequest: (packagePath?: string) => Promise<void>;
+  saveYouTubeUploadRequest: (
+    patch: Partial<YouTubeUploadRequest>,
+    packagePath?: string
+  ) => Promise<void>;
+  pickYouTubePackageFolder: () => Promise<string | undefined>;
   pickCreateBackgroundFile: () => Promise<string | undefined>;
   pickYouTubeVideoFile: () => Promise<string | undefined>;
   pickYouTubeThumbnailFile: () => Promise<string | undefined>;
-  uploadLastPackageToYouTube: () => Promise<void>;
+  uploadLastPackageToYouTube: (packagePath?: string) => Promise<void>;
+  inspectSceneScript: (packagePath?: string) => Promise<void>;
+  saveSceneScript: (document: SceneScriptDocument) => Promise<void>;
   sendClaudeInput: (sessionId: string, input: string) => Promise<void>;
   installMcp: (mcpId: string) => Promise<void>;
   uninstallMcp: (mcpId: string) => Promise<void>;
@@ -77,8 +99,14 @@ interface AppState {
   refreshWorkflowJobSnapshot: (jobId: string) => Promise<void>;
   refreshCreateReadiness: (jobId: string) => Promise<void>;
   runCreatePipeline: (jobId: string) => Promise<void>;
+  rerenderCreateComposition: (jobId: string) => Promise<void>;
+  rerenderCreateScenes: (jobId: string, sceneIndexes: number[]) => Promise<void>;
+  refreshCreateAssets: (jobId: string, sceneIndexes: number[]) => Promise<void>;
+  refreshCreateVoiceover: (jobId: string) => Promise<void>;
+  refreshCreateSubtitles: (jobId: string) => Promise<void>;
   saveManualInputCheckpoint: (payload: ManualInputCheckpointPayload) => Promise<void>;
   saveManualProcessCheckpoint: (payload: ManualProcessCheckpointPayload) => Promise<void>;
+  generateProcessDraft: (payload: AutoProcessDraftPayload) => Promise<void>;
   saveManualCreateCheckpoint: (payload: ManualCreateCheckpointPayload) => Promise<void>;
   saveManualOutputCheckpoint: (payload: ManualOutputCheckpointPayload) => Promise<void>;
   refreshStoreAccess: () => Promise<void>;
@@ -98,6 +126,18 @@ let unsubscribeOutput: (() => void) | undefined;
 let unsubscribeMcpOutput: (() => void) | undefined;
 let unsubscribeUpdateStatus: (() => void) | undefined;
 let claudeInstallPollTimer: ReturnType<typeof setTimeout> | undefined;
+
+function resolvePackagePath(state: {
+  telegramStatus?: { lastPackagePath?: string };
+  workflowJobSnapshot?: { resolvedPackagePath?: string | null };
+  sceneScriptPackagePath?: string;
+}): string | undefined {
+  return (
+    state.sceneScriptPackagePath ??
+    state.workflowJobSnapshot?.resolvedPackagePath ??
+    state.telegramStatus?.lastPackagePath
+  ) ?? undefined;
+}
 
 export const useAppStore = create<AppState>((set) => ({
   catalog: [],
@@ -265,6 +305,10 @@ export const useAppStore = create<AppState>((set) => ({
     const telegramStatus = await window.mellowcat.automation.sendMockShortlist();
     set({ telegramStatus });
   },
+  discoverYouTubeBreakoutCandidates: async (request) =>
+    window.mellowcat.automation.discoverYouTubeBreakoutCandidates(request),
+  analyzeYouTubeCandidate: async (request) =>
+    window.mellowcat.automation.analyzeYouTubeCandidate(request),
   refreshYouTubeStatus: async () => {
     const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
     set({ youTubeAuthStatus });
@@ -277,48 +321,80 @@ export const useAppStore = create<AppState>((set) => ({
     const youTubeAuthStatus = await window.mellowcat.automation.disconnectYouTube();
     set({ youTubeAuthStatus });
   },
-  refreshYouTubeUploadRequest: async () => {
-    const packagePath =
+  refreshYouTubeUploadRequest: async (packagePath?: string) => {
+    const resolvedPackagePath =
+      packagePath ??
       useAppStore.getState().telegramStatus?.lastPackagePath ??
       useAppStore.getState().workflowJobSnapshot?.resolvedPackagePath;
-    if (!packagePath) {
+    if (!resolvedPackagePath) {
       set({ youTubeUploadRequest: undefined });
       return;
     }
 
     const youTubeUploadRequest =
-      await window.mellowcat.automation.inspectYouTubeUploadRequest(packagePath);
+      await window.mellowcat.automation.inspectYouTubeUploadRequest(resolvedPackagePath);
     set({ youTubeUploadRequest });
   },
-  saveYouTubeUploadRequest: async (patch: Partial<YouTubeUploadRequest>) => {
-    const packagePath =
+  saveYouTubeUploadRequest: async (
+    patch: Partial<YouTubeUploadRequest>,
+    packagePath?: string
+  ) => {
+    const resolvedPackagePath =
+      packagePath ??
       useAppStore.getState().telegramStatus?.lastPackagePath ??
       useAppStore.getState().workflowJobSnapshot?.resolvedPackagePath;
-    if (!packagePath) {
+    if (!resolvedPackagePath) {
       return;
     }
 
     const youTubeUploadRequest =
-      await window.mellowcat.automation.updateYouTubeUploadRequest(packagePath, patch);
+      await window.mellowcat.automation.updateYouTubeUploadRequest(resolvedPackagePath, patch);
     set({ youTubeUploadRequest });
   },
   pickCreateBackgroundFile: async () => window.mellowcat.automation.pickCreateBackgroundFile(),
+  pickYouTubePackageFolder: async () =>
+    window.mellowcat.automation.pickYouTubePackageFolder(),
   pickYouTubeVideoFile: async () => window.mellowcat.automation.pickYouTubeVideoFile(),
   pickYouTubeThumbnailFile: async () =>
     window.mellowcat.automation.pickYouTubeThumbnailFile(),
-  uploadLastPackageToYouTube: async () => {
-    const packagePath =
+  uploadLastPackageToYouTube: async (packagePath?: string) => {
+    const resolvedPackagePath =
+      packagePath ??
       useAppStore.getState().telegramStatus?.lastPackagePath ??
       useAppStore.getState().workflowJobSnapshot?.resolvedPackagePath;
-    if (!packagePath) {
+    if (!resolvedPackagePath) {
       return;
     }
 
-    const lastYouTubeUploadResult = await window.mellowcat.automation.uploadYouTubePackage(packagePath);
+    const lastYouTubeUploadResult = await window.mellowcat.automation.uploadYouTubePackage(
+      resolvedPackagePath
+    );
     const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
     const youTubeUploadRequest =
-      await window.mellowcat.automation.inspectYouTubeUploadRequest(packagePath);
+      await window.mellowcat.automation.inspectYouTubeUploadRequest(resolvedPackagePath);
     set({ lastYouTubeUploadResult, youTubeAuthStatus, youTubeUploadRequest });
+  },
+  inspectSceneScript: async (packagePath?: string) => {
+    const resolvedPackagePath = packagePath ?? resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      set({ sceneScript: undefined, sceneScriptPackagePath: undefined });
+      return;
+    }
+
+    const sceneScript = await window.mellowcat.automation.inspectSceneScript(resolvedPackagePath);
+    set({ sceneScript, sceneScriptPackagePath: resolvedPackagePath });
+  },
+  saveSceneScript: async (document: SceneScriptDocument) => {
+    const resolvedPackagePath = resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      throw new Error("Package path was not found.");
+    }
+
+    const sceneScript = await window.mellowcat.automation.updateSceneScript(
+      resolvedPackagePath,
+      document
+    );
+    set({ sceneScript, sceneScriptPackagePath: resolvedPackagePath });
   },
   sendClaudeInput: async (sessionId: string, input: string) => {
     await window.mellowcat.claude.sendInput(sessionId, input);
@@ -533,12 +609,127 @@ export const useAppStore = create<AppState>((set) => ({
       youTubeUploadRequest
     });
   },
+  rerenderCreateComposition: async (jobId: string) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.rerenderCreateComposition(jobId);
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
+    const packagePath =
+      workflowJobSnapshot.resolvedPackagePath ??
+      useAppStore.getState().telegramStatus?.lastPackagePath;
+    const [youTubeAuthStatus, youTubeUploadRequest] = await Promise.all([
+      window.mellowcat.automation.getYouTubeStatus(),
+      packagePath
+        ? window.mellowcat.automation
+            .inspectYouTubeUploadRequest(packagePath)
+            .catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
+    set({
+      workflowJobSnapshot,
+      createReadiness,
+      youTubeAuthStatus,
+      youTubeUploadRequest
+    });
+  },
+  rerenderCreateScenes: async (jobId: string, sceneIndexes: number[]) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.rerenderCreateScenes(
+      jobId,
+      sceneIndexes
+    );
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
+    const packagePath =
+      workflowJobSnapshot.resolvedPackagePath ??
+      useAppStore.getState().telegramStatus?.lastPackagePath;
+    const [youTubeAuthStatus, youTubeUploadRequest] = await Promise.all([
+      window.mellowcat.automation.getYouTubeStatus(),
+      packagePath
+        ? window.mellowcat.automation
+            .inspectYouTubeUploadRequest(packagePath)
+            .catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
+    set({
+      workflowJobSnapshot,
+      createReadiness,
+      youTubeAuthStatus,
+      youTubeUploadRequest
+    });
+  },
+  refreshCreateAssets: async (jobId: string, sceneIndexes: number[]) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.refreshCreateAssets(
+      jobId,
+      sceneIndexes
+    );
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
+    const packagePath =
+      workflowJobSnapshot.resolvedPackagePath ??
+      useAppStore.getState().telegramStatus?.lastPackagePath;
+    const [youTubeAuthStatus, youTubeUploadRequest] = await Promise.all([
+      window.mellowcat.automation.getYouTubeStatus(),
+      packagePath
+        ? window.mellowcat.automation
+            .inspectYouTubeUploadRequest(packagePath)
+            .catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
+    set({
+      workflowJobSnapshot,
+      createReadiness,
+      youTubeAuthStatus,
+      youTubeUploadRequest
+    });
+  },
+  refreshCreateVoiceover: async (jobId: string) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.refreshCreateVoiceover(jobId);
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
+    const packagePath =
+      workflowJobSnapshot.resolvedPackagePath ??
+      useAppStore.getState().telegramStatus?.lastPackagePath;
+    const [youTubeAuthStatus, youTubeUploadRequest] = await Promise.all([
+      window.mellowcat.automation.getYouTubeStatus(),
+      packagePath
+        ? window.mellowcat.automation
+            .inspectYouTubeUploadRequest(packagePath)
+            .catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
+    set({
+      workflowJobSnapshot,
+      createReadiness,
+      youTubeAuthStatus,
+      youTubeUploadRequest
+    });
+  },
+  refreshCreateSubtitles: async (jobId: string) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.refreshCreateSubtitles(jobId);
+    const createReadiness = await window.mellowcat.automation.getCreateReadiness(jobId);
+    const packagePath =
+      workflowJobSnapshot.resolvedPackagePath ??
+      useAppStore.getState().telegramStatus?.lastPackagePath;
+    const [youTubeAuthStatus, youTubeUploadRequest] = await Promise.all([
+      window.mellowcat.automation.getYouTubeStatus(),
+      packagePath
+        ? window.mellowcat.automation
+            .inspectYouTubeUploadRequest(packagePath)
+            .catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
+    set({
+      workflowJobSnapshot,
+      createReadiness,
+      youTubeAuthStatus,
+      youTubeUploadRequest
+    });
+  },
   saveManualInputCheckpoint: async (payload) => {
     const workflowJobSnapshot = await window.mellowcat.automation.saveManualInputCheckpoint(payload);
     set({ workflowJobSnapshot });
   },
   saveManualProcessCheckpoint: async (payload) => {
     const workflowJobSnapshot = await window.mellowcat.automation.saveManualProcessCheckpoint(payload);
+    set({ workflowJobSnapshot });
+  },
+  generateProcessDraft: async (payload) => {
+    const workflowJobSnapshot = await window.mellowcat.automation.generateProcessDraft(payload);
     set({ workflowJobSnapshot });
   },
   saveManualCreateCheckpoint: async (payload) => {

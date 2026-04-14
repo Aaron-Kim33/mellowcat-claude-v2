@@ -246,6 +246,11 @@ export function InstalledPage() {
     refreshWorkflowJobSnapshot,
     refreshCreateReadiness,
     runCreatePipeline,
+    rerenderCreateComposition,
+    rerenderCreateScenes,
+    refreshCreateAssets,
+    refreshCreateVoiceover,
+    refreshCreateSubtitles,
     saveManualInputCheckpoint,
     saveManualProcessCheckpoint,
     saveManualCreateCheckpoint,
@@ -257,6 +262,7 @@ export function InstalledPage() {
     refreshYouTubeUploadRequest,
     saveYouTubeUploadRequest,
     pickCreateBackgroundFile,
+    pickYouTubePackageFolder,
     pickYouTubeVideoFile,
     pickYouTubeThumbnailFile,
     uploadLastPackageToYouTube
@@ -309,6 +315,10 @@ export function InstalledPage() {
   const [instagramAccountHandle, setInstagramAccountHandle] = useState("");
   const [instagramAccessToken, setInstagramAccessToken] = useState("");
   const [pexelsApiKey, setPexelsApiKey] = useState("");
+  const [fluxApiKey, setFluxApiKey] = useState("");
+  const [fluxApiBaseUrl, setFluxApiBaseUrl] = useState("https://openrouter.ai/api/v1");
+  const [fluxModel, setFluxModel] = useState("black-forest-labs/flux.2-pro");
+  const [createAssetSource, setCreateAssetSource] = useState<"pexels" | "flux">("pexels");
   const [createBackgroundSourceType, setCreateBackgroundSourceType] = useState<"preset" | "custom">("preset");
   const [createBackgroundMediaPath, setCreateBackgroundMediaPath] = useState("");
   const [createTargetDurationSec, setCreateTargetDurationSec] = useState("60");
@@ -316,10 +326,16 @@ export function InstalledPage() {
   const [createSubtitleTheme, setCreateSubtitleTheme] = useState<
     "clean_dark" | "clean_light" | "story_bold"
   >("story_bold");
+  const [createVideoSubtitleMode, setCreateVideoSubtitleMode] = useState<"soft" | "hard">("hard");
+  const [createVideoRenderQuality, setCreateVideoRenderQuality] = useState<"standard" | "high">(
+    "high"
+  );
+  const [createRerenderSceneIndexes, setCreateRerenderSceneIndexes] = useState("");
   const [instagramConnected, setInstagramConnected] = useState(false);
   const [instagramStatusMessage, setInstagramStatusMessage] = useState("");
   const [youtubeVideoFilePath, setYoutubeVideoFilePath] = useState("");
   const [youtubeThumbnailFilePath, setYoutubeThumbnailFilePath] = useState("");
+  const [selectedUploadPackagePath, setSelectedUploadPackagePath] = useState("");
   const [youtubePublishMode, setYoutubePublishMode] = useState<"now" | "scheduled">("now");
   const [youtubeScheduledPublishAt, setYoutubeScheduledPublishAt] = useState("");
   const [showTelegramBotToken, setShowTelegramBotToken] = useState(false);
@@ -1167,6 +1183,22 @@ export function InstalledPage() {
         value: pexelsApiKey,
         setValue: setPexelsApiKey
       },
+      fluxApiKey: {
+        value: fluxApiKey,
+        setValue: setFluxApiKey
+      },
+      fluxApiBaseUrl: {
+        value: fluxApiBaseUrl,
+        setValue: setFluxApiBaseUrl
+      },
+      fluxModel: {
+        value: fluxModel,
+        setValue: setFluxModel
+      },
+      assetSource: {
+        value: createAssetSource,
+        setValue: (value: string) => setCreateAssetSource(value as "pexels" | "flux")
+      },
       backgroundSourceType: {
         value: createBackgroundSourceType,
         setValue: (value: string) => setCreateBackgroundSourceType(value as "preset" | "custom")
@@ -1187,6 +1219,18 @@ export function InstalledPage() {
         value: createSubtitleTheme,
         setValue: (value: string) =>
           setCreateSubtitleTheme(value as "clean_dark" | "clean_light" | "story_bold")
+      },
+      videoSubtitleMode: {
+        value: createVideoSubtitleMode,
+        setValue: (value: string) => setCreateVideoSubtitleMode(value as "soft" | "hard")
+      },
+      videoRenderQuality: {
+        value: createVideoRenderQuality,
+        setValue: (value: string) => setCreateVideoRenderQuality(value as "standard" | "high")
+      },
+      rerenderSceneIndexes: {
+        value: createRerenderSceneIndexes,
+        setValue: setCreateRerenderSceneIndexes
       },
       videoFilePath: {
         value: manualCreateVideoPath,
@@ -1218,6 +1262,17 @@ export function InstalledPage() {
 
     const binding = createFieldMap[field.id];
     if (!binding) {
+      return null;
+    }
+
+    if (field.id === "pexelsApiKey" && createAssetSource !== "pexels") {
+      return null;
+    }
+
+    if (
+      (field.id === "fluxApiKey" || field.id === "fluxApiBaseUrl" || field.id === "fluxModel") &&
+      createAssetSource !== "flux"
+    ) {
       return null;
     }
 
@@ -1308,6 +1363,22 @@ export function InstalledPage() {
       );
     }
 
+    if (field.type === "secret") {
+      return (
+        <label key={field.id} className={fieldClassName}>
+          <span>{field.label}</span>
+          <input
+            className="text-input"
+            type="password"
+            value={binding.value}
+            onChange={(event) => binding.setValue(event.target.value)}
+            placeholder={field.placeholder}
+          />
+          {field.helpText && <span className="subtle">{field.helpText}</span>}
+        </label>
+      );
+    }
+
     return (
       <label key={field.id} className={fieldClassName}>
         <span>{field.label}</span>
@@ -1347,6 +1418,26 @@ export function InstalledPage() {
       await handleRunCreatePipeline();
       return;
     }
+    if (actionId === "rerender_create_composition") {
+      await handleRerenderCreateComposition();
+      return;
+    }
+    if (actionId === "rerender_selected_scenes") {
+      await handleRerenderSelectedScenes();
+      return;
+    }
+    if (actionId === "refresh_create_assets") {
+      await handleRefreshCreateAssets();
+      return;
+    }
+    if (actionId === "refresh_create_voiceover") {
+      await handleRefreshCreateVoiceover();
+      return;
+    }
+    if (actionId === "refresh_create_subtitles") {
+      await handleRefreshCreateSubtitles();
+      return;
+    }
     if (actionId === "save_youtube_config") {
       await handleSaveWorkflowConfig();
       return;
@@ -1357,6 +1448,10 @@ export function InstalledPage() {
     }
     if (actionId === "refresh_youtube_status") {
       await refreshYouTubeStatus();
+      return;
+    }
+    if (actionId === "chooseUploadPackageFolder" || actionId === "choose_upload_package_folder") {
+      await handleChooseUploadPackageFolder();
       return;
     }
     if (actionId === "refresh_instagram_status") {
@@ -1441,7 +1536,7 @@ export function InstalledPage() {
     if (actionId === "upload_last_package") {
       return (
         !youTubeAuthStatus?.connected ||
-        !activePackagePath ||
+        !uploadTargetPackagePath ||
         !youtubeVideoFilePath.trim()
       );
     }
@@ -1461,6 +1556,24 @@ export function InstalledPage() {
         !workflowJobSnapshot?.checkpoints[2] ||
         Boolean(createPipelineWarning)
       );
+    }
+    if (
+      actionId === "rerender_create_composition" ||
+      actionId === "refresh_create_voiceover" ||
+      actionId === "refresh_create_subtitles"
+    ) {
+      return createPipelineBusy || !resolvedWorkflowJobId;
+    }
+    if (actionId === "rerender_selected_scenes" || actionId === "refresh_create_assets") {
+      const sceneIndexes = Array.from(
+        new Set(
+          createRerenderSceneIndexes
+            .split(",")
+            .map((value) => Number.parseInt(value.trim(), 10))
+            .filter((value) => Number.isFinite(value) && value > 0)
+        )
+      );
+      return createPipelineBusy || !resolvedWorkflowJobId || sceneIndexes.length === 0;
     }
     return false;
   };
@@ -1528,11 +1641,18 @@ export function InstalledPage() {
     setInstagramAccountHandle(workflowConfig?.instagramAccountHandle ?? "");
       setInstagramAccessToken(workflowConfig?.instagramAccessToken ?? "");
       setPexelsApiKey(workflowConfig?.pexelsApiKey ?? "");
+      setFluxApiKey(workflowConfig?.fluxApiKey ?? "");
+      setFluxApiBaseUrl(workflowConfig?.fluxApiBaseUrl ?? "https://openrouter.ai/api/v1");
+      setFluxModel(workflowConfig?.fluxModel ?? "black-forest-labs/flux.2-pro");
+      setCreateAssetSource(workflowConfig?.createAssetSource ?? "pexels");
       setCreateBackgroundSourceType(workflowConfig?.createBackgroundSourceType ?? "preset");
       setCreateBackgroundMediaPath(workflowConfig?.createBackgroundMediaPath ?? "");
     setCreateTargetDurationSec(String(workflowConfig?.createTargetDurationSec ?? 60));
     setCreateMinimumSceneCount(String(workflowConfig?.createMinimumSceneCount ?? 3));
     setCreateSubtitleTheme(workflowConfig?.createSubtitleTheme ?? "story_bold");
+    setCreateVideoSubtitleMode(workflowConfig?.createVideoSubtitleMode ?? "hard");
+    setCreateVideoRenderQuality(workflowConfig?.createVideoRenderQuality ?? "high");
+    setCreateRerenderSceneIndexes(workflowConfig?.createRerenderSceneIndexes ?? "");
     setYoutubeChannelLabel(workflowConfig?.youtubeChannelLabel ?? "");
     setYoutubePrivacyStatus(workflowConfig?.youtubePrivacyStatus ?? "private");
     setYoutubeCategoryId(workflowConfig?.youtubeCategoryId ?? "22");
@@ -1560,16 +1680,23 @@ export function InstalledPage() {
   const resolvedWorkflowJobId = currentWorkflowJobId ?? workflowJobSnapshot?.job?.jobId;
   const activePackagePath =
     telegramStatus?.lastPackagePath ?? workflowJobSnapshot?.resolvedPackagePath ?? undefined;
+  const uploadTargetPackagePath = selectedUploadPackagePath || undefined;
   const createPipelineWarning =
-    ["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(createModuleId)
+    [
+      "youtube-material-generator-mcp",
+      "background-subtitle-composer-mcp",
+      "video-production-mcp"
+    ].includes(createModuleId)
       ? [
           ...((createReadiness?.items ?? [])
             .filter((item) => !item.ok)
             .map((item) => item.detail)),
           !createReadiness &&
-          ["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(
-            createModuleId
-          )
+          [
+            "youtube-material-generator-mcp",
+            "background-subtitle-composer-mcp",
+            "video-production-mcp"
+          ].includes(createModuleId)
             ? isKorean
               ? "3번 슬롯 준비 상태를 확인하는 중입니다."
               : "Checking Slot 03 readiness..."
@@ -1591,9 +1718,11 @@ export function InstalledPage() {
   useEffect(() => {
     if (
       !currentWorkflowJobId ||
-      !["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(
-        createModuleId
-      )
+      ![
+        "youtube-material-generator-mcp",
+        "background-subtitle-composer-mcp",
+        "video-production-mcp"
+      ].includes(createModuleId)
     ) {
       return;
     }
@@ -1603,6 +1732,10 @@ export function InstalledPage() {
       currentWorkflowJobId,
       createModuleId,
       pexelsApiKey,
+      fluxApiKey,
+      fluxApiBaseUrl,
+      fluxModel,
+      createAssetSource,
       createBackgroundSourceType,
       createBackgroundMediaPath,
     settings?.azureSpeechKey,
@@ -1819,6 +1952,10 @@ export function InstalledPage() {
       instagramAccountHandle: instagramAccountHandle.trim() || undefined,
       instagramAccessToken: instagramAccessToken.trim() || undefined,
       pexelsApiKey: pexelsApiKey.trim() || undefined,
+      fluxApiKey: fluxApiKey.trim() || undefined,
+      fluxApiBaseUrl: fluxApiBaseUrl.trim() || undefined,
+      fluxModel: fluxModel.trim() || undefined,
+      createAssetSource,
       createBackgroundSourceType,
       createBackgroundMediaPath: createBackgroundMediaPath.trim() || undefined,
       createTargetDurationSec:
@@ -1830,6 +1967,9 @@ export function InstalledPage() {
           ? parsedCreateMinimumSceneCount
           : undefined,
       createSubtitleTheme,
+      createVideoSubtitleMode,
+      createVideoRenderQuality,
+      createRerenderSceneIndexes: createRerenderSceneIndexes.trim() || undefined,
       youtubeChannelLabel: youtubeChannelLabel.trim() || undefined,
       youtubePrivacyStatus,
       youtubeCategoryId,
@@ -1842,6 +1982,14 @@ export function InstalledPage() {
   };
 
   const handleSaveUploadRequest = async () => {
+    if (!uploadTargetPackagePath) {
+      window.alert(
+        isKorean
+          ? "업로드할 패키지 폴더를 먼저 선택해 주세요."
+          : "Select a package folder before saving the upload request."
+      );
+      return;
+    }
     await saveYouTubeUploadRequest({
       videoFilePath: youtubeVideoFilePath.trim(),
       thumbnailFilePath: youtubeThumbnailFilePath.trim(),
@@ -1849,7 +1997,7 @@ export function InstalledPage() {
         youtubePublishMode === "scheduled"
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
-    });
+    }, uploadTargetPackagePath);
     setSavedMessage(isKorean ? "업로드 요청을 저장했습니다." : "Upload request saved.");
   };
 
@@ -1872,10 +2020,29 @@ export function InstalledPage() {
     );
   };
 
+  const handleChooseUploadPackageFolder = async () => {
+    const selectedPath = await pickYouTubePackageFolder();
+    if (!selectedPath) {
+      return;
+    }
+
+    setSelectedUploadPackagePath(selectedPath);
+    setYoutubeVideoFilePath("");
+    setYoutubeThumbnailFilePath("");
+    setYoutubePublishMode("now");
+    setYoutubeScheduledPublishAt("");
+    await refreshYouTubeUploadRequest(selectedPath);
+    setSavedMessage(
+      isKorean ? "업로드 패키지 폴더를 선택했습니다." : "Upload package folder selected."
+    );
+  };
+
   const handleChooseVideoFile = async () => {
-    if (!activePackagePath) {
+    if (!uploadTargetPackagePath) {
       window.alert(
-        "먼저 Telegram에서 후보를 승인해서 package를 만들어주세요. Approve 후 다시 시도하면 됩니다."
+        isKorean
+          ? "업로드할 패키지 폴더를 먼저 선택해 주세요."
+          : "Select a package folder before choosing a video file."
       );
       return;
     }
@@ -1893,14 +2060,16 @@ export function InstalledPage() {
         youtubePublishMode === "scheduled"
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
-    });
+    }, uploadTargetPackagePath);
     setSavedMessage(isKorean ? "영상 파일을 선택했습니다." : "Video file selected.");
   };
 
   const handleChooseThumbnailFile = async () => {
-    if (!activePackagePath) {
+    if (!uploadTargetPackagePath) {
       window.alert(
-        "먼저 Telegram에서 후보를 승인해서 package를 만들어주세요. Approve 후 다시 시도하면 됩니다."
+        isKorean
+          ? "업로드할 패키지 폴더를 먼저 선택해 주세요."
+          : "Select a package folder before choosing a thumbnail."
       );
       return;
     }
@@ -1918,14 +2087,16 @@ export function InstalledPage() {
         youtubePublishMode === "scheduled"
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
-    });
+    }, uploadTargetPackagePath);
     setSavedMessage(isKorean ? "썸네일 파일을 선택했습니다." : "Thumbnail file selected.");
   };
 
   const handleUploadLastPackage = async () => {
-    if (!activePackagePath) {
+    if (!uploadTargetPackagePath) {
       window.alert(
-        "업로드하려면 먼저 Telegram 흐름에서 package를 만들어야 합니다. 후보 선택 후 Approve까지 진행해 주세요."
+        isKorean
+          ? "업로드할 패키지 폴더를 먼저 선택해 주세요."
+          : "Select a package folder before uploading."
       );
       return;
     }
@@ -1937,8 +2108,8 @@ export function InstalledPage() {
         youtubePublishMode === "scheduled"
           ? localDateTimeInputToIso(youtubeScheduledPublishAt)
           : ""
-    });
-    await uploadLastPackageToYouTube();
+    }, uploadTargetPackagePath);
+    await uploadLastPackageToYouTube(uploadTargetPackagePath);
   };
 
   const handleSaveManualInput = async () => {
@@ -2176,6 +2347,32 @@ export function InstalledPage() {
       return;
     }
 
+    const readinessLines = (createReadiness?.items ?? []).map(
+      (item) => `${item.ok ? "OK" : "BLOCK"} · ${item.label}: ${item.detail}`
+    );
+    const confirmationText = [
+      isKorean ? "3번 소재 생성을 실행할까요?" : "Start Slot 03 create now?",
+      "",
+      ...(readinessLines.length > 0
+        ? readinessLines
+        : [
+            isKorean
+              ? "준비 상태를 아직 불러오지 못했습니다. 계속 진행하면 바로 생성이 시작됩니다."
+              : "Readiness details are not loaded yet. Continuing will start generation immediately."
+          ]),
+      "",
+      isKorean ? "확인을 누르면 실제 API 호출이 시작됩니다." : "Press OK to start real API calls."
+    ].join("\n");
+
+    if (!window.confirm(confirmationText)) {
+      setSavedMessage(
+        isKorean
+          ? "3번 소재 생성이 취소되었습니다."
+          : "Slot 03 create was canceled."
+      );
+      return;
+    }
+
     setCreatePipelineBusy(true);
     setSavedMessage(
       isKorean
@@ -2188,6 +2385,234 @@ export function InstalledPage() {
         isKorean
           ? "3번 슬롯 소재 생성을 완료했습니다. 패키지와 최종 영상 파일을 확인해 주세요."
           : "Slot 3 create generation finished. Check the package and final video files."
+      );
+    } finally {
+      setCreatePipelineBusy(false);
+    }
+  };
+
+  const handleRerenderCreateComposition = async () => {
+    setSavedMessage("");
+    setManualCreateError("");
+    if (!resolvedWorkflowJobId) {
+      setManualCreateError(
+        isKorean
+          ? "재합성을 실행하려면 작업 ID가 필요합니다."
+          : "A workflow job id is required to re-render composition."
+      );
+      return;
+    }
+
+    const confirmationText = isKorean
+      ? "재합성을 실행할까요?\n\n이미 만들어진 자산/더빙/자막을 재사용하고 final-video.mp4만 다시 생성합니다.\n추가 API 비용은 발생하지 않습니다."
+      : "Re-render final composition now?\n\nThis reuses existing assets, dubbing, and subtitles, and rebuilds final-video.mp4 only.\nNo additional API generation cost is expected.";
+
+    if (!window.confirm(confirmationText)) {
+      setSavedMessage(
+        isKorean ? "재합성이 취소되었습니다." : "Re-render was canceled."
+      );
+      return;
+    }
+
+    setCreatePipelineBusy(true);
+    setSavedMessage(
+      isKorean
+        ? "기존 산출물을 재사용해 final-video.mp4를 다시 합성하는 중입니다..."
+        : "Re-rendering final-video.mp4 from existing outputs..."
+    );
+    try {
+      await rerenderCreateComposition(resolvedWorkflowJobId);
+      setSavedMessage(
+        isKorean
+          ? "재합성이 완료되었습니다. final-video.mp4를 확인해 주세요."
+          : "Re-render finished. Please check final-video.mp4."
+      );
+    } finally {
+      setCreatePipelineBusy(false);
+    }
+  };
+
+  const handleRerenderSelectedScenes = async () => {
+    setSavedMessage("");
+    setManualCreateError("");
+    if (!resolvedWorkflowJobId) {
+      setManualCreateError(
+        isKorean
+          ? "부분 재렌더를 실행하려면 작업 ID가 필요합니다."
+          : "A workflow job id is required to re-render selected scenes."
+      );
+      return;
+    }
+
+    const sceneIndexes = Array.from(
+      new Set(
+        createRerenderSceneIndexes
+          .split(",")
+          .map((value) => Number.parseInt(value.trim(), 10))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    ).sort((a, b) => a - b);
+
+    if (sceneIndexes.length === 0) {
+      setManualCreateError(
+        isKorean
+          ? "씬 번호를 입력해 주세요. 예: 1,3"
+          : "Enter scene indexes first, e.g. 1,3."
+      );
+      return;
+    }
+
+    const confirmationText = isKorean
+      ? `선택 씬만 재렌더할까요? (${sceneIndexes.join(", ")})\n\n기존 생성 결과를 재사용하고 지정된 씬 클립만 다시 만든 뒤 최종 합성합니다.`
+      : `Re-render selected scenes only? (${sceneIndexes.join(", ")})\n\nThis reuses current outputs, rebuilds only selected scene clips, then composes final video.`;
+
+    if (!window.confirm(confirmationText)) {
+      setSavedMessage(
+        isKorean ? "부분 재렌더가 취소되었습니다." : "Selected scene re-render was canceled."
+      );
+      return;
+    }
+
+    setCreatePipelineBusy(true);
+    setSavedMessage(
+      isKorean
+        ? `선택한 씬(${sceneIndexes.join(", ")})만 재렌더 중입니다...`
+        : `Re-rendering selected scenes (${sceneIndexes.join(", ")})...`
+    );
+    try {
+      await rerenderCreateScenes(resolvedWorkflowJobId, sceneIndexes);
+      setSavedMessage(
+        isKorean
+          ? `선택한 씬(${sceneIndexes.join(", ")}) 재렌더가 완료되었습니다.`
+          : `Selected scene re-render finished (${sceneIndexes.join(", ")}).`
+      );
+    } finally {
+      setCreatePipelineBusy(false);
+    }
+  };
+
+  const handleRefreshCreateAssets = async () => {
+    setSavedMessage("");
+    setManualCreateError("");
+    if (!resolvedWorkflowJobId) {
+      setManualCreateError(
+        isKorean
+          ? "자산 재검색을 실행하려면 작업 ID가 필요합니다."
+          : "A workflow job id is required to refresh assets."
+      );
+      return;
+    }
+
+    const sceneIndexes = Array.from(
+      new Set(
+        createRerenderSceneIndexes
+          .split(",")
+          .map((value) => Number.parseInt(value.trim(), 10))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    ).sort((a, b) => a - b);
+
+    if (sceneIndexes.length === 0) {
+      setManualCreateError(
+        isKorean
+          ? "씬 번호를 입력해 주세요. 예: 1,3"
+          : "Enter scene indexes first, e.g. 1,3."
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        isKorean
+          ? `선택 씬(${sceneIndexes.join(", ")}) 자산만 재검색할까요?`
+          : `Refresh assets for selected scenes (${sceneIndexes.join(", ")})?`
+      )
+    ) {
+      setSavedMessage(
+        isKorean ? "자산 재검색이 취소되었습니다." : "Asset refresh was canceled."
+      );
+      return;
+    }
+
+    setCreatePipelineBusy(true);
+    try {
+      await refreshCreateAssets(resolvedWorkflowJobId, sceneIndexes);
+      setSavedMessage(
+        isKorean
+          ? `선택 씬(${sceneIndexes.join(", ")}) 자산 재검색을 완료했습니다.`
+          : `Asset refresh finished for scenes (${sceneIndexes.join(", ")}).`
+      );
+    } finally {
+      setCreatePipelineBusy(false);
+    }
+  };
+
+  const handleRefreshCreateVoiceover = async () => {
+    setSavedMessage("");
+    setManualCreateError("");
+    if (!resolvedWorkflowJobId) {
+      setManualCreateError(
+        isKorean
+          ? "더빙 재생성을 실행하려면 작업 ID가 필요합니다."
+          : "A workflow job id is required to refresh voiceover."
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        isKorean
+          ? "더빙을 다시 생성할까요? (TTS 재호출)"
+          : "Re-generate voiceover now? (calls TTS again)"
+      )
+    ) {
+      setSavedMessage(
+        isKorean ? "더빙 재생성이 취소되었습니다." : "Voiceover refresh was canceled."
+      );
+      return;
+    }
+
+    setCreatePipelineBusy(true);
+    try {
+      await refreshCreateVoiceover(resolvedWorkflowJobId);
+      setSavedMessage(
+        isKorean ? "더빙 재생성을 완료했습니다." : "Voiceover refresh finished."
+      );
+    } finally {
+      setCreatePipelineBusy(false);
+    }
+  };
+
+  const handleRefreshCreateSubtitles = async () => {
+    setSavedMessage("");
+    setManualCreateError("");
+    if (!resolvedWorkflowJobId) {
+      setManualCreateError(
+        isKorean
+          ? "자막 재생성을 실행하려면 작업 ID가 필요합니다."
+          : "A workflow job id is required to refresh subtitles."
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        isKorean
+          ? "자막 파일(SRT/ASS)을 다시 생성할까요?"
+          : "Refresh subtitle files (SRT/ASS) now?"
+      )
+    ) {
+      setSavedMessage(
+        isKorean ? "자막 재생성이 취소되었습니다." : "Subtitle refresh was canceled."
+      );
+      return;
+    }
+
+    setCreatePipelineBusy(true);
+    try {
+      await refreshCreateSubtitles(resolvedWorkflowJobId);
+      setSavedMessage(
+        isKorean ? "자막 재생성을 완료했습니다." : "Subtitle refresh finished."
       );
     } finally {
       setCreatePipelineBusy(false);
@@ -2602,10 +3027,10 @@ export function InstalledPage() {
                             ? "승인 대기 중"
                             : "Waiting for approval",
                     detail:
-                      activePackagePath ??
+                      uploadTargetPackagePath ??
                       (isKorean
-                        ? "패키지를 만들면 여기에 최근 결과 경로가 표시됩니다."
-                        : "The latest package path will appear here."),
+                        ? "패키지 폴더를 선택하면 여기에 표시됩니다."
+                        : "Select a package folder to display it here."),
                     checkpointSummary: summarizeCheckpoint(
                       workflowJobSnapshot?.checkpoints[3],
                       isKorean ? "ko" : "en"
@@ -2684,20 +3109,115 @@ export function InstalledPage() {
                       })
                   }
                 ] as const;
+                const getWorkflowGroupTone = (slots: readonly (typeof slotCards)[number][]) => {
+                  if (slots.some((slot) => slot.status === "error")) {
+                    return "error";
+                  }
+                  if (slots.some((slot) => slot.status === "running")) {
+                    return "running";
+                  }
+                  if (slots.every((slot) => slot.status === "ready")) {
+                    return "ready";
+                  }
+                  if (slots.some((slot) => slot.status === "waiting")) {
+                    return "waiting";
+                  }
+                  return "idle";
+                };
+                const workflowGroups = [
+                  {
+                    id: "planning",
+                    eyebrow: "01-02",
+                    title: isKorean ? "기획 · 스크립트" : "Planning · Script",
+                    description: isKorean
+                      ? "후보를 고르고, 스크립트 초안을 만들고, 승인까지 정리합니다."
+                      : "Collect candidates, draft the script, and approve the story direction.",
+                    summaryItems: [
+                      {
+                        label: isKorean ? "선택 후보" : "Selected topic",
+                        value: slotCards[0].detail
+                      },
+                      {
+                        label: isKorean ? "스크립트 상태" : "Script status",
+                        value: slotCards[1].detail
+                      }
+                    ],
+                    slots: slotCards.filter((slot) => slot.id === "input" || slot.id === "process")
+                  },
+                  {
+                    id: "production",
+                    eyebrow: "03-04",
+                    title: isKorean ? "제작 · 업로드" : "Production · Publish",
+                    description: isKorean
+                      ? "소재를 만들고, 업로드 준비와 게시 결과를 확인합니다."
+                      : "Generate media, prepare the upload, and monitor the publish result.",
+                    summaryItems: [
+                      {
+                        label: isKorean ? "선택 패키지" : "Selected package",
+                        value: slotCards[2].detail
+                      },
+                      {
+                        label: isKorean ? "배포 상태" : "Publish status",
+                        value: slotCards[3].detail
+                      }
+                    ],
+                    slots: slotCards.filter((slot) => slot.id === "create" || slot.id === "output")
+                  }
+                ] as const;
 
                 return (
-                  <div className="workflow-slot-pipeline">
-                    {slotCards.map((slot) => (
+                  <div className="workflow-group-pipeline">
+                    {workflowGroups.map((group) => (
                       <article
-                        key={slot.id}
-                        className={`workflow-slot-card ${getSlotTone(slot.status)}`}
+                        key={group.id}
+                        className={`workflow-group-card ${getWorkflowGroupTone(group.slots)}`}
                       >
-                        <div className="workflow-slot-card-header">
-                          <span className="workflow-slot-step">{slot.step}</span>
-                          <span className={`workflow-slot-status ${getSlotTone(slot.status)}`}>
-                            {slot.statusLabel}
-                          </span>
+                        <div className="workflow-group-header">
+                          <div className="workflow-group-copy">
+                            <span className="eyebrow">{group.eyebrow}</span>
+                            <h3>{group.title}</h3>
+                            <p className="subtle">{group.description}</p>
+                          </div>
+                          <div className="workflow-group-step-pills">
+                            {group.slots.map((slot) => (
+                              <span
+                                key={slot.id}
+                                className={`workflow-slot-status ${getSlotTone(slot.status)}`}
+                              >
+                                {slot.step} {slot.statusLabel}
+                              </span>
+                            ))}
+                          </div>
                         </div>
+                        <div className="workflow-group-summary-grid">
+                          {group.summaryItems.map((item) => (
+                            <div key={item.label} className="workflow-group-summary-item">
+                              <span>{item.label}</span>
+                              <strong>{item.value}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        <details className="workflow-group-details">
+                          <summary className="workflow-group-summary">
+                            <strong>{isKorean ? "상세 보기" : "Show details"}</strong>
+                            <span className="workflow-slot-mode-hint">
+                              {isKorean
+                                ? "각 내부 슬롯의 설정과 상태를 펼쳐서 봅니다."
+                                : "Expand to inspect each underlying slot and its settings."}
+                            </span>
+                          </summary>
+                          <div className="workflow-slot-pipeline workflow-slot-pipeline-grouped">
+                            {group.slots.map((slot) => (
+                              <article
+                                key={slot.id}
+                                className={`workflow-slot-card ${getSlotTone(slot.status)}`}
+                              >
+                                <div className="workflow-slot-card-header">
+                                  <span className="workflow-slot-step">{slot.step}</span>
+                                  <span className={`workflow-slot-status ${getSlotTone(slot.status)}`}>
+                                    {slot.statusLabel}
+                                  </span>
+                                </div>
                         <div className="workflow-slot-mode-row">
                           <button
                             type="button"
@@ -2821,9 +3341,11 @@ export function InstalledPage() {
                           </div>
                         )}
                         {slot.id === "create" &&
-                          ["youtube-material-generator-mcp", "background-subtitle-composer-mcp"].includes(
-                            createModuleId
-                          ) &&
+                          [
+                            "youtube-material-generator-mcp",
+                            "background-subtitle-composer-mcp",
+                            "video-production-mcp"
+                          ].includes(createModuleId) &&
                           (createReadiness?.items?.length || createPipelineWarning) && (
                             <div className="workflow-slot-manual-box">
                               <strong>{isKorean ? "생성 전 확인" : "Before generate"}</strong>
@@ -2927,6 +3449,21 @@ export function InstalledPage() {
                               {isKorean
                                 ? "이 슬롯에서 사용할 생성기 설정과 실행 버튼입니다."
                                 : "Configure and run the generator used for this slot."}
+                            </span>
+                            <div className="workflow-slot-inline-actions">
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => void handleChooseUploadPackageFolder()}
+                              >
+                                {isKorean ? "패키지 폴더 선택" : "Choose package folder"}
+                              </button>
+                            </div>
+                            <span className="workflow-slot-detail">
+                              {uploadTargetPackagePath ??
+                                (isKorean
+                                  ? "아직 선택한 패키지 폴더가 없습니다."
+                                  : "No package folder selected yet.")}
                             </span>
                             <div className="form-grid">{createFields.map(renderCreateField)}</div>
                             {createActions.length > 0 && (
@@ -3410,10 +3947,14 @@ export function InstalledPage() {
                             )}
                           </div>
                         )}
-                        <div className="workflow-slot-preview">
-                          <strong>{isKorean ? "최근 checkpoint" : "Latest checkpoint"}</strong>
-                          <span>{slot.checkpointSummary}</span>
-                        </div>
+                                <div className="workflow-slot-preview">
+                                  <strong>{isKorean ? "최근 checkpoint" : "Latest checkpoint"}</strong>
+                                  <span>{slot.checkpointSummary}</span>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                        </details>
                       </article>
                     ))}
                   </div>
@@ -3487,11 +4028,14 @@ export function InstalledPage() {
                   chooseThumbnailFile: {
                     onClick: () => void handleChooseThumbnailFile()
                   },
+                  chooseUploadPackageFolder: {
+                    onClick: () => void handleChooseUploadPackageFolder()
+                  },
                   uploadLastPackage: {
                     onClick: () => void handleUploadLastPackage(),
                     disabled:
                       !youTubeAuthStatus?.connected ||
-                      !activePackagePath ||
+                      !uploadTargetPackagePath ||
                       !youtubeVideoFilePath.trim()
                   }
                 }}
@@ -3531,7 +4075,9 @@ export function InstalledPage() {
                     tone: "default"
                   },
                   latestPackage: {
-                    value: activePackagePath ?? (isKorean ? "아직 생성되지 않음" : "Not created yet")
+                    value:
+                      uploadTargetPackagePath ??
+                      (isKorean ? "아직 선택되지 않음" : "No package selected")
                   },
                   uploadRequestStatus: {
                     value: youTubeUploadRequest

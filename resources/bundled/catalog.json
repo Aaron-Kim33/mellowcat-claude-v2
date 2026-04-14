@@ -74,6 +74,43 @@
     }
   },
   {
+    "id": "youtube-breakout-crawler-mcp",
+    "slug": "youtube-breakout-crawler-mcp",
+    "name": "YouTube Breakout Crawler",
+    "summary": "Find videos that overperform versus channel subscribers by country, period, ratio, and category.",
+    "description": "Crawls breakout YouTube candidates using view-to-subscriber ratio filters so operators can pick high-momentum topics quickly.",
+    "author": {
+      "id": "mellowcat",
+      "name": "MellowCat",
+      "verified": true
+    },
+    "distribution": {
+      "type": "free",
+      "priceText": "Built-in"
+    },
+    "commerce": {
+      "productUrl": "https://mellowcat.xyz/payment",
+      "checkoutUrl": "https://mellowcat.xyz/payment",
+      "ctaLabel": "Unlock"
+    },
+    "latestVersion": "0.1.0",
+    "compatibility": {
+      "launcherMinVersion": "0.3.15",
+      "os": ["win32", "darwin", "linux"]
+    },
+    "visibility": "public",
+    "tags": ["youtube", "discovery", "breakout", "official"],
+    "publishedAt": "2026-04-11T00:00:00.000Z",
+    "updatedAt": "2026-04-11T00:00:00.000Z",
+    "availability": {
+      "state": "coming_soon",
+      "note": "Built-in runtime contract is available in launcher crawling mode."
+    },
+    "workflow": {
+      "ids": ["shortform-automation-stack", "shortform-telegram-youtube"]
+    }
+  },
+  {
     "id": "shortform-script-mcp",
     "slug": "shortform-script-mcp",
     "name": "Script Writer",

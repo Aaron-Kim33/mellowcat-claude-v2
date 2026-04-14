@@ -1,5 +1,6 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import type {
   AutomationJobSnapshot,
   ShortformScriptCategory,
@@ -7,6 +8,10 @@ import type {
   ShortformScriptDraft,
   TelegramControlStatus
 } from "../../../common/types/automation";
+import type {
+  GeneratedMediaPackageManifest,
+  SceneScriptDocument
+} from "../../../common/types/media-generation";
 import type { TrendCandidate } from "../../../common/types/trend";
 import { PathService } from "../system/path-service";
 import { ProductionPackageService } from "./production-package-service";
@@ -43,6 +48,7 @@ interface TelegramControlStateFile {
 export class TelegramControlService {
   private pollTimer?: NodeJS.Timeout;
   private syncInFlight = false;
+  private readonly debugInstanceId = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
   constructor(
     private readonly workflowConfigService: ShortformWorkflowConfigService,
@@ -56,8 +62,11 @@ export class TelegramControlService {
 
   startPolling(): void {
     if (this.pollTimer) {
+      this.appendDebugLog(`startPolling skipped instance=${this.debugInstanceId} reason=already_started`);
       return;
     }
+
+    this.appendDebugLog(`startPolling started instance=${this.debugInstanceId} pid=${process.pid}`);
 
     this.pollTimer = setInterval(() => {
       if (this.syncInFlight) {
@@ -76,6 +85,7 @@ export class TelegramControlService {
 
   async syncUpdates(): Promise<TelegramControlStatus> {
     if (this.syncInFlight) {
+      this.appendDebugLog(`syncUpdates skipped instance=${this.debugInstanceId} reason=in_flight`);
       return this.getStatus();
     }
 
@@ -90,11 +100,28 @@ export class TelegramControlService {
     }
 
     const state = this.readState();
+    this.appendDebugLog(
+      `syncUpdates start instance=${this.debugInstanceId} pid=${process.pid} offset=${state.updateOffset ?? 0}`
+    );
 
     try {
-      const response = await fetch(
-        `https://api.telegram.org/bot${botToken}/getUpdates?offset=${state.updateOffset ?? 0}&timeout=0`
+      const requestOffset = state.updateOffset ?? 0;
+      const requestUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${requestOffset}&timeout=0&ts=${Date.now()}`;
+      const requestBody = new URLSearchParams({
+        offset: `${requestOffset}`,
+        timeout: "0"
+      });
+      this.appendDebugLog(
+        `getUpdates request instance=${this.debugInstanceId} url=${requestUrl.replace(botToken, "***")} body=${requestBody.toString()}`
       );
+      const response = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Cache-Control": "no-store"
+        },
+        body: requestBody.toString()
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -123,60 +150,95 @@ export class TelegramControlService {
         throw new Error(payload.description ?? "Unknown Telegram API error");
       }
 
+      const resultIds = (payload.result ?? []).map((item) => item.update_id);
+      this.appendDebugLog(
+        `getUpdates response instance=${this.debugInstanceId} count=${resultIds.length} first=${resultIds[0] ?? "none"} last=${resultIds.at(-1) ?? "none"}`
+      );
+
       let nextOffset = state.updateOffset ?? 0;
       let nextState = state;
+      let lastProcessingError: string | undefined;
 
       for (const update of payload.result ?? []) {
-        nextOffset = Math.max(nextOffset, update.update_id + 1);
-        const messageText = update.message?.text?.trim();
-        const callback = update.callback_query;
+        nextOffset = update.update_id + 1;
+        try {
+          const messageText = update.message?.text?.trim();
+          const callback = update.callback_query;
 
-        if (messageText) {
-          if (`${update.message?.chat?.id ?? ""}` !== chatId) {
+          if (messageText) {
+            this.appendDebugLog(`incoming message update_id=${update.update_id} chat_id=${update.message?.chat?.id ?? ""} text=${JSON.stringify(messageText)}`);
+            if (`${update.message?.chat?.id ?? ""}` !== chatId) {
+              continue;
+            }
+
+            nextState = await this.handleTextCommand(
+              botToken,
+              chatId,
+              nextState,
+              messageText
+            );
             continue;
           }
 
-          nextState = await this.handleTextCommand(
+          if (!callback?.data) {
+            continue;
+          }
+
+          this.appendDebugLog(`incoming callback update_id=${update.update_id} chat_id=${callback.message?.chat?.id ?? ""} callback_id=${callback.id} data=${JSON.stringify(callback.data)}`);
+          if (`${callback.message?.chat?.id ?? ""}` !== chatId) {
+            continue;
+          }
+
+          if (nextState.processedCallbackIds?.includes(callback.id)) {
+            continue;
+          }
+
+          nextState = await this.handleCallback(
             botToken,
             chatId,
             nextState,
-            messageText
+            callback.id,
+            callback.data
           );
-          continue;
+        } catch (error) {
+          this.appendDebugLog(
+            `update processing error update_id=${update.update_id} error=${JSON.stringify(
+              error instanceof Error ? error.message : "Unknown Telegram update error."
+            )}`
+          );
+          lastProcessingError =
+            error instanceof Error ? error.message : "Unknown Telegram update error.";
+        } finally {
+          nextState = {
+            ...nextState,
+            updateOffset: nextOffset
+          };
+          this.writeState(nextState);
         }
+      }
 
-        if (!callback?.data) {
-          continue;
-        }
-
-        if (`${callback.message?.chat?.id ?? ""}` !== chatId) {
-          continue;
-        }
-
-        if (nextState.processedCallbackIds?.includes(callback.id)) {
-          continue;
-        }
-
-        nextState = await this.handleCallback(
-          botToken,
-          chatId,
-          nextState,
-          callback.id,
-          callback.data
+      const status = this.toStatus(workflowConfig, nextState);
+      if (lastProcessingError) {
+        this.appendDebugLog(
+          `syncUpdates end instance=${this.debugInstanceId} offset=${nextState.updateOffset ?? 0} status=error error=${JSON.stringify(lastProcessingError)}`
         );
+        return {
+          ...status,
+          state: "error",
+          message: `Telegram sync failed: ${lastProcessingError}`
+        };
       }
 
-      const persistedState = {
-        ...nextState,
-        updateOffset: nextOffset
-      };
-
-      if (nextOffset !== (state.updateOffset ?? 0) || nextState !== state) {
-        this.writeState(persistedState);
-      }
-
-      return this.toStatus(workflowConfig, persistedState);
+      this.appendDebugLog(
+        `syncUpdates end instance=${this.debugInstanceId} offset=${nextState.updateOffset ?? 0} status=ok`
+      );
+      return status;
     } catch (error) {
+      this.appendDebugLog(
+        `syncUpdates fatal instance=${this.debugInstanceId} error=${JSON.stringify(
+          error instanceof Error ? error.message : "Telegram sync failed."
+        )}`
+      );
       return {
         ...this.toStatus(workflowConfig, state),
         state: "error",
@@ -191,10 +253,12 @@ export class TelegramControlService {
   }
 
   async sendMockShortlist(): Promise<TelegramControlStatus> {
+    this.appendDebugLog("sendMockShortlist invoked");
     return this.dispatchTrendShortlist();
   }
 
   private async dispatchTrendShortlist(): Promise<TelegramControlStatus> {
+    this.appendDebugLog("dispatchTrendShortlist invoked");
     const workflowConfig = this.workflowConfigService.get();
     const currentState = this.readState();
     const language = this.resolveTelegramLanguage(workflowConfig, currentState);
@@ -761,8 +825,79 @@ export class TelegramControlService {
       return nextState;
     }
 
-    if (callbackData.startsWith("create:run:")) {
+    if (callbackData.startsWith("create:scene-list:")) {
       const [, , jobId] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const packagePath =
+        nextState.lastPackagePath?.trim() || this.pathService.getAutomationPackagePath(jobId);
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "패키지를 찾을 수 없습니다." : "Package was not found."
+        );
+        return nextState;
+      }
+
+      await this.sendCreateSceneListMessage(botToken, chatId, language, jobId, packagePath);
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko" ? "씬 목록을 보냈습니다." : "Scene list sent."
+      );
+      return nextState;
+    }
+
+    if (callbackData.startsWith("create:scene:")) {
+      const [, , jobId, sceneArg] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const sceneIndex = Number.parseInt(sceneArg ?? "", 10);
+      if (!Number.isFinite(sceneIndex) || sceneIndex <= 0) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "씬 번호를 확인해 주세요." : "Please check the scene index."
+        );
+        return nextState;
+      }
+
+      const packagePath =
+        nextState.lastPackagePath?.trim() || this.pathService.getAutomationPackagePath(jobId);
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "패키지를 찾을 수 없습니다." : "Package was not found."
+        );
+        return nextState;
+      }
+
+      await this.sendCreateSceneDetailMessage(
+        botToken,
+        chatId,
+        language,
+        jobId,
+        packagePath,
+        sceneIndex
+      );
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko" ? `씬 ${sceneIndex} 정보를 보냈습니다.` : `Scene ${sceneIndex} details sent.`
+      );
+      return nextState;
+    }
+
+    if (callbackData.startsWith("create:run:")) {
+      const [, , jobId, approvalStep] = callbackData.split(":");
       if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
         await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
         return nextState;
@@ -773,6 +908,42 @@ export class TelegramControlService {
           botToken,
           callbackId,
           language === "ko" ? "활성 작업이 없습니다." : "No active job was found."
+        );
+        return nextState;
+      }
+
+      if (approvalStep !== "confirm") {
+        const readiness = this.productionPackageService.getCreateReadiness(jobId);
+        const readinessLines = readiness.items.map((item) =>
+          `${item.ok ? "✅" : "⚠️"} ${item.label}: ${item.detail}`
+        );
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          [
+            language === "ko"
+              ? "3번 소재 생성을 시작하기 전 최종 확인이 필요합니다."
+              : "Final confirmation is required before Slot 03 create starts.",
+            "",
+            ...readinessLines,
+            "",
+            language === "ko"
+              ? "아래 확인 버튼을 누르면 실제 생성이 시작됩니다."
+              : "Tap confirm below to actually start generation."
+          ].join("\n"),
+          [
+            [
+              {
+                text: language === "ko" ? "확인 후 생성 시작" : "Confirm and start create",
+                callback_data: `create:run:${jobId}:confirm`
+              }
+            ]
+          ]
+        );
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "확인 버튼을 누르면 생성이 시작됩니다." : "Tap confirm to start create."
         );
         return nextState;
       }
@@ -850,6 +1021,266 @@ export class TelegramControlService {
             : `Slot 03 create failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
         );
       }
+    }
+
+    if (callbackData.startsWith("create:rerender:")) {
+      const [, , jobId, sceneArg = "", approvalStep] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const sceneIndexes = this.parseSceneIndexes(sceneArg);
+      if (sceneIndexes.length === 0) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "씬 번호를 확인해 주세요." : "Please check scene indexes."
+        );
+        return nextState;
+      }
+
+      if (approvalStep !== "confirm") {
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          [
+            language === "ko"
+              ? "선택 씬 재렌더를 시작하기 전 최종 확인이 필요합니다."
+              : "Final confirmation is required before selected-scene re-render.",
+            "",
+            `${language === "ko" ? "대상 씬" : "Target scenes"}: ${sceneIndexes.join(", ")}`,
+            "",
+            language === "ko"
+              ? "확인을 누르면 선택한 씬만 다시 렌더하고 최종 영상을 재합성합니다."
+              : "Press confirm to re-render only selected scenes and compose the final video again."
+          ].join("\n"),
+          [
+            [
+              {
+                text: language === "ko" ? "확인 후 재렌더" : "Confirm re-render",
+                callback_data: `create:rerender:${jobId}:${sceneArg}:confirm`
+              }
+            ]
+          ]
+        );
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "확인 버튼을 눌러 재렌더를 시작하세요." : "Tap confirm to start re-render."
+        );
+        return nextState;
+      }
+
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko"
+          ? `씬 ${sceneIndexes.join(", ")} 재렌더를 시작합니다.`
+          : `Starting re-render for scenes ${sceneIndexes.join(", ")}.`
+      );
+
+      try {
+        const snapshot = await this.productionPackageService.rerenderCreateScenes(
+          jobId,
+          sceneIndexes
+        );
+        const packagePath =
+          snapshot.resolvedPackagePath ?? this.pathService.getAutomationPackagePath(jobId);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `선택 씬 재렌더 완료\n\nScene: ${sceneIndexes.join(", ")}\nPath: ${packagePath}`
+            : `Selected-scene re-render finished.\n\nScenes: ${sceneIndexes.join(", ")}\nPath: ${packagePath}`
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `선택 씬 재렌더 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Selected-scene re-render failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return nextState;
+    }
+
+    if (callbackData.startsWith("create:refresh-assets:")) {
+      const [, , jobId, sceneArg = "", approvalStep] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      const sceneIndexes = this.parseSceneIndexes(sceneArg);
+      if (sceneIndexes.length === 0) {
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "씬 번호를 확인해 주세요." : "Please check scene indexes."
+        );
+        return nextState;
+      }
+
+      if (approvalStep !== "confirm") {
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          [
+            language === "ko"
+              ? "선택 씬의 자산 재검색을 시작하기 전 최종 확인이 필요합니다."
+              : "Final confirmation is required before selected-scene asset refresh.",
+            "",
+            `${language === "ko" ? "대상 씬" : "Target scenes"}: ${sceneIndexes.join(", ")}`
+          ].join("\n"),
+          [[
+            {
+              text: language === "ko" ? "확인 후 자산 재검색" : "Confirm asset refresh",
+              callback_data: `create:refresh-assets:${jobId}:${sceneArg}:confirm`
+            }
+          ]]
+        );
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "확인 버튼을 눌러 진행하세요." : "Tap confirm to continue."
+        );
+        return nextState;
+      }
+
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko"
+          ? `씬 ${sceneIndexes.join(", ")} 자산 재검색을 시작합니다.`
+          : `Starting asset refresh for scenes ${sceneIndexes.join(", ")}.`
+      );
+      try {
+        await this.productionPackageService.refreshCreateAssets(jobId, sceneIndexes);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `자산 재검색 완료\n\nScene: ${sceneIndexes.join(", ")}`
+            : `Asset refresh finished.\n\nScenes: ${sceneIndexes.join(", ")}`
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `자산 재검색 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Asset refresh failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return nextState;
+    }
+
+    if (callbackData.startsWith("create:refresh-voice:")) {
+      const [, , jobId, approvalStep] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      if (approvalStep !== "confirm") {
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "더빙을 다시 생성할까요? (음성/TTS 재호출)"
+            : "Re-generate voiceover now? (calls TTS again)",
+          [[
+            {
+              text: language === "ko" ? "확인 후 더빙 재생성" : "Confirm voice refresh",
+              callback_data: `create:refresh-voice:${jobId}:confirm`
+            }
+          ]]
+        );
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "확인 버튼을 눌러 진행하세요." : "Tap confirm to continue."
+        );
+        return nextState;
+      }
+
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko" ? "더빙 재생성을 시작합니다." : "Starting voiceover refresh."
+      );
+      try {
+        await this.productionPackageService.refreshCreateVoiceover(jobId);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko" ? "더빙 재생성을 완료했습니다." : "Voiceover refresh finished."
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `더빙 재생성 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Voiceover refresh failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return nextState;
+    }
+
+    if (callbackData.startsWith("create:refresh-subtitles:")) {
+      const [, , jobId, approvalStep] = callbackData.split(":");
+      if (nextState.activeJob?.id && nextState.activeJob.id !== jobId) {
+        await this.answerCallbackQuery(botToken, callbackId, this.t(language, "reviewInactive"));
+        return nextState;
+      }
+
+      if (approvalStep !== "confirm") {
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "자막 파일(SRT/ASS)을 다시 생성할까요?"
+            : "Refresh subtitle files (SRT/ASS) now?",
+          [[
+            {
+              text: language === "ko" ? "확인 후 자막 재생성" : "Confirm subtitle refresh",
+              callback_data: `create:refresh-subtitles:${jobId}:confirm`
+            }
+          ]]
+        );
+        await this.answerCallbackQuery(
+          botToken,
+          callbackId,
+          language === "ko" ? "확인 버튼을 눌러 진행하세요." : "Tap confirm to continue."
+        );
+        return nextState;
+      }
+
+      await this.answerCallbackQuery(
+        botToken,
+        callbackId,
+        language === "ko" ? "자막 재생성을 시작합니다." : "Starting subtitle refresh."
+      );
+      try {
+        await this.productionPackageService.refreshCreateSubtitles(jobId);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko" ? "자막 재생성을 완료했습니다." : "Subtitle refresh finished."
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `자막 재생성 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Subtitle refresh failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return nextState;
     }
 
     if (callbackData.startsWith("upload:run:")) {
@@ -992,6 +1423,7 @@ export class TelegramControlService {
     messageText: string
   ): Promise<TelegramControlStateFile> {
     const normalized = messageText.toLowerCase();
+    this.appendDebugLog(`handleTextCommand text=${JSON.stringify(normalized)}`);
     const workflowConfig = this.workflowConfigService.get();
     const language = this.resolveTelegramLanguage(workflowConfig, currentState);
 
@@ -1102,11 +1534,11 @@ export class TelegramControlService {
 
     if (normalized === "/upload_video" || normalized === "/upload_shorts") {
       const publishTarget = normalized === "/upload_shorts" ? "shorts" : "video";
-      const packagePath =
-        currentState.lastPackagePath?.trim() ||
-        currentState.activeJob?.id?.trim()
-          ? this.pathService.getAutomationPackagePath(currentState.activeJob?.id?.trim() ?? "")
-          : undefined;
+      const activeJobId = currentState.activeJob?.id?.trim();
+      const packagePath = this.resolveRecentPackagePath(
+        currentState.lastPackagePath?.trim(),
+        activeJobId
+      );
 
       if (!packagePath || !fs.existsSync(packagePath)) {
         await this.sendTelegramText(
@@ -1118,6 +1550,22 @@ export class TelegramControlService {
         );
         return currentState;
       }
+
+      const packageJobId = path.basename(packagePath);
+      const nextState: TelegramControlStateFile = {
+        ...currentState,
+        lastPackagePath: packagePath,
+        activeJob:
+          currentState.activeJob && currentState.activeJob.id === packageJobId
+            ? currentState.activeJob
+            : {
+                id: packageJobId,
+                title: currentState.activeJob?.title ?? "Latest package",
+                stage: currentState.activeJob?.stage ?? "ready",
+                createdAt: currentState.activeJob?.createdAt ?? new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }
+      };
 
       try {
         this.youTubeAuthService.setPublishTarget(packagePath, publishTarget);
@@ -1142,6 +1590,352 @@ export class TelegramControlService {
             : `Upload failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
         );
       }
+      return nextState;
+    }
+
+    if (normalized === "/create_status") {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      if (!activeJobId) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "활성 작업이 없습니다. 먼저 /shortlist 로 후보를 고르고 승인까지 진행해 주세요."
+            : "No active job found. Start with /shortlist and finish script approval first."
+        );
+        return currentState;
+      }
+
+      const readiness = this.productionPackageService.getCreateReadiness(activeJobId);
+      const readinessLines = readiness.items.map((item) =>
+        `${item.ok ? "✅" : "⚠️"} ${item.label}: ${item.detail}`
+      );
+      await this.sendTelegramText(
+        botToken,
+        chatId,
+        [
+          language === "ko" ? "Slot 03 생성 준비 상태" : "Slot 03 create readiness",
+          "",
+          ...readinessLines,
+          "",
+          readiness.canRun
+            ? language === "ko"
+              ? "준비 완료: /create_run 으로 시작할 수 있습니다."
+              : "Ready: use /create_run to start."
+            : language === "ko"
+              ? "아직 준비가 부족합니다. 위 항목을 먼저 채워주세요."
+              : "Not ready yet. Complete the missing items above."
+        ].join("\n")
+      );
+      return currentState;
+    }
+
+    if (normalized === "/create_run") {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      if (!activeJobId) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "활성 작업이 없습니다. 먼저 /shortlist 후 승인까지 완료해 주세요."
+            : "No active job found. Run /shortlist and finish approval first."
+        );
+        return currentState;
+      }
+
+      await this.sendTelegramActionMessage(
+        botToken,
+        chatId,
+        language === "ko"
+          ? "3번 소재 생성을 시작하려면 아래 버튼을 눌러주세요."
+          : "Tap the button below to start Slot 03 create.",
+        [[
+          {
+            text: language === "ko" ? "3번 소재 생성 실행" : "Run Slot 03 create",
+            callback_data: `create:run:${activeJobId}`
+          }
+        ]]
+      );
+      return currentState;
+    }
+
+    if (normalized === "/create_progress") {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      const packagePath = currentState.lastPackagePath?.trim()
+        || (activeJobId ? this.pathService.getAutomationPackagePath(activeJobId) : undefined);
+
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "확인할 생성 패키지가 없습니다. 먼저 3번 생성을 실행해 주세요."
+            : "No creation package found yet. Run Slot 03 create first."
+        );
+        return currentState;
+      }
+
+      const progressPath = path.join(packagePath, "create-progress.json");
+      if (!fs.existsSync(progressPath)) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `진행 로그 파일이 아직 없습니다.\n\nPath: ${packagePath}`
+            : `No progress log file yet.\n\nPath: ${packagePath}`
+        );
+        return currentState;
+      }
+
+      try {
+        const progress = JSON.parse(
+          fs.readFileSync(progressPath, "utf-8")
+        ) as {
+          stage?: string;
+          status?: string;
+          detail?: string;
+          updatedAt?: string;
+        };
+        const sceneCount = this.resolveSceneCount(packagePath);
+        const rerenderKeyboard =
+          activeJobId && sceneCount > 0
+            ? [
+                ...this.buildRerenderInlineKeyboard(language, activeJobId, sceneCount),
+                [
+                  {
+                    text: language === "ko" ? "씬별 자산 보기" : "View scene assets",
+                    callback_data: `create:scene-list:${activeJobId}`
+                  }
+                ]
+              ]
+            : undefined;
+        await this.sendTelegramActionMessage(
+          botToken,
+          chatId,
+          [
+            language === "ko" ? "Slot 03 생성 진행 상태" : "Slot 03 create progress",
+            "",
+            `${language === "ko" ? "단계" : "Stage"}: ${progress.stage ?? "-"}`,
+            `${language === "ko" ? "상태" : "Status"}: ${progress.status ?? "-"}`,
+            `${language === "ko" ? "상세" : "Detail"}: ${progress.detail ?? "-"}`,
+            `${language === "ko" ? "갱신 시각" : "Updated"}: ${progress.updatedAt ?? "-"}`,
+            `${language === "ko" ? "패키지" : "Package"}: ${packagePath}`,
+            ...(sceneCount > 0
+              ? [
+                  "",
+                  language === "ko"
+                    ? `씬 개수: ${sceneCount} (아래 버튼으로 부분 재렌더 가능)`
+                    : `Scene count: ${sceneCount} (use buttons below for partial re-render)`
+                ]
+              : [])
+          ].join("\n"),
+          rerenderKeyboard
+        );
+      } catch {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "진행 로그를 읽는 중 오류가 발생했습니다."
+            : "Failed to read the progress log."
+        );
+      }
+      return currentState;
+    }
+
+    if (normalized.startsWith("/create_rerender")) {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      if (!activeJobId) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "활성 작업이 없습니다. 먼저 /shortlist 후 승인까지 완료해 주세요."
+            : "No active job found. Run /shortlist and finish approval first."
+        );
+        return currentState;
+      }
+
+      const sceneArg = messageText.replace(/^\/create_rerender/i, "").trim();
+      if (!sceneArg) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "사용법: /create_rerender 1,3\n\n지정한 씬만 다시 렌더하고 최종 영상을 재합성합니다."
+            : "Usage: /create_rerender 1,3\n\nRe-renders selected scenes and composes the final video again."
+        );
+        return currentState;
+      }
+
+      const sceneIndexes = this.parseSceneIndexes(sceneArg);
+      if (sceneIndexes.length === 0) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "씬 번호를 인식하지 못했습니다. 예: /create_rerender 1,3"
+            : "Could not parse scene indexes. Example: /create_rerender 1,3"
+        );
+        return currentState;
+      }
+
+      try {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `선택한 씬(${sceneIndexes.join(", ")})을 재렌더하고 최종 합성을 시작합니다.`
+            : `Starting selected-scene re-render (${sceneIndexes.join(", ")}) and final composition.`
+        );
+        const snapshot = await this.productionPackageService.rerenderCreateScenes(
+          activeJobId,
+          sceneIndexes
+        );
+        const packagePath =
+          snapshot.resolvedPackagePath ?? this.pathService.getAutomationPackagePath(activeJobId);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `선택 씬 재렌더를 완료했습니다.\n\nScene: ${sceneIndexes.join(", ")}\nPath: ${packagePath}`
+            : `Selected-scene re-render finished.\n\nScenes: ${sceneIndexes.join(", ")}\nPath: ${packagePath}`
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `선택 씬 재렌더에 실패했습니다.\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Selected-scene re-render failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return currentState;
+    }
+
+    if (normalized === "/create_scenes") {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      const packagePath = currentState.lastPackagePath?.trim()
+        || (activeJobId ? this.pathService.getAutomationPackagePath(activeJobId) : undefined);
+      if (!activeJobId || !packagePath || !fs.existsSync(packagePath)) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "확인할 생성 패키지가 없습니다. 먼저 3번 생성을 실행해 주세요."
+            : "No creation package found yet. Run Slot 03 create first."
+        );
+        return currentState;
+      }
+
+      await this.sendCreateSceneListMessage(botToken, chatId, language, activeJobId, packagePath);
+      return currentState;
+    }
+
+    if (normalized.startsWith("/create_refresh_assets")) {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      if (!activeJobId) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "활성 작업이 없습니다. 먼저 /shortlist 후 승인까지 완료해 주세요."
+            : "No active job found. Run /shortlist and finish approval first."
+        );
+        return currentState;
+      }
+      const sceneArg = messageText.replace(/^\/create_refresh_assets/i, "").trim();
+      const sceneIndexes = this.parseSceneIndexes(sceneArg);
+      if (sceneIndexes.length === 0) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "사용법: /create_refresh_assets 1,3"
+            : "Usage: /create_refresh_assets 1,3"
+        );
+        return currentState;
+      }
+      try {
+        await this.productionPackageService.refreshCreateAssets(activeJobId, sceneIndexes);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `자산 재검색 완료\n\nScene: ${sceneIndexes.join(", ")}`
+            : `Asset refresh finished.\n\nScenes: ${sceneIndexes.join(", ")}`
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `자산 재검색 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Asset refresh failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return currentState;
+    }
+
+    if (normalized === "/create_refresh_voice") {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      if (!activeJobId) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "활성 작업이 없습니다. 먼저 /shortlist 후 승인까지 완료해 주세요."
+            : "No active job found. Run /shortlist and finish approval first."
+        );
+        return currentState;
+      }
+      try {
+        await this.productionPackageService.refreshCreateVoiceover(activeJobId);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko" ? "더빙 재생성을 완료했습니다." : "Voiceover refresh finished."
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `더빙 재생성 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Voiceover refresh failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
+      return currentState;
+    }
+
+    if (normalized === "/create_refresh_subtitles") {
+      const activeJobId = currentState.activeJob?.id?.trim();
+      if (!activeJobId) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? "활성 작업이 없습니다. 먼저 /shortlist 후 승인까지 완료해 주세요."
+            : "No active job found. Run /shortlist and finish approval first."
+        );
+        return currentState;
+      }
+      try {
+        await this.productionPackageService.refreshCreateSubtitles(activeJobId);
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko" ? "자막 재생성을 완료했습니다." : "Subtitle refresh finished."
+        );
+      } catch (error) {
+        await this.sendTelegramText(
+          botToken,
+          chatId,
+          language === "ko"
+            ? `자막 재생성 실패\n\n${error instanceof Error ? error.message : "알 수 없는 오류"}`
+            : `Subtitle refresh failed.\n\n${error instanceof Error ? error.message : "Unknown error"}`
+        );
+      }
       return currentState;
     }
 
@@ -1155,6 +1949,16 @@ export class TelegramControlService {
           this.t(language, "helpShortlist"),
           this.t(language, "helpMoreGlobal"),
           this.t(language, "helpMoreDomestic"),
+          this.t(language, "helpCreateStatus"),
+          this.t(language, "helpCreateRun"),
+          this.t(language, "helpCreateProgress"),
+          this.t(language, "helpCreateScenes"),
+          this.t(language, "helpCreateRerender"),
+          this.t(language, "helpCreateRefreshAssets"),
+          this.t(language, "helpCreateRefreshVoice"),
+          this.t(language, "helpCreateRefreshSubtitles"),
+          this.t(language, "helpUploadVideo"),
+          this.t(language, "helpUploadShorts"),
           this.t(language, "helpStatus"),
           this.t(language, "helpLang"),
           this.t(language, "helpHelp")
@@ -1180,6 +1984,9 @@ export class TelegramControlService {
     text: string,
     inlineKeyboard?: Array<Array<{ text: string; callback_data: string }>>
   ): Promise<void> {
+    this.appendDebugLog(
+      `sendTelegramActionMessage text=${JSON.stringify(text.slice(0, 120))}${text.length > 120 ? "..." : ""}`
+    );
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: {
@@ -1196,6 +2003,47 @@ export class TelegramControlService {
             }
           : {})
       })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  }
+
+  private async sendTelegramPhotoActionMessage(
+    botToken: string,
+    chatId: string,
+    photo:
+      | { kind: "url"; value: string }
+      | { kind: "buffer"; value: Buffer; filename: string; mimeType: string },
+    caption: string,
+    inlineKeyboard?: Array<Array<{ text: string; callback_data: string }>>
+  ): Promise<void> {
+    const payloadForm = new FormData();
+    payloadForm.append("chat_id", chatId);
+    payloadForm.append("caption", this.clampText(caption, 1000));
+    if (inlineKeyboard) {
+      payloadForm.append(
+        "reply_markup",
+        JSON.stringify({
+          inline_keyboard: inlineKeyboard
+        })
+      );
+    }
+
+    if (photo.kind === "url") {
+      payloadForm.append("photo", photo.value);
+    } else {
+      payloadForm.append(
+        "photo",
+        new Blob([photo.value], { type: photo.mimeType }),
+        photo.filename
+      );
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+      method: "POST",
+      body: payloadForm
     });
 
     if (!response.ok) {
@@ -1463,7 +2311,27 @@ export class TelegramControlService {
 
   private writeState(nextState: TelegramControlStateFile): void {
     const filePath = this.pathService.getAutomationStatePath("telegram-control.json");
-    fs.writeFileSync(filePath, JSON.stringify(nextState, null, 2), "utf-8");
+    const currentState = this.readState();
+    const mergedState: TelegramControlStateFile = {
+      ...currentState,
+      ...nextState,
+      updateOffset: nextState.updateOffset ?? currentState.updateOffset,
+      processedCallbackIds: nextState.processedCallbackIds ?? currentState.processedCallbackIds ?? []
+    };
+    fs.writeFileSync(filePath, JSON.stringify(mergedState, null, 2), "utf-8");
+    this.appendDebugLog(
+      `writeState instance=${this.debugInstanceId} offset=${mergedState.updateOffset ?? 0} job=${mergedState.activeJob?.id ?? ""} stage=${mergedState.activeJob?.stage ?? ""}`
+    );
+  }
+
+  private appendDebugLog(message: string): void {
+    try {
+      const filePath = this.pathService.getAutomationStatePath("telegram-debug.log");
+      const line = `[${new Date().toISOString()}] ${message}${os.EOL}`;
+      fs.appendFileSync(filePath, line, "utf-8");
+    } catch {
+      // Ignore debug logging failures.
+    }
   }
 
   private createJobId(isoDate: string): string {
@@ -1657,6 +2525,465 @@ export class TelegramControlService {
     return "community";
   }
 
+  private parseSceneIndexes(input: string): number[] {
+    return Array.from(
+      new Set(
+        input
+          .split(",")
+          .map((token) => Number.parseInt(token.trim(), 10))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    ).sort((a, b) => a - b);
+  }
+
+  private resolveSceneCount(packagePath: string): number {
+    try {
+      const manifestPath = path.join(packagePath, "asset-manifest.json");
+      if (!fs.existsSync(manifestPath)) {
+        return 0;
+      }
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as {
+        scenes?: Array<unknown>;
+      };
+      return Array.isArray(manifest.scenes) ? manifest.scenes.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private buildRerenderInlineKeyboard(
+    language: "en" | "ko",
+    jobId: string,
+    sceneCount: number
+  ): Array<Array<{ text: string; callback_data: string }>> {
+    const presets: Array<{ label: string; csv: string }> = [];
+    const allScenes = Array.from({ length: sceneCount }, (_value, index) => index + 1);
+    if (sceneCount >= 1) {
+      presets.push({
+        label: language === "ko" ? "씬 1" : "Scene 1",
+        csv: "1"
+      });
+    }
+    if (sceneCount >= 2) {
+      presets.push({
+        label: language === "ko" ? "씬 1,2" : "Scene 1,2",
+        csv: "1,2"
+      });
+    }
+    if (sceneCount >= 3) {
+      presets.push({
+        label: language === "ko" ? "씬 1,2,3" : "Scene 1,2,3",
+        csv: "1,2,3"
+      });
+    }
+    if (sceneCount >= 4) {
+      presets.push({
+        label: language === "ko" ? "씬 3,4" : "Scene 3,4",
+        csv: "3,4"
+      });
+    }
+    presets.push({
+      label: language === "ko" ? "전체 재렌더" : "Re-render all",
+      csv: allScenes.join(",")
+    });
+
+    const rerenderRows = presets.map((preset) => [
+      {
+        text: preset.label,
+        callback_data: `create:rerender:${jobId}:${preset.csv}`
+      }
+    ]);
+    const maintenanceRows: Array<Array<{ text: string; callback_data: string }>> = [];
+    if (sceneCount >= 1) {
+      const assetCsv = sceneCount >= 2 ? "1,2" : "1";
+      maintenanceRows.push([
+        {
+          text: language === "ko" ? `자산 재검색(${assetCsv})` : `Refresh assets (${assetCsv})`,
+          callback_data: `create:refresh-assets:${jobId}:${assetCsv}`
+        }
+      ]);
+    }
+    maintenanceRows.push(
+      [
+        {
+          text: language === "ko" ? "더빙 재생성" : "Refresh voiceover",
+          callback_data: `create:refresh-voice:${jobId}`
+        }
+      ],
+      [
+        {
+          text: language === "ko" ? "자막 재생성" : "Refresh subtitles",
+          callback_data: `create:refresh-subtitles:${jobId}`
+        }
+      ]
+    );
+
+    return [...rerenderRows, ...maintenanceRows];
+  }
+
+  private async sendCreateSceneListMessage(
+    botToken: string,
+    chatId: string,
+    language: "en" | "ko",
+    jobId: string,
+    packagePath: string
+  ): Promise<void> {
+    const manifest = this.readCreateManifest(packagePath);
+    if (!manifest || !Array.isArray(manifest.scenes) || manifest.scenes.length === 0) {
+      await this.sendTelegramText(
+        botToken,
+        chatId,
+        language === "ko"
+          ? "씬 자산 정보를 찾을 수 없습니다. 먼저 3번 생성을 완료해 주세요."
+          : "No scene asset data was found. Complete Slot 03 create first."
+      );
+      return;
+    }
+
+    const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+    for (let index = 0; index < manifest.scenes.length; index += 2) {
+      const left = manifest.scenes[index];
+      const right = manifest.scenes[index + 1];
+      const row: Array<{ text: string; callback_data: string }> = [
+        {
+          text: language === "ko" ? `씬 ${left.sceneIndex}` : `Scene ${left.sceneIndex}`,
+          callback_data: `create:scene:${jobId}:${left.sceneIndex}`
+        }
+      ];
+      if (right) {
+        row.push({
+          text: language === "ko" ? `씬 ${right.sceneIndex}` : `Scene ${right.sceneIndex}`,
+          callback_data: `create:scene:${jobId}:${right.sceneIndex}`
+        });
+      }
+      rows.push(row);
+    }
+
+    await this.sendTelegramActionMessage(
+      botToken,
+      chatId,
+      [
+        language === "ko" ? "씬별 사용 자산" : "Scene assets",
+        `${language === "ko" ? "작업" : "Job"}: ${jobId}`,
+        `${language === "ko" ? "총 씬" : "Total scenes"}: ${manifest.scenes.length}`,
+        "",
+        language === "ko"
+          ? "확인할 씬을 눌러 상세(사용 영상 URL/출처/재검색 버튼)를 보세요."
+          : "Tap a scene to inspect the selected video URL/source and quick actions."
+      ].join("\n"),
+      rows
+    );
+  }
+
+  private async sendCreateSceneDetailMessage(
+    botToken: string,
+    chatId: string,
+    language: "en" | "ko",
+    jobId: string,
+    packagePath: string,
+    sceneIndex: number
+  ): Promise<void> {
+    const manifest = this.readCreateManifest(packagePath);
+    if (!manifest) {
+      await this.sendTelegramText(
+        botToken,
+        chatId,
+        language === "ko"
+          ? "asset-manifest.json을 찾을 수 없습니다."
+          : "asset-manifest.json was not found."
+      );
+      return;
+    }
+    const scene = manifest.scenes.find((item) => item.sceneIndex === sceneIndex);
+    if (!scene) {
+      await this.sendTelegramText(
+        botToken,
+        chatId,
+        language === "ko"
+          ? `씬 ${sceneIndex} 정보를 찾을 수 없습니다.`
+          : `Scene ${sceneIndex} was not found.`
+      );
+      return;
+    }
+
+    const script = this.readSceneScript(packagePath);
+    const scriptScene = script?.scenes?.find((item) => item.sceneNo === sceneIndex);
+    const selectedAsset = scene.selectedAsset;
+    const sourceUrl = selectedAsset?.sourceUrl?.trim();
+    const previewUrl = sourceUrl ? this.clampText(sourceUrl, 220) : "-";
+    const localPath = selectedAsset?.localPath?.trim() || "-";
+    const provider = selectedAsset?.provider ?? "-";
+    const attribution = selectedAsset?.attributionLabel ?? "-";
+    const resolution =
+      selectedAsset?.width && selectedAsset?.height
+        ? `${selectedAsset.width}x${selectedAsset.height}`
+        : "-";
+    const assetDuration =
+      typeof selectedAsset?.durationSec === "number"
+        ? `${selectedAsset.durationSec}s`
+        : "-";
+    const sceneText = scriptScene?.text?.trim() || "-";
+    const searchQuery = scriptScene?.assetSearchQuery?.trim() || "-";
+    const motion = scriptScene?.motion ?? scene.motion ?? "-";
+    const durationSec = scene.trim?.sourceEndSec && scene.trim?.sourceStartSec !== undefined
+      ? Math.max(1, scene.trim.sourceEndSec - scene.trim.sourceStartSec)
+      : undefined;
+    const detailsText = [
+      language === "ko" ? `씬 ${sceneIndex} 상세` : `Scene ${sceneIndex} details`,
+      "",
+      `${language === "ko" ? "검색 키워드" : "Search query"}: ${searchQuery}`,
+      `${language === "ko" ? "모션" : "Motion"}: ${motion}`,
+      `${language === "ko" ? "길이" : "Duration"}: ${durationSec ? `${durationSec}s` : "-"}`,
+      `${language === "ko" ? "자산 공급자" : "Asset provider"}: ${provider}`,
+      `${language === "ko" ? "출처 표시" : "Attribution"}: ${attribution}`,
+      `${language === "ko" ? "해상도" : "Resolution"}: ${resolution}`,
+      `${language === "ko" ? "원본 길이" : "Source duration"}: ${assetDuration}`,
+      `${language === "ko" ? "로컬 파일" : "Local file"}: ${localPath}`,
+      `${language === "ko" ? "원본 URL" : "Source URL"}: ${previewUrl}`,
+      "",
+      `${language === "ko" ? "내레이션" : "Narration"}: ${this.clampText(sceneText, 180)}`
+    ].join("\n");
+    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
+      [
+        {
+          text: language === "ko" ? "이 씬 자산 재검색" : "Refresh this scene asset",
+          callback_data: `create:refresh-assets:${jobId}:${sceneIndex}`
+        }
+      ],
+      [
+        {
+          text: language === "ko" ? "이 씬 재렌더" : "Re-render this scene",
+          callback_data: `create:rerender:${jobId}:${sceneIndex}`
+        }
+      ],
+      [
+        {
+          text: language === "ko" ? "씬 목록으로" : "Back to scene list",
+          callback_data: `create:scene-list:${jobId}`
+        }
+      ]
+    ];
+
+    const decodedDataImage = this.decodeDataImageSource(sourceUrl);
+    const absoluteLocalPath = selectedAsset?.localPath?.trim()
+      ? path.isAbsolute(selectedAsset.localPath)
+        ? selectedAsset.localPath
+        : path.join(packagePath, selectedAsset.localPath)
+      : "";
+
+    try {
+      if (decodedDataImage) {
+        await this.sendTelegramPhotoActionMessage(
+          botToken,
+          chatId,
+          {
+            kind: "buffer",
+            value: decodedDataImage.buffer,
+            filename: `scene-${sceneIndex}.${decodedDataImage.extension}`,
+            mimeType: decodedDataImage.mimeType
+          },
+          detailsText,
+          keyboard
+        );
+        return;
+      }
+
+      if (absoluteLocalPath && fs.existsSync(absoluteLocalPath)) {
+        await this.sendTelegramPhotoActionMessage(
+          botToken,
+          chatId,
+          {
+            kind: "buffer",
+            value: fs.readFileSync(absoluteLocalPath),
+            filename: path.basename(absoluteLocalPath),
+            mimeType: this.resolveMimeTypeFromPath(absoluteLocalPath)
+          },
+          detailsText,
+          keyboard
+        );
+        return;
+      }
+
+      if (sourceUrl && /^https?:\/\//i.test(sourceUrl)) {
+        await this.sendTelegramPhotoActionMessage(
+          botToken,
+          chatId,
+          { kind: "url", value: sourceUrl },
+          detailsText,
+          keyboard
+        );
+        return;
+      }
+    } catch {
+      // Fallback to text message when photo upload/preview fails.
+    }
+
+    await this.sendTelegramActionMessage(
+      botToken,
+      chatId,
+      detailsText,
+      keyboard
+    );
+  }
+
+  private decodeDataImageSource(
+    sourceUrl: string | undefined
+  ): { buffer: Buffer; mimeType: string; extension: string } | undefined {
+    if (!sourceUrl || !sourceUrl.startsWith("data:image/")) {
+      return undefined;
+    }
+
+    const splitIndex = sourceUrl.indexOf(",");
+    if (splitIndex <= 0) {
+      return undefined;
+    }
+
+    const header = sourceUrl.slice(0, splitIndex).toLowerCase();
+    if (!header.includes(";base64")) {
+      return undefined;
+    }
+
+    const mimeMatch = /^data:(image\/[a-z0-9.+-]+);base64$/i.exec(sourceUrl.slice(0, splitIndex));
+    const mimeType = mimeMatch?.[1] ?? "image/png";
+    const encoded = sourceUrl.slice(splitIndex + 1);
+
+    try {
+      const buffer = Buffer.from(encoded, "base64");
+      if (!buffer.length) {
+        return undefined;
+      }
+      return {
+        buffer,
+        mimeType,
+        extension: this.extensionFromMimeType(mimeType)
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private extensionFromMimeType(mimeType: string): string {
+    if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
+      return "jpg";
+    }
+    if (mimeType.includes("webp")) {
+      return "webp";
+    }
+    return "png";
+  }
+
+  private resolveMimeTypeFromPath(filePath: string): string {
+    const extension = path.extname(filePath).toLowerCase();
+    if (extension === ".jpg" || extension === ".jpeg") {
+      return "image/jpeg";
+    }
+    if (extension === ".webp") {
+      return "image/webp";
+    }
+    return "image/png";
+  }
+
+  private readCreateManifest(packagePath: string): GeneratedMediaPackageManifest | undefined {
+    try {
+      const manifestPath = path.join(packagePath, "asset-manifest.json");
+      if (!fs.existsSync(manifestPath)) {
+        return undefined;
+      }
+      return JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as GeneratedMediaPackageManifest;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readSceneScript(packagePath: string): SceneScriptDocument | undefined {
+    try {
+      const sceneScriptPath = path.join(packagePath, "scene-script.json");
+      if (!fs.existsSync(sceneScriptPath)) {
+        return undefined;
+      }
+      return JSON.parse(fs.readFileSync(sceneScriptPath, "utf-8")) as SceneScriptDocument;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private resolveRecentPackagePath(
+    preferredPath?: string,
+    activeJobId?: string
+  ): string | undefined {
+    const preferredCandidates = [
+      preferredPath?.trim(),
+      activeJobId?.trim() ? this.pathService.getAutomationPackagePath(activeJobId.trim()) : undefined
+    ].filter((value): value is string => Boolean(value));
+
+    for (const candidate of preferredCandidates) {
+      if (this.isUploadPackagePath(candidate)) {
+        return candidate;
+      }
+    }
+
+    return this.findLatestUploadPackagePath();
+  }
+
+  private isUploadPackagePath(packagePath: string): boolean {
+    if (!packagePath || !fs.existsSync(packagePath)) {
+      return false;
+    }
+    try {
+      return fs.statSync(packagePath).isDirectory() &&
+        fs.existsSync(path.join(packagePath, "youtube-upload-request.json"));
+    } catch {
+      return false;
+    }
+  }
+
+  private findLatestUploadPackagePath(): string | undefined {
+    const rootPath = this.pathService.getAutomationPackagesRootPath();
+    if (!fs.existsSync(rootPath)) {
+      return undefined;
+    }
+
+    const candidates = fs
+      .readdirSync(rootPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const packagePath = path.join(rootPath, entry.name);
+        const uploadRequestPath = path.join(packagePath, "youtube-upload-request.json");
+        if (!fs.existsSync(uploadRequestPath)) {
+          return null;
+        }
+
+        const markerPaths = [
+          uploadRequestPath,
+          path.join(packagePath, "asset-manifest.json"),
+          path.join(packagePath, "checkpoint-3", "checkpoint.json"),
+          path.join(packagePath, "job.json")
+        ];
+        const latestTouchedAt = markerPaths
+          .map((markerPath) => {
+            try {
+              return fs.existsSync(markerPath) ? fs.statSync(markerPath).mtimeMs : 0;
+            } catch {
+              return 0;
+            }
+          })
+          .reduce((max, current) => Math.max(max, current), 0);
+
+        return { packagePath, latestTouchedAt };
+      })
+      .filter((item): item is { packagePath: string; latestTouchedAt: number } => Boolean(item))
+      .sort((left, right) => right.latestTouchedAt - left.latestTouchedAt);
+
+    return candidates[0]?.packagePath;
+  }
+
+  private clampText(value: string, maxLength: number): string {
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return `${value.slice(0, Math.max(1, maxLength - 3))}...`;
+  }
+
   private t(language: "en" | "ko", key: string): string {
     const ko: Record<string, string> = {
       shortlistTitle: "MellowCat 트렌드 후보",
@@ -1706,6 +3033,14 @@ export class TelegramControlService {
       helpShortlist: "/shortlist - 새 트렌드 후보 보내기",
       helpMoreGlobal: "/more_global - 글로벌 후보 더 보기",
       helpMoreDomestic: "/more_domestic - 국내 커뮤니티 후보 더 보기",
+      helpCreateStatus: "/create_status - 3번 생성 준비 상태 확인",
+      helpCreateRun: "/create_run - 3번 생성 실행 버튼 받기",
+      helpCreateProgress: "/create_progress - 3번 생성 진행 상태 확인",
+      helpCreateScenes: "/create_scenes - 씬별 사용 영상/자산 보기",
+      helpCreateRerender: "/create_rerender 1,3 - 선택 씬만 재렌더 후 재합성",
+      helpCreateRefreshAssets: "/create_refresh_assets 1,3 - 선택 씬 자산만 재검색",
+      helpCreateRefreshVoice: "/create_refresh_voice - 더빙만 재생성",
+      helpCreateRefreshSubtitles: "/create_refresh_subtitles - 자막 파일만 재생성",
       helpUploadVideo: "/upload_video - 최근 패키지를 유튜브 영상으로 업로드",
       helpUploadShorts: "/upload_shorts - 최근 패키지를 유튜브 쇼츠로 업로드",
       helpStatus: "/status - 현재 상태 보기",
@@ -1770,6 +3105,14 @@ export class TelegramControlService {
       helpShortlist: "/shortlist - send a fresh trend shortlist",
       helpMoreGlobal: "/more_global - show more global candidates",
       helpMoreDomestic: "/more_domestic - show more Korean community candidates",
+      helpCreateStatus: "/create_status - check Slot 03 create readiness",
+      helpCreateRun: "/create_run - get the Slot 03 create launch button",
+      helpCreateProgress: "/create_progress - check Slot 03 create progress",
+      helpCreateScenes: "/create_scenes - inspect scene-by-scene selected assets",
+      helpCreateRerender: "/create_rerender 1,3 - re-render selected scenes and re-compose",
+      helpCreateRefreshAssets: "/create_refresh_assets 1,3 - refresh assets for selected scenes",
+      helpCreateRefreshVoice: "/create_refresh_voice - refresh voiceover only",
+      helpCreateRefreshSubtitles: "/create_refresh_subtitles - refresh subtitle files only",
       helpUploadVideo: "/upload_video - upload the latest package as a YouTube video",
       helpUploadShorts: "/upload_shorts - upload the latest package as YouTube Shorts",
       helpStatus: "/status - show the current assistant status",

@@ -6,6 +6,7 @@ artifactName: MellowCat-Claude-${os}-${arch}.${ext}
 files:
   - dist/**
   - package.json
+afterSign: scripts/notarize.cjs
 extraResources:
   - from: mellowcat-vault
     to: mellowcat-vault
@@ -22,7 +23,13 @@ win:
 mac:
   target:
     - dmg
+    - zip
   category: public.app-category.developer-tools
+  type: distribution
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
 nsis:
   oneClick: false
   perMachine: false

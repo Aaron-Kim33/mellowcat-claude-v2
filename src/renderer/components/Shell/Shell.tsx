@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { LauncherPage } from "../../pages/LauncherPage/LauncherPage";
+import { CrawlingPage } from "../../pages/CrawlingPage/CrawlingPage";
+import { GenerationPage } from "../../pages/GenerationPage/GenerationPage";
 import { StorePage } from "../../pages/StorePage/StorePage";
 import { InstalledPage } from "../../pages/InstalledPage/InstalledPage";
 import { SettingsPage } from "../../pages/SettingsPage/SettingsPage";
@@ -8,18 +10,29 @@ import { AboutPage } from "../../pages/AboutPage/AboutPage";
 import { useAppStore } from "../../store/app-store";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 
-type Tab = "launcher" | "store" | "installed" | "settings" | "login" | "about";
+type Tab =
+  | "launcher"
+  | "crawling"
+  | "generation"
+  | "store"
+  | "installed"
+  | "settings"
+  | "login"
+  | "about";
 
 export function Shell() {
   const [tab, setTab] = useState<Tab>("launcher");
   const launcherLanguage = useAppStore((state) => state.settings?.launcherLanguage);
   const authSession = useAppStore((state) => state.authSession);
   const copy = getLauncherCopy(launcherLanguage);
+  const isKorean = launcherLanguage === "ko";
   const tabGroups: Array<{ label: string; items: Array<{ id: Tab; label: string }> }> = [
     {
       label: copy.shell.workspaceLabel,
       items: [
         { id: "launcher", label: copy.shell.tabs.launcher },
+        { id: "crawling", label: isKorean ? "크롤링" : "Crawling" },
+        { id: "generation", label: copy.shell.tabs.generation },
         { id: "store", label: copy.shell.tabs.store },
         { id: "installed", label: copy.shell.tabs.installed },
         { id: "settings", label: copy.shell.tabs.settings }
@@ -77,6 +90,8 @@ export function Shell() {
       </aside>
       <main className="content">
         {tab === "launcher" && <LauncherPage onNavigate={setTab} />}
+        {tab === "crawling" && <CrawlingPage />}
+        {tab === "generation" && <GenerationPage />}
         {tab === "store" && <StorePage />}
         {tab === "installed" && <InstalledPage />}
         {tab === "settings" && <SettingsPage />}

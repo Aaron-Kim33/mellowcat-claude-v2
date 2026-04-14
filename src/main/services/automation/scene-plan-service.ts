@@ -150,12 +150,14 @@ export class ScenePlanService {
     workflowConfig: ReturnType<ShortformWorkflowConfigService["get"]>,
     headline?: string
   ): ScenePlanRequest {
-    const targetDurationSec =
+    const configuredDurationSec =
       typeof workflowConfig.createTargetDurationSec === "number" &&
       Number.isFinite(workflowConfig.createTargetDurationSec) &&
       workflowConfig.createTargetDurationSec > 0
         ? workflowConfig.createTargetDurationSec
-        : 60;
+        : undefined;
+    const adaptiveDurationSec = this.estimateTargetDurationFromNarration(draft.narration);
+    const targetDurationSec = this.resolveTargetDuration(configuredDurationSec, adaptiveDurationSec);
     const minimumSceneCount =
       typeof workflowConfig.createMinimumSceneCount === "number" &&
       Number.isFinite(workflowConfig.createMinimumSceneCount) &&
@@ -181,8 +183,9 @@ export class ScenePlanService {
   }
 
   buildPrompt(request: ScenePlanRequest): string {
+    const isLongform = request.targetDurationSec >= 90;
     return [
-      "You are a scene planner for Korean shortform video production.",
+      "You are a scene planner for Korean video production.",
       "Return strict JSON only.",
       "Analyze the provided Korean script and split it into independent scenes.",
       `Keep the total duration under ${request.targetDurationSec} seconds.`,
@@ -198,7 +201,10 @@ export class ScenePlanService {
       `- keywords (an array of ${request.keywordCountPerScene.min} to ${request.keywordCountPerScene.max} short English keywords)`,
       "- visualIntent (one short English phrase describing the visual direction)",
       "Do not change the meaning of the original script.",
-      "Compress naturally for a 60-second short.",
+      isLongform
+        ? "This is longform mode: preserve context and progression across multiple scenes."
+        : "This is shortform mode: keep pacing compact and punchy.",
+      `Compress naturally for the requested runtime (${request.targetDurationSec} seconds target).`,
       "Timeline must be continuous from 0 seconds with no gaps or overlaps.",
       "Use this JSON schema exactly:",
       SCENE_PLAN_SCHEMA,
@@ -273,6 +279,40 @@ export class ScenePlanService {
     };
   }
 
+  private estimateTargetDurationFromNarration(narration: string): number {
+    const text = narration.replace(/\s+/g, " ").trim();
+    if (!text) {
+      return 60;
+    }
+
+    const charCount = text.replace(/\s+/g, "").length;
+    const sentenceCount = text
+      .split(/(?<=[.!?。！？])\s+|\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean).length;
+
+    const speakingSeconds = Math.ceil(charCount / 5.2);
+    const pauseSeconds = Math.ceil(sentenceCount * 0.45);
+    const estimated = speakingSeconds + pauseSeconds;
+    return Math.max(60, Math.min(1800, estimated));
+  }
+
+  private resolveTargetDuration(configuredDurationSec: number | undefined, adaptiveDurationSec: number): number {
+    if (typeof configuredDurationSec !== "number" || !Number.isFinite(configuredDurationSec)) {
+      return adaptiveDurationSec;
+    }
+
+    const safeConfigured = Math.max(1, Math.min(1800, Math.round(configuredDurationSec)));
+
+    // Legacy configs often persisted `60` for shorts. If narration is clearly long,
+    // auto-expand so longform jobs are not clipped to one minute unintentionally.
+    if (safeConfigured <= 60 && adaptiveDurationSec >= 90) {
+      return adaptiveDurationSec;
+    }
+
+    return safeConfigured;
+  }
+
   private runClaude(executablePath: string, prompt: string): Promise<ScenePlanDocument> {
     return new Promise((resolve, reject) => {
       const child = spawn(
@@ -324,8 +364,8 @@ export class ScenePlanService {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/Aaron-Kim33/mellowcat-claude-v2",
-        "X-Title": "MellowCat Claude"
+        "HTTP-Referer": "https://mellowcat.xyz",
+        "X-Title": "MellowCat Launcher"
       },
       body: JSON.stringify({
         model,

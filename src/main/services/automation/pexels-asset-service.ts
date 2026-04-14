@@ -25,20 +25,31 @@ export class PexelsAssetService {
   async enrichManifestWithPexels(
     manifest: GeneratedMediaPackageManifest,
     scenePlan: ScenePlanDocument,
-    apiKey?: string
+    apiKey?: string,
+    sceneIndexes?: number[],
+    queryOverrides?: Record<number, string>
   ): Promise<GeneratedMediaPackageManifest> {
     if (!apiKey?.trim()) {
       return manifest;
     }
+    const sceneIndexSet =
+      sceneIndexes && sceneIndexes.length > 0 ? new Set(sceneIndexes) : undefined;
 
     const scenes = await Promise.all(
       manifest.scenes.map(async (sceneSelection) => {
+        if (sceneIndexSet && !sceneIndexSet.has(sceneSelection.sceneIndex)) {
+          return sceneSelection;
+        }
         const scene = scenePlan.scenes.find((item) => item.index === sceneSelection.sceneIndex);
         if (!scene) {
           return sceneSelection;
         }
 
-        const selectedAsset = await this.searchBestAsset(scene.keywords, apiKey.trim());
+        const selectedAsset = await this.searchBestAsset(
+          scene.keywords,
+          apiKey.trim(),
+          queryOverrides?.[sceneSelection.sceneIndex]
+        );
         return {
           ...sceneSelection,
           selectedAsset,
@@ -55,9 +66,10 @@ export class PexelsAssetService {
 
   private async searchBestAsset(
     keywords: string[],
-    apiKey: string
+    apiKey: string,
+    queryOverride?: string
   ): Promise<SceneAssetCandidate | undefined> {
-    const query = keywords.filter(Boolean).slice(0, 3).join(" ");
+    const query = queryOverride?.trim() || keywords.filter(Boolean).slice(0, 3).join(" ");
     if (!query) {
       return undefined;
     }

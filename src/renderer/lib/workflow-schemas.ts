@@ -103,6 +103,7 @@ const YOUTUBE_SECTION = {
     }
   ],
   actions: [
+    { id: "chooseUploadPackageFolder", label: "패키지 폴더 선택", tone: "secondary" },
     { id: "chooseVideoFile", label: "영상 파일 선택", tone: "secondary" },
     { id: "chooseThumbnailFile", label: "썸네일 선택", tone: "secondary" }
   ],
@@ -111,7 +112,7 @@ const YOUTUBE_SECTION = {
     { id: "selectedVideoFile", label: "선택된 영상" },
     { id: "selectedThumbnailFile", label: "선택된 썸네일" },
     { id: "uploadRequestStatus", label: "업로드 요청" },
-    { id: "latestPackage", label: "최근 패키지" },
+    { id: "latestPackage", label: "업로드 대상 패키지" },
     { id: "lastUpload", label: "최근 업로드" }
   ]
 } as const;

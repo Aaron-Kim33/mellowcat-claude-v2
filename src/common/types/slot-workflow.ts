@@ -99,12 +99,34 @@ export interface ManualProcessCheckpointPayload {
   reviewNotes?: string;
 }
 
+export interface AutoProcessDraftPayload {
+  jobId: string;
+  selectedCandidateId?: string;
+  scriptCategory?: "horror" | "romance" | "community";
+  ideaStrategy?: "pattern_remix" | "comment_gap" | "series_ip";
+  lengthMode?: "auto" | "shortform" | "longform";
+  draftMode?: "auto_generate" | "manual_polish";
+  sourceDraft?: {
+    headline?: string;
+    summary?: string;
+    titleOptions?: string[];
+    hook?: string;
+    narration?: string;
+    callToAction?: string;
+    operatorMemo?: string;
+  };
+  revisionRequest?: string;
+}
+
 export interface ProcessCheckpointReviewState {
   status?: "pending" | "approved";
   notes?: string;
   selectedTitleIndex?: number;
   selectedTitle?: string;
   scriptCategory?: "horror" | "romance" | "community";
+  ideaStrategy?: "pattern_remix" | "comment_gap" | "series_ip";
+  lengthMode?: "auto" | "shortform" | "longform";
+  draftMode?: "auto_generate" | "manual_polish";
 }
 
 export interface ManualCreateCheckpointPayload {

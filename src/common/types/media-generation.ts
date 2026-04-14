@@ -23,6 +23,47 @@ export interface ScenePlanRequest {
   };
 }
 
+export type SceneScriptCategory = "horror" | "romance" | "community";
+
+export interface SceneScriptItem {
+  sceneNo: number;
+  text: string;
+  fluxPrompt: string;
+  assetSearchQuery?: string;
+  motion: "none" | "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "wipe-transition" | "shake";
+  durationSec: number;
+}
+
+export interface SceneScriptSubtitleStyle {
+  mode: "outline" | "box";
+  fontFamily: string;
+  fontSize: number;
+  outline: number;
+  color: string;
+  outlineColor: string;
+}
+
+export interface SceneScriptVoiceProfile {
+  provider: "elevenlabs" | "azure" | "openai";
+  voiceId?: string;
+  modelId?: string;
+  stability?: number;
+  similarityBoost?: number;
+  style?: number;
+  useSpeakerBoost?: boolean;
+}
+
+export interface SceneScriptDocument {
+  schemaVersion: 1;
+  jobId: string;
+  language: "ko";
+  category: SceneScriptCategory;
+  targetDurationSec: number;
+  scenes: SceneScriptItem[];
+  subtitleStyle: SceneScriptSubtitleStyle;
+  voiceProfile: SceneScriptVoiceProfile;
+}
+
 export interface ScenePlanScene {
   index: number;
   startSec: number;
@@ -42,7 +83,7 @@ export interface ScenePlanDocument {
 }
 
 export interface SceneAssetCandidate {
-  provider: "pexels" | "local" | "manual";
+  provider: "pexels" | "flux" | "local" | "manual";
   assetType: "video" | "image";
   sourceUrl?: string;
   localPath?: string;
@@ -54,6 +95,7 @@ export interface SceneAssetCandidate {
 
 export interface SceneAssetSelection {
   sceneIndex: number;
+  motion?: SceneScriptItem["motion"];
   selectedAsset?: SceneAssetCandidate;
   fallbackUsed?: boolean;
   trim: {
@@ -88,9 +130,20 @@ export interface GeneratedMediaArtifacts {
 export interface GeneratedMediaPackageManifest {
   schemaVersion: 1;
   generatedAt: string;
-  provider: "youtube-material-generator-mcp" | "background-subtitle-composer-mcp";
+  provider:
+    | "youtube-material-generator-mcp"
+    | "background-subtitle-composer-mcp"
+    | "video-production-mcp";
   language: "ko";
   totalDurationSec: number;
+  compositionOptions?: {
+    burnSubtitles?: boolean;
+    videoCrf?: number;
+    videoPreset?: "fast" | "medium" | "slow";
+    speedFactor?: number;
+  };
+  subtitleStyle?: SceneScriptSubtitleStyle;
+  voiceProfile?: SceneScriptVoiceProfile;
   scenes: SceneAssetSelection[];
   voiceoverCues: VoiceoverCue[];
   subtitles: SubtitleCue[];
