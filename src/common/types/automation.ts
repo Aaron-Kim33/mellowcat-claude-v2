@@ -28,6 +28,9 @@ export interface ShortformScriptDraft {
 }
 
 export type ShortformScriptCategory = "horror" | "romance" | "community";
+export type ShortformIdeaStrategy = "pattern_remix" | "comment_gap" | "series_ip";
+export type ScriptLengthMode = "auto" | "shortform" | "longform";
+export type ProcessDraftMode = "auto_generate" | "manual_polish";
 
 export interface ShortformScriptResult {
   source: "claude" | "openrouter" | "openai" | "mock";
@@ -85,6 +88,9 @@ export interface ShortformWorkflowConfig {
   processAiConnection?: WorkflowAiConnectionRef;
   processAiProvider?: WorkflowAiProvider;
   processAiModel?: string;
+  processIdeaStrategy?: ShortformIdeaStrategy;
+  processLengthMode?: ScriptLengthMode;
+  processDraftMode?: ProcessDraftMode;
   createAiConnection?: WorkflowAiConnectionRef;
   createAiProvider?: WorkflowAiProvider;
   createAiModel?: string;
@@ -107,15 +113,25 @@ export interface ShortformWorkflowConfig {
   instagramAccountHandle?: string;
   instagramAccessToken?: string;
   pexelsApiKey?: string;
+  createAssetSource?: "pexels" | "flux";
+  fluxApiKey?: string;
+  fluxApiBaseUrl?: string;
+  fluxModel?: string;
   createBackgroundSourceType?: "preset" | "custom";
+  createSceneStylePresetId?: string;
   createTargetDurationSec?: number;
   createMinimumSceneCount?: number;
   createBackgroundMediaPath?: string;
   createSubtitleTheme?: "clean_dark" | "clean_light" | "story_bold";
+  createVideoSubtitleMode?: "soft" | "hard";
+  createVideoRenderQuality?: "standard" | "high";
+  createRerenderSceneIndexes?: string;
   youtubeChannelLabel?: string;
   youtubePrivacyStatus?: "private" | "unlisted" | "public";
   youtubeCategoryId?: string;
   youtubeAudience?: "not_made_for_kids" | "made_for_kids";
+  youtubeRequireCaptions?: boolean;
+  youtubeDataApiKey?: string;
   youtubeOAuthClientId?: string;
   youtubeOAuthClientSecret?: string;
   youtubeOAuthRedirectPort?: string;

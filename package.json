@@ -1,6 +1,6 @@
 {
   "name": "mellowcat-claude-v2",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "private": true,
   "description": "MellowCat launcher for Claude Code and MCP packages.",
   "author": "Yuncheol Kim <gakphe@gmail.com>",
@@ -17,6 +17,8 @@
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
     "dist": "npm run build && electron-builder --publish always",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish always",
+    "dist:win": "npm run build && electron-builder --win nsis --publish always",
     "dist:dir": "npm run build && electron-builder --dir",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "preview": "vite preview"
@@ -33,6 +35,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@types/node": "^22.13.10",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

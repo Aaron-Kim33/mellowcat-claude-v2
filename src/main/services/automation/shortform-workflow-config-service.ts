@@ -10,6 +10,8 @@ const SECRET_KEYS = [
   "openAiApiKey",
   "telegramBotToken",
   "pexelsApiKey",
+  "fluxApiKey",
+  "youtubeDataApiKey",
   "youtubeOAuthClientSecret",
   "instagramAccessToken"
 ] as const;
@@ -106,10 +108,10 @@ export class ShortformWorkflowConfigService {
       }
     }
 
-    this.currentConfig = {
+    this.currentConfig = this.normalizeConfig({
       ...this.currentConfig,
       ...patch
-    };
+    });
     this.write(this.currentConfig);
     this.currentConfig = this.readMergedConfig();
     return this.currentConfig;
@@ -171,7 +173,7 @@ export class ShortformWorkflowConfigService {
       }
     }
 
-    return merged;
+    return this.normalizeConfig(merged);
   }
 
   private write(config: ShortformWorkflowConfig): void {
@@ -216,6 +218,8 @@ export class ShortformWorkflowConfigService {
       processAiConnection: "connection_1",
       processAiProvider: "openrouter_api",
       processAiModel: "openai/gpt-5.4-mini",
+      processLengthMode: "auto",
+      processDraftMode: "manual_polish",
       createAiConnection: "connection_1",
       createAiProvider: "openrouter_api",
       createAiModel: "openai/gpt-5.4-mini",
@@ -227,10 +231,16 @@ export class ShortformWorkflowConfigService {
       createAiGenerationEnabled: false,
       outputAiGenerationEnabled: false,
       trendWindow: "24h",
-        createTargetDurationSec: 60,
-        createMinimumSceneCount: 3,
-        createBackgroundSourceType: "preset",
-        createSubtitleTheme: "story_bold",
+      createTargetDurationSec: 60,
+      createMinimumSceneCount: 3,
+      createAssetSource: "pexels",
+      fluxApiBaseUrl: "https://openrouter.ai/api/v1",
+      fluxModel: "black-forest-labs/flux.2-pro",
+      createBackgroundSourceType: "preset",
+      createSubtitleTheme: "story_bold",
+      createVideoSubtitleMode: "hard",
+      createVideoRenderQuality: "high",
+      createRerenderSceneIndexes: "",
       scriptProvider: "openrouter_api",
       openRouterModel: "openai/gpt-5.4-mini",
       openAiModel: "gpt-5.4-mini",
@@ -238,11 +248,63 @@ export class ShortformWorkflowConfigService {
       youtubePrivacyStatus: "private",
       youtubeCategoryId: "22",
       youtubeAudience: "not_made_for_kids",
+      youtubeRequireCaptions: false,
       youtubeOAuthRedirectPort: "45123"
     };
   }
 
   private getConfigPath(): string {
     return this.pathService.getAutomationStatePath("shortform-workflow-config.json");
+  }
+
+  private normalizeConfig(config: ShortformWorkflowConfig): ShortformWorkflowConfig {
+    const normalized = { ...config };
+
+    if ((normalized.fluxApiBaseUrl ?? "").trim()) {
+      normalized.fluxApiBaseUrl = this.normalizeFluxBaseUrl(normalized.fluxApiBaseUrl);
+    }
+
+    const normalizedModel = this.normalizeFluxModel(normalized.fluxModel);
+    if (normalizedModel) {
+      normalized.fluxModel = normalizedModel;
+    }
+
+    return normalized;
+  }
+
+  private normalizeFluxBaseUrl(rawBaseUrl?: string): string {
+    const fallback = "https://openrouter.ai/api/v1";
+    const value = rawBaseUrl?.trim();
+    if (!value) {
+      return fallback;
+    }
+
+    const sanitized = value.replace(/\/+$/, "");
+    if (/openrouter\.ai/i.test(sanitized) && !/\/api\/v1$/i.test(sanitized)) {
+      if (/\/api$/i.test(sanitized)) {
+        return `${sanitized}/v1`;
+      }
+      return `${sanitized}/api/v1`;
+    }
+    return sanitized;
+  }
+
+  private normalizeFluxModel(rawModel?: string): string | undefined {
+    const model = rawModel?.trim();
+    if (!model) {
+      return undefined;
+    }
+
+    const normalized = model.toLowerCase();
+    if (
+      normalized === "black-forest-labs/flux.1-schnell" ||
+      normalized === "black-forest-labs/flux.1-schnell:free" ||
+      normalized === "black-forest-labs/flux.1.1-pro" ||
+      normalized === "black-forest-labs/flux-1.1-pro"
+    ) {
+      return "black-forest-labs/flux.2-pro";
+    }
+
+    return model;
   }
 }

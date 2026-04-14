@@ -6,7 +6,9 @@ import { load } from "cheerio";
 import type {
   TrendCandidate,
   TrendDiscoveryRequest,
-  TrendDiscoveryResult
+  TrendDiscoveryResult,
+  YouTubeBreakoutDiscoveryRequest,
+  YouTubeBreakoutDiscoveryResult
 } from "../../../common/types/trend";
 
 type TrendAdapter = {
@@ -35,6 +37,59 @@ type RedditListingResponse = {
         over_18?: boolean;
         is_self?: boolean;
       };
+    }>;
+  };
+};
+
+type YouTubeApiVideosResponse = {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      title?: string;
+      channelId?: string;
+      channelTitle?: string;
+      publishedAt?: string;
+      categoryId?: string;
+      thumbnails?: {
+        maxres?: { url?: string };
+        standard?: { url?: string };
+        high?: { url?: string };
+        medium?: { url?: string };
+        default?: { url?: string };
+      };
+    };
+    statistics?: {
+      viewCount?: string | number;
+      likeCount?: string | number;
+      commentCount?: string | number;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
+};
+
+type YouTubeApiChannelsResponse = {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      title?: string;
+    };
+    statistics?: {
+      subscriberCount?: string | number;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
+};
+
+type YouTubeApiErrorPayload = {
+  error?: {
+    message?: string;
+    errors?: Array<{
+      reason?: string;
+      message?: string;
     }>;
   };
 };
@@ -113,6 +168,304 @@ export class TrendDiscoveryService {
         message: batch.result.message
       }))
     };
+  }
+
+  async discoverYouTubeBreakoutCandidates(
+    request: YouTubeBreakoutDiscoveryRequest,
+    apiKey?: string
+  ): Promise<YouTubeBreakoutDiscoveryResult> {
+    const normalizedCountry = (request.country || "KR").trim().toUpperCase();
+    const normalizedPeriod =
+      request.period === "7d" ? "7d" : request.period === "3d" ? "3d" : "24h";
+    const normalizedRatio = Math.max(1, Number.parseFloat(`${request.breakoutRatioPercent || 0}`) || 120);
+    const normalizedCategory = (request.categoryId || "all").trim() || "all";
+    const requireCaptions = request.requireCaptions === true;
+    const normalizedSubscriberRange = this.normalizeYouTubeSubscriberRange(request.subscriberRange);
+    const subscriberBand = this.resolveSubscriberBand(normalizedSubscriberRange);
+    const normalizedLimit = Math.min(Math.max(request.limit ?? 10, 1), 50);
+    const requestInfo: YouTubeBreakoutDiscoveryResult["request"] = {
+      country: normalizedCountry,
+      period: normalizedPeriod,
+      breakoutRatioPercent: normalizedRatio,
+      categoryId: normalizedCategory,
+      requireCaptions,
+      subscriberRange: normalizedSubscriberRange,
+      limit: normalizedLimit
+    };
+
+    const cutoff = this.resolveYouTubePeriodCutoff(normalizedPeriod);
+    const sourceId = "youtube-data-api-v3";
+    const effectiveApiKey = apiKey?.trim();
+    const fetchSampleSize = 50;
+
+    if (!effectiveApiKey) {
+      return {
+        generatedAt: new Date().toISOString(),
+        request: requestInfo,
+        candidates: this.buildYouTubeBreakoutFallbackCandidatesReadable(requestInfo),
+        sourceDebug: {
+          sourceId,
+          count: 1,
+          status: "fallback",
+          message:
+            "YouTube Data API key is missing. Enter a key in the crawling module and retry."
+        }
+      };
+    }
+
+    try {
+      const videoQuery = new URLSearchParams({
+        part: "snippet,statistics",
+        chart: "mostPopular",
+        regionCode: normalizedCountry,
+        maxResults: String(fetchSampleSize),
+        key: effectiveApiKey
+      });
+      if (normalizedCategory !== "all") {
+        videoQuery.set("videoCategoryId", normalizedCategory);
+      }
+
+      const videosResponse = await fetch(`https://www.googleapis.com/youtube/v3/videos?${videoQuery.toString()}`, {
+        headers: HTML_HEADERS
+      });
+      if (!videosResponse.ok) {
+        throw new Error(
+          await this.extractYouTubeApiError(
+            videosResponse,
+            `YouTube videos HTTP ${videosResponse.status}`
+          )
+        );
+      }
+
+      const videosPayload = (await videosResponse.json()) as YouTubeApiVideosResponse;
+      if (videosPayload.error?.message) {
+        throw new Error(`YouTube videos API: ${videosPayload.error.message}`);
+      }
+      const videos = videosPayload.items ?? [];
+      const channelIds = Array.from(
+        new Set(
+          videos
+            .map((video) => video.snippet?.channelId?.trim())
+            .filter((channelId): channelId is string => Boolean(channelId))
+        )
+      );
+
+      const channelMeta = new Map<string, { subscribers: number; title?: string }>();
+      for (let index = 0; index < channelIds.length; index += 50) {
+        const chunk = channelIds.slice(index, index + 50);
+        const channelQuery = new URLSearchParams({
+          part: "snippet,statistics",
+          id: chunk.join(","),
+          key: effectiveApiKey
+        });
+        const channelsResponse = await fetch(
+          `https://www.googleapis.com/youtube/v3/channels?${channelQuery.toString()}`,
+          { headers: HTML_HEADERS }
+        );
+        if (!channelsResponse.ok) {
+          throw new Error(
+            await this.extractYouTubeApiError(
+              channelsResponse,
+              `YouTube channels HTTP ${channelsResponse.status}`
+            )
+          );
+        }
+        const channelsPayload = (await channelsResponse.json()) as YouTubeApiChannelsResponse;
+        if (channelsPayload.error?.message) {
+          throw new Error(`YouTube channels API: ${channelsPayload.error.message}`);
+        }
+        for (const channel of channelsPayload.items ?? []) {
+          const channelId = channel.id?.trim();
+          if (!channelId) {
+            continue;
+          }
+          channelMeta.set(channelId, {
+            subscribers: this.parseNumericValue(channel.statistics?.subscriberCount),
+            title: channel.snippet?.title?.trim() || undefined
+          });
+        }
+      }
+
+      const rankedCandidates = videos
+        .map((video) => {
+          const videoId = video.id?.trim();
+          const title = video.snippet?.title?.trim();
+          const channelId = video.snippet?.channelId?.trim();
+          if (!videoId || !title || !channelId) {
+            return null;
+          }
+
+          const publishedAtRaw = video.snippet?.publishedAt?.trim();
+          const publishedAt = publishedAtRaw ? new Date(publishedAtRaw) : undefined;
+          const isPublishedAtValid = publishedAt && Number.isFinite(publishedAt.getTime());
+
+          const views = this.parseNumericValue(video.statistics?.viewCount);
+          const comments = this.parseNumericValue(video.statistics?.commentCount);
+          const likes = this.parseNumericValue(video.statistics?.likeCount);
+          const channel = channelMeta.get(channelId);
+          const subscribers = channel?.subscribers ?? 0;
+          if (views <= 0) {
+            return null;
+          }
+
+          const hasSubscriberCount = subscribers > 0;
+          const ratioPercent = hasSubscriberCount ? (views / subscribers) * 100 : 0;
+          if (subscriberBand) {
+            if (!hasSubscriberCount) {
+              return null;
+            }
+            if (subscribers < subscriberBand.min) {
+              return null;
+            }
+            if (typeof subscriberBand.max === "number" && subscribers > subscriberBand.max) {
+              return null;
+            }
+          }
+
+          const channelTitle =
+            channel?.title || video.snippet?.channelTitle?.trim() || "YouTube Channel";
+          const isTopicChannel = /\s-\sTopic$/i.test(channelTitle);
+          if (isTopicChannel) {
+            return null;
+          }
+          const ratioText = `${ratioPercent.toFixed(1)}%`;
+          const publishedAtMs = isPublishedAtValid ? publishedAt.getTime() : null;
+          const recencyBonus =
+            publishedAtMs !== null && publishedAtMs >= cutoff.getTime() ? 8 : 0;
+          const summaryText = hasSubscriberCount
+            ? `Views ${views.toLocaleString()} / Subscribers ${subscribers.toLocaleString()} (${ratioText}) breakout.`
+            : `Views ${views.toLocaleString()} / Subscribers hidden (ratio unavailable).`;
+          const operatorSummaryText = `${title} · ${summaryText}`;
+          const sourceLabel = `${channelTitle} · ${normalizedCountry}`;
+          const fitReasonText = hasSubscriberCount
+            ? `View/subscriber ratio reached ${ratioText}, making it a strong short-form breakout candidate.`
+            : "Subscriber data is hidden, so this was included as a high-view live fallback candidate.";
+          const normalizedOperatorSummary = `${title} - ${summaryText}`;
+          const normalizedSourceLabel = `${channelTitle} - ${normalizedCountry}`;
+
+          const thumbnailUrl =
+            video.snippet?.thumbnails?.maxres?.url?.trim() ||
+            video.snippet?.thumbnails?.standard?.url?.trim() ||
+            video.snippet?.thumbnails?.high?.url?.trim() ||
+            video.snippet?.thumbnails?.medium?.url?.trim() ||
+            video.snippet?.thumbnails?.default?.url?.trim() ||
+            `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+          const candidate = {
+            id: `youtube-breakout-${videoId}`,
+            title,
+            summary: summaryText,
+            operatorSummary: operatorSummaryText,
+            contentAngle: "high view-to-subscriber breakout / reaction-first retell",
+            media: this.buildMediaMetadata([thumbnailUrl]),
+            sourceKind: "youtube" as const,
+            sourceRegion: normalizedCountry === "KR" ? ("domestic" as const) : ("global" as const),
+            sourceLabel: `${channelTitle} · ${normalizedCountry}`,
+            sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+            score: Math.round(
+              Math.min(ratioPercent, 400) * 0.55 +
+                Math.min(comments / 300, 20) +
+                Math.min(likes / 600, 20) +
+                Math.min(views / 200000, 25) +
+                recencyBonus
+            ),
+            metrics: {
+              views,
+              comments,
+              likes,
+              subscribers: hasSubscriberCount ? subscribers : undefined,
+              breakoutRatioPercent: hasSubscriberCount ? Number(ratioPercent.toFixed(2)) : undefined
+            },
+            fitReason: `구독자 대비 조회수 ${ratioText}로 확산력이 높아 숏폼 리프레이밍 후보로 적합합니다.`
+          } as TrendCandidate;
+          candidate.operatorSummary = normalizedOperatorSummary;
+          candidate.sourceLabel = normalizedSourceLabel;
+          candidate.fitReason = fitReasonText;
+          return { candidate, ratioPercent };
+        })
+        .filter(
+          (item): item is { candidate: TrendCandidate; ratioPercent: number } => Boolean(item)
+        )
+        .sort((left, right) => right.candidate.score - left.candidate.score);
+
+      const strictCandidates = rankedCandidates.filter(
+        (item) => item.ratioPercent >= normalizedRatio
+      );
+      const strictCandidateIds = new Set(strictCandidates.map((item) => item.candidate.id));
+      const candidatePool =
+        strictCandidates.length >= normalizedLimit
+          ? strictCandidates
+          : [
+              ...strictCandidates,
+              ...rankedCandidates.filter((item) => !strictCandidateIds.has(item.candidate.id))
+            ];
+      const candidates = await this.applyCaptionAvailabilityFilter(
+        candidatePool,
+        normalizedLimit,
+        requireCaptions,
+        normalizedCountry
+      );
+
+      if (candidates.length > 0) {
+        const usedRelaxedFill = strictCandidates.length < candidates.length;
+        const captionFilterNote = requireCaptions
+          ? ` Caption filter kept ${candidates.length} candidate(s).`
+          : "";
+        return {
+          generatedAt: new Date().toISOString(),
+          request: requestInfo,
+          candidates,
+          sourceDebug: {
+            sourceId,
+            count: candidates.length,
+            status: "ok",
+            message: usedRelaxedFill
+              ? `Live candidates fetched. Ratio filter ${normalizedRatio.toFixed(
+                  0
+                )}% was too strict, so additional ranked videos were included.${captionFilterNote}`
+              : `Live candidates fetched from YouTube Data API v3.${captionFilterNote}`
+          }
+        };
+      }
+      if (requireCaptions) {
+        return {
+          generatedAt: new Date().toISOString(),
+          request: requestInfo,
+          candidates: this.buildYouTubeBreakoutFallbackCandidatesReadable(requestInfo),
+          sourceDebug: {
+            sourceId,
+            count: 1,
+            status: "fallback",
+            message:
+              "Caption-required filter removed all live videos (no manual/ASR captions available)."
+          }
+        };
+      }
+      return {
+        generatedAt: new Date().toISOString(),
+        request: requestInfo,
+        candidates: this.buildYouTubeBreakoutFallbackCandidatesReadable(requestInfo),
+        sourceDebug: {
+          sourceId,
+          count: 1,
+          status: "fallback",
+          message:
+            "No live candidates were parsed from API response. Check API quota/permissions and retry."
+        }
+      };
+    } catch (error) {
+      return {
+        generatedAt: new Date().toISOString(),
+        request: requestInfo,
+        candidates: this.buildYouTubeBreakoutFallbackCandidatesReadable(requestInfo),
+        sourceDebug: {
+          sourceId,
+          count: 1,
+          status: "fallback",
+          message: error instanceof Error ? error.message : "Unknown YouTube breakout error"
+        }
+      };
+    }
   }
 
   private createGlobalRedditAdapter(): TrendAdapter {
@@ -769,6 +1122,293 @@ export class TrendDiscoveryService {
       return "relationship commentary / gender-friction angle / opinion split";
     }
     return "community recap / Korean reaction summary / debate framing";
+  }
+
+  private resolveYouTubePeriodCutoff(period: "24h" | "3d" | "7d"): Date {
+    const now = Date.now();
+    const offsetHours = period === "7d" ? 7 * 24 : period === "3d" ? 3 * 24 : 24;
+    return new Date(now - offsetHours * 60 * 60 * 1000);
+  }
+
+  private normalizeYouTubeSubscriberRange(
+    value: YouTubeBreakoutDiscoveryRequest["subscriberRange"]
+  ):
+    | "all"
+    | "0_10k"
+    | "10k_50k"
+    | "50k_100k"
+    | "100k_200k"
+    | "200k_300k"
+    | "300k_500k"
+    | "500k_plus" {
+    const allowed = new Set([
+      "all",
+      "0_10k",
+      "10k_50k",
+      "50k_100k",
+      "100k_200k",
+      "200k_300k",
+      "300k_500k",
+      "500k_plus"
+    ]);
+    return value && allowed.has(value) ? value : "all";
+  }
+
+  private resolveSubscriberBand(
+    value:
+      | "all"
+      | "0_10k"
+      | "10k_50k"
+      | "50k_100k"
+      | "100k_200k"
+      | "200k_300k"
+      | "300k_500k"
+      | "500k_plus"
+  ): { min: number; max?: number } | undefined {
+    switch (value) {
+      case "0_10k":
+        return { min: 0, max: 10_000 };
+      case "10k_50k":
+        return { min: 10_000, max: 50_000 };
+      case "50k_100k":
+        return { min: 50_000, max: 100_000 };
+      case "100k_200k":
+        return { min: 100_000, max: 200_000 };
+      case "200k_300k":
+        return { min: 200_000, max: 300_000 };
+      case "300k_500k":
+        return { min: 300_000, max: 500_000 };
+      case "500k_plus":
+        return { min: 500_000 };
+      default:
+        return undefined;
+    }
+  }
+
+  private async applyCaptionAvailabilityFilter(
+    candidatePool: Array<{ candidate: TrendCandidate; ratioPercent: number }>,
+    limit: number,
+    requireCaptions: boolean,
+    country: string
+  ): Promise<TrendCandidate[]> {
+    if (!requireCaptions) {
+      return candidatePool.slice(0, limit).map((item) => ({
+        ...item.candidate,
+        captionMode: item.candidate.captionMode ?? "none"
+      }));
+    }
+
+    const preferredLanguage = country === "KR" ? "ko" : "en";
+    const filtered: TrendCandidate[] = [];
+    const maxProbe = Math.min(candidatePool.length, Math.max(limit * 5, limit));
+    for (let index = 0; index < maxProbe; index += 1) {
+      if (filtered.length >= limit) {
+        break;
+      }
+      const candidate = candidatePool[index]?.candidate;
+      if (!candidate?.sourceUrl) {
+        continue;
+      }
+      const videoId = this.extractYouTubeVideoId(candidate.sourceUrl);
+      if (!videoId) {
+        continue;
+      }
+      const captionMode = await this.inspectYouTubeCaptionMode(videoId, preferredLanguage);
+      if (captionMode === "none") {
+        continue;
+      }
+      filtered.push({
+        ...candidate,
+        captionMode
+      });
+    }
+
+    return filtered;
+  }
+
+  private extractYouTubeVideoId(sourceUrl?: string): string | undefined {
+    if (!sourceUrl?.trim()) {
+      return undefined;
+    }
+    try {
+      const parsed = new URL(sourceUrl);
+      const watchId = parsed.searchParams.get("v")?.trim();
+      if (watchId) {
+        return watchId;
+      }
+      if (parsed.hostname.includes("youtu.be")) {
+        const shortId = parsed.pathname.replaceAll("/", "").trim();
+        if (shortId) {
+          return shortId;
+        }
+      }
+      const embedMatch = parsed.pathname.match(/\/embed\/([^/?]+)/);
+      if (embedMatch?.[1]) {
+        return embedMatch[1];
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private async inspectYouTubeCaptionMode(
+    videoId: string,
+    preferredLanguage: "ko" | "en"
+  ): Promise<"manual" | "asr" | "none"> {
+    const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    try {
+      const response = await fetch(watchUrl, {
+        headers: {
+          "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9",
+          ...HTML_HEADERS
+        }
+      });
+      if (!response.ok) {
+        return "none";
+      }
+      const html = await response.text();
+      const jsonText = this.extractYouTubePlayerResponseJson(html);
+      if (!jsonText) {
+        return "none";
+      }
+      const payload = JSON.parse(jsonText) as {
+        captions?: {
+          playerCaptionsTracklistRenderer?: {
+            captionTracks?: Array<{
+              languageCode?: string;
+              kind?: string;
+              vssId?: string;
+            }>;
+          };
+        };
+      };
+      const tracks = payload.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+      if (tracks.length === 0) {
+        return "none";
+      }
+      const languageTracks = tracks.filter((track) => track.languageCode === preferredLanguage);
+      const pool = languageTracks.length > 0 ? languageTracks : tracks;
+      const hasManual = pool.some((track) => !this.isAsrTrack(track));
+      if (hasManual) {
+        return "manual";
+      }
+      const hasAsr = pool.some((track) => this.isAsrTrack(track));
+      if (hasAsr) {
+        return "asr";
+      }
+      return "none";
+    } catch {
+      return "none";
+    }
+  }
+
+  private extractYouTubePlayerResponseJson(html: string): string | undefined {
+    const patterns = [
+      /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*var\s+meta/i,
+      /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*<\/script>/i,
+      /"ytInitialPlayerResponse"\s*:\s*(\{[\s\S]*?\})\s*,\s*"ytInitialData"/i
+    ];
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+    return undefined;
+  }
+
+  private isAsrTrack(track: { kind?: string; vssId?: string }): boolean {
+    return track.kind === "asr" || track.vssId?.includes(".asr") === true;
+  }
+
+  private parseNumericValue(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Math.max(0, Math.floor(value));
+    }
+    if (typeof value === "string") {
+      const normalized = value.replace(/[^0-9.]/g, "");
+      const parsed = Number.parseFloat(normalized);
+      if (Number.isFinite(parsed)) {
+        return Math.max(0, Math.floor(parsed));
+      }
+    }
+    return 0;
+  }
+
+  private async extractYouTubeApiError(
+    response: Response,
+    fallbackMessage: string
+  ): Promise<string> {
+    try {
+      const payload = (await response.json()) as YouTubeApiErrorPayload;
+      const detail =
+        payload.error?.errors?.[0]?.message ??
+        payload.error?.errors?.[0]?.reason ??
+        payload.error?.message;
+      if (detail) {
+        return `${fallbackMessage}: ${detail}`;
+      }
+    } catch {
+      // ignore parse failure and return fallback below
+    }
+    return fallbackMessage;
+  }
+
+  private buildYouTubeBreakoutFallbackCandidatesReadable(
+    request: YouTubeBreakoutDiscoveryResult["request"]
+  ): TrendCandidate[] {
+    const ratioText = `${request.breakoutRatioPercent.toFixed(0)}%`;
+    return [
+      {
+        id: `youtube-breakout-fallback-${request.country.toLowerCase()}-${request.period}`,
+        title: `YouTube breakout sample (${request.country}, ${ratioText}+)`,
+        summary: `Live fetch failed or no videos matched filter. country=${request.country}, period=${request.period}, category=${request.categoryId}.`,
+        operatorSummary: `Fallback sample returned because breakout candidates were unavailable for the configured filter (${ratioText}).`,
+        contentAngle: "youtube breakout fallback / filter sanity check",
+        media: this.buildMediaMetadata(),
+        sourceKind: "youtube",
+        sourceRegion: request.country === "KR" ? "domestic" : "global",
+        sourceLabel: "YouTube Breakout Fallback",
+        sourceUrl: `https://www.youtube.com/feed/trending?gl=${request.country}`,
+        score: 20,
+        metrics: {
+          views: 100000,
+          comments: 500
+        },
+        fitReason:
+          "Fallback candidate for pipeline verification when live YouTube discovery is unavailable."
+      }
+    ];
+  }
+
+  private buildYouTubeBreakoutFallbackCandidates(
+    request: YouTubeBreakoutDiscoveryResult["request"]
+  ): TrendCandidate[] {
+    const ratioText = `${request.breakoutRatioPercent.toFixed(0)}%`;
+    return [
+      {
+        id: `youtube-breakout-fallback-${request.country.toLowerCase()}-${request.period}`,
+        title: `구독자 대비 조회수 ${ratioText} 이상 영상 샘플 (${request.country})`,
+        summary:
+          `라이브 조회가 실패하거나 필터 조건이 강해서 샘플 후보를 표시합니다. 국가=${request.country}, 기간=${request.period}, 카테고리=${request.categoryId}.`,
+        operatorSummary:
+          `구독자 대비 조회수 기준(${ratioText})으로 필터링한 유튜브 후보를 불러오지 못해 fallback 샘플을 반환했습니다.`,
+        contentAngle: "youtube breakout fallback / filter sanity check",
+        media: this.buildMediaMetadata(),
+        sourceKind: "youtube",
+        sourceRegion: request.country === "KR" ? "domestic" : "global",
+        sourceLabel: "YouTube Breakout Fallback",
+        sourceUrl: `https://www.youtube.com/feed/trending?gl=${request.country}`,
+        score: 20,
+        metrics: {
+          views: 100000,
+          comments: 500
+        },
+        fitReason:
+          "필터 파이프라인 검증용 fallback 후보입니다. 실시간 API 연결 시 실제 영상 후보로 대체됩니다."
+      }
+    ];
   }
 
   private slugify(value: string): string {

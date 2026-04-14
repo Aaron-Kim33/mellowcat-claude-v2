@@ -24,12 +24,16 @@ export interface TrendCandidate {
   sourceRegion: TrendSourceRegion;
   sourceLabel: string;
   sourceUrl?: string;
+  captionMode?: "manual" | "asr" | "none";
   score: number;
   metrics?: {
     upvoteRatio?: number;
     upvotes?: number;
     comments?: number;
+    likes?: number;
     views?: number;
+    subscribers?: number;
+    breakoutRatioPercent?: number;
   };
   fitReason: string;
 }
@@ -52,4 +56,79 @@ export interface TrendDiscoveryResult {
     status: "ok" | "fallback" | "error";
     message?: string;
   }>;
+}
+
+export interface YouTubeBreakoutDiscoveryRequest {
+  country: string;
+  period: "24h" | "3d" | "7d";
+  breakoutRatioPercent: number;
+  categoryId: string;
+  requireCaptions?: boolean;
+  subscriberRange?:
+    | "all"
+    | "0_10k"
+    | "10k_50k"
+    | "50k_100k"
+    | "100k_200k"
+    | "200k_300k"
+    | "300k_500k"
+    | "500k_plus";
+  limit?: number;
+}
+
+export interface YouTubeBreakoutDiscoveryResult {
+  generatedAt: string;
+  request: {
+    country: string;
+    period: "24h" | "3d" | "7d";
+    breakoutRatioPercent: number;
+    categoryId: string;
+    requireCaptions: boolean;
+    subscriberRange:
+      | "all"
+      | "0_10k"
+      | "10k_50k"
+      | "50k_100k"
+      | "100k_200k"
+      | "200k_300k"
+      | "300k_500k"
+      | "500k_plus";
+    limit: number;
+  };
+  candidates: TrendCandidate[];
+  sourceDebug: {
+    sourceId: string;
+    count: number;
+    status: "ok" | "fallback" | "error";
+    message?: string;
+  };
+}
+
+export interface YouTubeCandidateAnalysisRequest {
+  title: string;
+  summary?: string;
+  sourceLabel?: string;
+  sourceUrl?: string;
+  views?: number;
+  subscribers?: number;
+  breakoutRatioPercent?: number;
+  comments?: number;
+  likes?: number;
+}
+
+export interface YouTubeCandidateAnalysisResult {
+  source: "claude" | "openrouter" | "openai" | "mock";
+  analysis: string;
+  contextSummary?: string;
+  transcriptEvidence?: string[];
+  contextDebug?: string[];
+  references?: Array<{
+    type: "news" | "wiki" | "community";
+    title: string;
+    url: string;
+    source?: string;
+    publishedAt?: string;
+    snippet?: string;
+  }>;
+  error?: string;
 }
