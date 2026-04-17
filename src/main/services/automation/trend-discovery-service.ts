@@ -106,6 +106,11 @@ const REDDIT_USER_AGENT = "MellowCatTrendDiscovery/0.1";
 const HTML_HEADERS = {
   "User-Agent": REDDIT_USER_AGENT
 };
+const YOUTUBE_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+};
 
 export class TrendDiscoveryService {
   private readonly adapters: TrendAdapter[];
@@ -437,7 +442,7 @@ export class TrendDiscoveryService {
             count: 1,
             status: "fallback",
             message:
-              "Caption-required filter removed all live videos (no manual/ASR captions available)."
+              "Caption-required filter removed all live videos (manual/ASR tracks missing or transcript text unusable)."
           }
         };
       }
@@ -1222,7 +1227,6 @@ export class TrendDiscoveryService {
         captionMode
       });
     }
-
     return filtered;
   }
 
@@ -1252,6 +1256,80 @@ export class TrendDiscoveryService {
     return undefined;
   }
 
+  private async inspectYouTubeCaptionAvailability(
+    videoId: string,
+    preferredLanguage: "ko" | "en"
+  ): Promise<{ mode: "manual" | "asr" | "none"; usable: boolean }> {
+    const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    try {
+      const response = await fetch(watchUrl, {
+        headers: {
+          "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9",
+          ...YOUTUBE_HEADERS
+        }
+      });
+      if (!response.ok) {
+        return { mode: "none", usable: false };
+      }
+      const html = await response.text();
+      const jsonText = this.extractYouTubePlayerResponseJson(html);
+      if (!jsonText) {
+        return { mode: "none", usable: false };
+      }
+      const payload = JSON.parse(jsonText) as {
+        captions?: {
+          playerCaptionsTracklistRenderer?: {
+            captionTracks?: Array<{
+              languageCode?: string;
+              kind?: string;
+              vssId?: string;
+              baseUrl?: string;
+            }>;
+          };
+        };
+      };
+      const tracks = payload.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+      if (tracks.length === 0) {
+        return { mode: "none", usable: false };
+      }
+      const languageTracks = tracks.filter((track) => track.languageCode === preferredLanguage);
+      const pool = languageTracks.length > 0 ? languageTracks : tracks;
+      const manualTrack = pool.find((track) => !this.isAsrTrack(track));
+      const asrTrack = pool.find((track) => this.isAsrTrack(track));
+      const selectedTrack = manualTrack ?? asrTrack;
+      const mode: "manual" | "asr" | "none" =
+        selectedTrack && !this.isAsrTrack(selectedTrack)
+          ? "manual"
+          : selectedTrack && this.isAsrTrack(selectedTrack)
+            ? "asr"
+            : "none";
+      if (!selectedTrack?.baseUrl || mode === "none") {
+        return { mode, usable: false };
+      }
+
+      const captionUrls = this.buildYouTubeCaptionCandidateUrls(selectedTrack.baseUrl);
+      for (const captionUrl of captionUrls) {
+        const captionResponse = await fetch(captionUrl, {
+          headers: this.buildYouTubeCaptionHeaders(preferredLanguage, watchUrl)
+        });
+        if (!captionResponse.ok) {
+          if (captionResponse.status === 429) {
+            break;
+          }
+          continue;
+        }
+        const content = await captionResponse.text();
+        const transcript = this.parseYouTubeCaptionContent(content);
+        if (transcript.length > 0) {
+          return { mode, usable: true };
+        }
+      }
+      return { mode, usable: false };
+    } catch {
+      return { mode: "none", usable: false };
+    }
+  }
+
   private async inspectYouTubeCaptionMode(
     videoId: string,
     preferredLanguage: "ko" | "en"
@@ -1261,7 +1339,7 @@ export class TrendDiscoveryService {
       const response = await fetch(watchUrl, {
         headers: {
           "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9",
-          ...HTML_HEADERS
+          ...YOUTUBE_HEADERS
         }
       });
       if (!response.ok) {
@@ -1279,6 +1357,7 @@ export class TrendDiscoveryService {
               languageCode?: string;
               kind?: string;
               vssId?: string;
+              baseUrl?: string;
             }>;
           };
         };
@@ -1289,12 +1368,12 @@ export class TrendDiscoveryService {
       }
       const languageTracks = tracks.filter((track) => track.languageCode === preferredLanguage);
       const pool = languageTracks.length > 0 ? languageTracks : tracks;
-      const hasManual = pool.some((track) => !this.isAsrTrack(track));
-      if (hasManual) {
+      const manualTrack = pool.find((track) => !this.isAsrTrack(track));
+      if (manualTrack) {
         return "manual";
       }
-      const hasAsr = pool.some((track) => this.isAsrTrack(track));
-      if (hasAsr) {
+      const asrTrack = pool.find((track) => this.isAsrTrack(track));
+      if (asrTrack) {
         return "asr";
       }
       return "none";
@@ -1304,6 +1383,48 @@ export class TrendDiscoveryService {
   }
 
   private extractYouTubePlayerResponseJson(html: string): string | undefined {
+    const marker = "ytInitialPlayerResponse";
+    const markerIndex = html.indexOf(marker);
+    if (markerIndex >= 0) {
+      const start = html.indexOf("{", markerIndex);
+      if (start >= 0) {
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+        for (let index = start; index < html.length; index += 1) {
+          const char = html[index];
+          if (inString) {
+            if (escaped) {
+              escaped = false;
+              continue;
+            }
+            if (char === "\\") {
+              escaped = true;
+              continue;
+            }
+            if (char === "\"") {
+              inString = false;
+            }
+            continue;
+          }
+          if (char === "\"") {
+            inString = true;
+            continue;
+          }
+          if (char === "{") {
+            depth += 1;
+            continue;
+          }
+          if (char === "}") {
+            depth -= 1;
+            if (depth === 0) {
+              return html.slice(start, index + 1);
+            }
+          }
+        }
+      }
+    }
+
     const patterns = [
       /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*var\s+meta/i,
       /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*<\/script>/i,
@@ -1320,6 +1441,112 @@ export class TrendDiscoveryService {
 
   private isAsrTrack(track: { kind?: string; vssId?: string }): boolean {
     return track.kind === "asr" || track.vssId?.includes(".asr") === true;
+  }
+
+  private parseYouTubeCaptionXml(xml: string): string {
+    const lines: string[] = [];
+    const textMatches = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/gi)];
+    const paragraphMatches = [...xml.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)];
+    const rawChunks = [...textMatches, ...paragraphMatches].map((match) => match[1] ?? "");
+
+    for (const chunk of rawChunks) {
+      const normalized = this.decodeHtmlEntities(chunk)
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (normalized) {
+        lines.push(normalized);
+      }
+      if (lines.length >= 200) {
+        break;
+      }
+    }
+
+    return lines.join(" ").trim();
+  }
+
+  private parseYouTubeCaptionVtt(vtt: string): string {
+    const lines = vtt
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => !line.startsWith("WEBVTT"))
+      .filter((line) => !line.startsWith("NOTE"))
+      .filter((line) => !/^\d+$/.test(line))
+      .filter((line) => !/^\d{1,2}:\d{2}(?::\d{2})?\.\d{3}\s+-->\s+\d{1,2}:\d{2}(?::\d{2})?\.\d{3}/.test(line))
+      .map((line) => line.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      .filter((line) => line.length > 0);
+    return lines.join(" ").trim();
+  }
+
+  private parseYouTubeCaptionContent(content: string): string {
+    const xml = this.parseYouTubeCaptionXml(content);
+    if (xml.length > 0) {
+      return xml;
+    }
+    return this.parseYouTubeCaptionVtt(content);
+  }
+
+  private decodeHtmlEntities(value: string): string {
+    return value
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_, code) => {
+        const parsed = Number.parseInt(code, 10);
+        return Number.isFinite(parsed) ? String.fromCharCode(parsed) : "";
+      })
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => {
+        const parsed = Number.parseInt(code, 16);
+        return Number.isFinite(parsed) ? String.fromCharCode(parsed) : "";
+      });
+  }
+
+  private ensureYouTubeCaptionSrv3Url(baseUrl: string): string {
+    try {
+      const parsed = new URL(baseUrl);
+      parsed.searchParams.set("fmt", "srv3");
+      return parsed.toString();
+    } catch {
+      if (baseUrl.includes("fmt=")) {
+        return baseUrl.replace(/([?&])fmt=[^&]*/i, "$1fmt=srv3");
+      }
+      return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=srv3`;
+    }
+  }
+
+  private ensureYouTubeCaptionVttUrl(baseUrl: string): string {
+    try {
+      const parsed = new URL(baseUrl);
+      parsed.searchParams.set("fmt", "vtt");
+      return parsed.toString();
+    } catch {
+      if (baseUrl.includes("fmt=")) {
+        return baseUrl.replace(/([?&])fmt=[^&]*/i, "$1fmt=vtt");
+      }
+      return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=vtt`;
+    }
+  }
+
+  private buildYouTubeCaptionCandidateUrls(baseUrl: string): string[] {
+    const urls = [baseUrl, this.ensureYouTubeCaptionSrv3Url(baseUrl), this.ensureYouTubeCaptionVttUrl(baseUrl)];
+    return Array.from(new Set(urls));
+  }
+
+  private buildYouTubeCaptionHeaders(
+    preferredLanguage: "ko" | "en",
+    watchUrl: string
+  ): Record<string, string> {
+    return {
+      "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "*/*",
+      Referer: watchUrl,
+      Origin: "https://www.youtube.com"
+    };
   }
 
   private parseNumericValue(value: unknown): number {

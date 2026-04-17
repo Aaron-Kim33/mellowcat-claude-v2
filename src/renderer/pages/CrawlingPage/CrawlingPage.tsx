@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { ManualInputCandidateDraft } from "@common/types/slot-workflow";
 import type {
   YouTubeBreakoutDiscoveryResult,
-  YouTubeCandidateAnalysisResult
+  YouTubeCandidateAnalysisResult,
+  YouTubeTranscriptProbeResult
 } from "@common/types/trend";
 import { getMcpRuntimeContract, listMcpRuntimeContracts } from "../../../common/contracts/mcp-contract-registry";
 import { useAppStore } from "../../store/app-store";
@@ -37,6 +38,11 @@ type YouTubePreviewCandidate = {
 type CandidateAnalysisState = {
   status: "idle" | "loading" | "done" | "error";
   result?: YouTubeCandidateAnalysisResult;
+};
+
+type CandidateTranscriptProbeState = {
+  status: "loading" | "done" | "error";
+  result?: YouTubeTranscriptProbeResult;
 };
 
 type ProcessCheckpointPayload = {
@@ -182,6 +188,190 @@ function formatPerformanceRatio(value?: number): string {
   return `x${(value / 100).toFixed(1)}`;
 }
 
+function describeTranscriptEvidenceFailure(
+  contextDebug: string[] | undefined,
+  isKorean: boolean,
+  captionMode?: "manual" | "asr" | "none"
+): string {
+  const transcriptDebug = (contextDebug ?? []).filter((line) => line.startsWith("transcript:"));
+  const detailsPrefix = isKorean ? "사유: " : "Reason: ";
+  const find = (token: string) => transcriptDebug.find((line) => line.includes(token));
+
+  if (find("transcript:skip:no_video_id")) {
+    return isKorean
+      ? `${detailsPrefix}영상 URL에서 videoId를 추출하지 못했습니다.`
+      : `${detailsPrefix}Could not extract videoId from the video URL.`;
+  }
+  if (find("transcript:watch_http_")) {
+    const status = find("transcript:watch_http_")?.split("transcript:watch_http_")[1] ?? "?";
+    return isKorean
+      ? `${detailsPrefix}유튜브 자막 트랙 조회가 실패했습니다. (watch HTTP ${status})`
+      : `${detailsPrefix}Failed to fetch YouTube caption track metadata. (watch HTTP ${status})`;
+  }
+  if (find("transcript:watch_fetch_error:")) {
+    return isKorean
+      ? `${detailsPrefix}유튜브 자막 트랙 조회 중 네트워크 오류가 발생했습니다.`
+      : `${detailsPrefix}Network error while fetching YouTube caption track metadata.`;
+  }
+  if (find("transcript:player_response_missing")) {
+    return isKorean
+      ? `${detailsPrefix}유튜브 페이지에서 자막 메타데이터를 찾지 못했습니다.`
+      : `${detailsPrefix}Caption metadata was missing in the YouTube player response.`;
+  }
+  if (find("transcript:player_parse_error:")) {
+    return isKorean
+      ? `${detailsPrefix}유튜브 플레이어 응답 파싱에 실패했습니다.`
+      : `${detailsPrefix}Failed to parse YouTube player response for captions.`;
+  }
+  if (find("transcript:empty:no_caption_tracks")) {
+    return isKorean
+      ? `${detailsPrefix}원문/ASR 자막 트랙이 없습니다.`
+      : `${detailsPrefix}No manual/ASR caption tracks are available.`;
+  }
+  if (find("transcript:empty:no_base_url")) {
+    return isKorean
+      ? `${detailsPrefix}자막 트랙은 있으나 다운로드 URL이 비어 있습니다.`
+      : `${detailsPrefix}Caption track exists, but the download URL is missing.`;
+  }
+  if (find("transcript:http_")) {
+    const status = find("transcript:http_")?.split("transcript:http_")[1] ?? "?";
+    return isKorean
+      ? `${detailsPrefix}자막 원문 다운로드가 실패했습니다. (HTTP ${status})`
+      : `${detailsPrefix}Failed to download caption text. (HTTP ${status})`;
+  }
+  if (find("transcript:fetch_error:")) {
+    return isKorean
+      ? `${detailsPrefix}자막 원문 요청 중 네트워크 오류가 발생했습니다.`
+      : `${detailsPrefix}Network error while fetching caption text.`;
+  }
+  const bodyLogs = transcriptDebug.filter((line) => line.startsWith("transcript:body_"));
+  const isPlayerOnlyTimedtext =
+    bodyLogs.length > 0 && bodyLogs.every((line) => line.startsWith("transcript:body_200:0"));
+  if (isPlayerOnlyTimedtext && find("transcript:empty:caption")) {
+    return isKorean
+      ? `${detailsPrefix}플레이어에서는 자막이 보이지만 timedtext 응답이 비어 있어 인용할 수 없습니다.`
+      : `${detailsPrefix}Captions are visible in player, but timedtext response was empty (player-only caption).`;
+  }
+  if (isPlayerOnlyTimedtext && find("transcript:empty:stt_fallback")) {
+    return isKorean
+      ? `${detailsPrefix}ASR 자막 트랙은 보이지만 timedtext 본문이 비어 있어 인용할 수 없습니다.`
+      : `${detailsPrefix}ASR track is visible, but timedtext body was empty (player-only caption).`;
+  }
+  if (find("transcript:empty:caption")) {
+    return isKorean
+      ? `${detailsPrefix}원문 자막 트랙은 있으나 실제 텍스트가 비어 있습니다.`
+      : `${detailsPrefix}Manual caption track exists, but text content was empty.`;
+  }
+  if (find("transcript:empty:stt_fallback")) {
+    return isKorean
+      ? `${detailsPrefix}ASR 자막 트랙은 있으나 실제 텍스트가 비어 있습니다.`
+      : `${detailsPrefix}ASR caption track exists, but text content was empty.`;
+  }
+  if (find("transcript:ok:")) {
+    return isKorean
+      ? `${detailsPrefix}자막 텍스트는 불러왔지만 인용 기준(짧은 문장/중복 제거)에서 남은 문장이 없었습니다.`
+      : `${detailsPrefix}Transcript was fetched, but no lines survived evidence filtering (short/repeated lines).`;
+  }
+  if (captionMode === "manual") {
+    return isKorean
+      ? `${detailsPrefix}원문 자막 표시가 있었지만 분석 시점에 자막 원문을 안정적으로 가져오지 못했습니다.`
+      : `${detailsPrefix}Manual captions were detected, but analysis could not reliably fetch caption text.`;
+  }
+  if (captionMode === "asr") {
+    return isKorean
+      ? `${detailsPrefix}ASR 자막 표시가 있었지만 분석 시점에 자막 원문을 안정적으로 가져오지 못했습니다.`
+      : `${detailsPrefix}ASR captions were detected, but analysis could not reliably fetch caption text.`;
+  }
+  return isKorean
+    ? `${detailsPrefix}원문/ASR 자막 데이터를 확인하지 못했습니다.`
+    : `${detailsPrefix}Could not verify manual/ASR transcript data.`;
+}
+
+function getTranscriptProbeLabel(
+  probeState: CandidateTranscriptProbeState | undefined,
+  isKorean: boolean
+): { text: string; className: "ready" | "waiting" | "error" } {
+  if (!probeState) {
+    return {
+      text: isKorean ? "인용 확인 대기" : "Evidence check pending",
+      className: "waiting"
+    };
+  }
+  if (probeState.status === "loading") {
+    return {
+      text: isKorean ? "인용 확인 중..." : "Checking evidence...",
+      className: "waiting"
+    };
+  }
+  if (probeState.status === "error") {
+    return {
+      text: isKorean ? "인용 확인 실패" : "Evidence check failed",
+      className: "error"
+    };
+  }
+  if (probeState.result?.ok) {
+    const mode =
+      probeState.result.captionMode === "manual"
+        ? isKorean
+          ? "원문"
+          : "manual"
+        : probeState.result.captionMode === "asr"
+          ? "ASR"
+          : isKorean
+            ? "자막"
+            : "caption";
+    return {
+      text: isKorean
+        ? `${mode} 인용 가능 (${probeState.result.evidenceCount})`
+        : `${mode} evidence ready (${probeState.result.evidenceCount})`,
+      className: "ready"
+    };
+  }
+  return {
+    text: isKorean ? "인용 불가" : "Evidence unavailable",
+    className: "error"
+  };
+}
+
+function getTranscriptProbeReasonText(
+  probeState: CandidateTranscriptProbeState | undefined,
+  isKorean: boolean
+): string | undefined {
+  if (!probeState || probeState.status !== "done" || probeState.result?.ok) {
+    return undefined;
+  }
+  const code = probeState.result.reasonCode;
+  const detail = probeState.result.reasonMessage;
+  if (isKorean && code === "player_only_caption") {
+    return "플레이어 전용 자막으로 감지되어 원문 인용이 불가능합니다.";
+  }
+  if (!isKorean) {
+    return detail;
+  }
+  const map: Record<string, string> = {
+    no_video_id: "영상 URL에서 videoId를 찾지 못했습니다.",
+    no_caption_tracks: "원문/ASR 자막 트랙이 없습니다.",
+    no_base_url: "자막 트랙은 있으나 다운로드 URL이 비어 있습니다.",
+    watch_http_error: "유튜브 자막 메타 조회가 HTTP 오류로 실패했습니다.",
+    watch_fetch_error: "유튜브 자막 메타 조회 중 네트워크 오류가 발생했습니다.",
+    player_response_missing: "유튜브 플레이어 응답에서 자막 정보를 찾지 못했습니다.",
+    player_parse_error: "유튜브 플레이어 응답 파싱에 실패했습니다.",
+    transcript_http_error: "자막 원문 다운로드가 HTTP 오류로 실패했습니다.",
+    transcript_fetch_error: "자막 원문 요청 중 네트워크 오류가 발생했습니다.",
+    transcript_empty: "자막 트랙은 있으나 텍스트가 비어 있습니다.",
+    filtered_out: "자막은 받았지만 짧은/중복 필터 후 인용 문장이 남지 않았습니다.",
+    unknown: "원인을 특정하지 못했습니다. 다시 시도해 주세요."
+  };
+  const base = map[code];
+  if (!base) {
+    return detail;
+  }
+  if (detail && detail !== base) {
+    return `${base} (${detail})`;
+  }
+  return base;
+}
+
 export function CrawlingPage() {
   const {
     installed,
@@ -194,6 +384,7 @@ export function CrawlingPage() {
     sendMockShortlist,
     discoverYouTubeBreakoutCandidates,
     analyzeYouTubeCandidate,
+    probeYouTubeTranscript,
     refreshTelegramStatus,
     refreshWorkflowJobSnapshot,
     refreshCreateReadiness,
@@ -340,6 +531,9 @@ export function CrawlingPage() {
   const [candidateAnalysisById, setCandidateAnalysisById] = useState<
     Record<string, CandidateAnalysisState>
   >({});
+  const [transcriptProbeById, setTranscriptProbeById] = useState<
+    Record<string, CandidateTranscriptProbeState>
+  >({});
   const [analysisViewTab, setAnalysisViewTab] = useState<"analysis" | "evidence">("analysis");
   const [activePreviewCandidateId, setActivePreviewCandidateId] = useState<string>("");
   const [attachments, setAttachments] = useState<Array<{ name: string; path: string }>>([]);
@@ -441,6 +635,18 @@ export function CrawlingPage() {
   const activeCandidateAnalysis = activePreviewCandidate
     ? candidateAnalysisById[activePreviewCandidate.id]
     : undefined;
+  const activeTranscriptProbe = activePreviewCandidate
+    ? transcriptProbeById[activePreviewCandidate.id]
+    : undefined;
+  const activeTranscriptProbeLabel = getTranscriptProbeLabel(activeTranscriptProbe, isKorean);
+  const activeTranscriptProbeReason = getTranscriptProbeReasonText(activeTranscriptProbe, isKorean);
+  const transcriptEvidenceFailureReason = describeTranscriptEvidenceFailure(
+    activeCandidateAnalysis?.result?.contextDebug,
+    isKorean,
+    activePreviewCandidate?.captionMode
+  );
+  const transcriptEvidenceReasonMessage =
+    activeTranscriptProbeReason ?? transcriptEvidenceFailureReason;
   const activeAnalysisReferences = activeCandidateAnalysis?.result?.references ?? [];
   const knowledgeReferences = activeAnalysisReferences
     .filter((reference) => reference.type === "news" || reference.type === "wiki")
@@ -502,10 +708,6 @@ export function CrawlingPage() {
       youtubeCountry: current.youtubeCountry ?? "KR",
       youtubeBreakoutPeriod: current.youtubeBreakoutPeriod ?? "24h",
       youtubeBreakoutRatioPercent: current.youtubeBreakoutRatioPercent ?? "120",
-      youtubeRequireCaptions:
-        current.youtubeRequireCaptions ??
-        (workflowConfig?.youtubeRequireCaptions ? "on" : "off") ??
-        "off",
       youtubeSubscriberRange: current.youtubeSubscriberRange ?? "all",
       youtubeBreakoutLimit:
         current.youtubeBreakoutLimit &&
@@ -518,8 +720,7 @@ export function CrawlingPage() {
     workflowConfig?.telegramAdminChatId,
     workflowConfig?.telegramBotToken,
     workflowConfig?.trendWindow,
-    workflowConfig?.youtubeDataApiKey,
-    workflowConfig?.youtubeRequireCaptions
+    workflowConfig?.youtubeDataApiKey
   ]);
 
   useEffect(() => {
@@ -562,6 +763,57 @@ export function CrawlingPage() {
     }
     setActivePreviewCandidateId(previewCandidates[0].id);
   }, [activePreviewCandidateId, previewCandidates]);
+
+  const runTranscriptProbeForCandidate = async (candidate: YouTubePreviewCandidate) => {
+    const candidateId = candidate.id;
+    const sourceUrl = candidate.sourceUrl?.trim();
+    if (!sourceUrl) {
+      setTranscriptProbeById((current) => ({
+        ...current,
+        [candidateId]: {
+          status: "done",
+          result: {
+            ok: false,
+            captionMode: "none",
+            evidenceCount: 0,
+            reasonCode: "no_video_id",
+            reasonMessage: "videoId could not be extracted from source URL."
+          }
+        }
+      }));
+      return;
+    }
+
+    setTranscriptProbeById((current) => ({
+      ...current,
+      [candidateId]: { status: "loading" }
+    }));
+
+    try {
+      const result = await probeYouTubeTranscript({
+        sourceUrl,
+        language: isKorean ? "ko" : "en"
+      });
+      setTranscriptProbeById((current) => ({
+        ...current,
+        [candidateId]: { status: "done", result }
+      }));
+    } catch {
+      setTranscriptProbeById((current) => ({
+        ...current,
+        [candidateId]: {
+          status: "done",
+          result: {
+            ok: false,
+            captionMode: candidate.captionMode ?? "none",
+            evidenceCount: 0,
+            reasonCode: "transcript_fetch_error",
+            reasonMessage: "Transcript probe timed out or failed."
+          }
+        }
+      }));
+    }
+  };
 
   const isInformationalMessage = (value: string): boolean =>
     value === copy.telegramSaved ||
@@ -904,8 +1156,7 @@ export function CrawlingPage() {
       );
 
       await saveWorkflowConfig({
-        youtubeDataApiKey: fieldValues.youtubeDataApiKey?.trim() || undefined,
-        youtubeRequireCaptions: fieldValues.youtubeRequireCaptions === "on"
+        youtubeDataApiKey: fieldValues.youtubeDataApiKey?.trim() || undefined
       });
 
       const result = await discoverYouTubeBreakoutCandidates({
@@ -928,7 +1179,7 @@ export function CrawlingPage() {
           fieldValues.youtubeSubscriberRange === "500k_plus"
             ? fieldValues.youtubeSubscriberRange
             : "all",
-        requireCaptions: fieldValues.youtubeRequireCaptions === "on",
+        requireCaptions: false,
         limit: breakoutLimit
       });
 
@@ -949,6 +1200,7 @@ export function CrawlingPage() {
       setDiscoveryResult(result);
       setActivePreviewCandidateId(result.candidates[0]?.id ?? "");
       setCandidateAnalysisById({});
+      setTranscriptProbeById({});
       if (mappedCandidates.length > 0) {
         const first = mappedCandidates[0];
         setProcessCandidateId(first.id ?? "");
@@ -1004,6 +1256,8 @@ export function CrawlingPage() {
       setQueuedCandidates([]);
       setDiscoveredCandidates([]);
       setDiscoveryResult(undefined);
+      setCandidateAnalysisById({});
+      setTranscriptProbeById({});
       const savedJobId = useAppStore.getState().workflowJobSnapshot?.job?.jobId;
       if (savedJobId) {
         await refreshWorkflowJobSnapshot(savedJobId);
@@ -1096,7 +1350,9 @@ export function CrawlingPage() {
                 : "form-grid"
             }
           >
-            {selectedInputUi.fields.map((field) => {
+            {selectedInputUi.fields
+              .filter((field) => field.id !== "youtubeRequireCaptions")
+              .map((field) => {
               const className = field.width === "half" ? "field" : "field field-span-2";
               const value = fieldValues[field.id] ?? "";
               const commonProps = {
@@ -1148,21 +1404,6 @@ export function CrawlingPage() {
               );
             })}
           </div>
-          {selectedModuleId === "youtube-breakout-crawler-mcp" ? (
-            <div className="crawling-inline-toggle">
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={fieldValues.youtubeRequireCaptions === "on"}
-                  onChange={(event) =>
-                    setField("youtubeRequireCaptions", event.target.checked ? "on" : "off")
-                  }
-                />
-                <span>{isKorean ? "자막 필수 (원문/ASR 없으면 제외)" : "Require captions (exclude if none)"}</span>
-              </label>
-            </div>
-          ) : null}
-
           {selectedInputUi.actions.length > 0 && (
             <div className="button-row">
               {selectedInputUi.actions.map((action) => (
@@ -1303,6 +1544,13 @@ export function CrawlingPage() {
                               ? "자막 없음"
                               : "No captions"}
                       </span>
+                      <span
+                        className={`workflow-slot-status ${
+                          getTranscriptProbeLabel(transcriptProbeById[candidate.id], isKorean).className
+                        }`}
+                      >
+                        {getTranscriptProbeLabel(transcriptProbeById[candidate.id], isKorean).text}
+                      </span>
                     </div>
                     <div className="youtube-breakout-actions">
                       {candidate.sourceUrl ? (
@@ -1318,6 +1566,24 @@ export function CrawlingPage() {
                       ) : (
                         <span className="subtle">{copy.breakoutNoVideo}</span>
                       )}
+                      <button
+                        type="button"
+                        className="secondary-button slim"
+                        disabled={transcriptProbeById[candidate.id]?.status === "loading"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setActivePreviewCandidateId(candidate.id);
+                          void runTranscriptProbeForCandidate(candidate);
+                        }}
+                      >
+                        {transcriptProbeById[candidate.id]?.status === "loading"
+                          ? isKorean
+                            ? "인용 확인 중..."
+                            : "Checking evidence..."
+                          : isKorean
+                            ? "인용 확인"
+                            : "Check evidence"}
+                      </button>
                       <button
                         type="button"
                         className="secondary-button slim"
@@ -1415,6 +1681,22 @@ export function CrawlingPage() {
                   <button
                     type="button"
                     className="secondary-button slim"
+                    disabled={!activePreviewCandidate || activeTranscriptProbe?.status === "loading"}
+                    onClick={() =>
+                      activePreviewCandidate && void runTranscriptProbeForCandidate(activePreviewCandidate)
+                    }
+                  >
+                    {activeTranscriptProbe?.status === "loading"
+                      ? isKorean
+                        ? "인용 확인 중..."
+                        : "Checking evidence..."
+                      : isKorean
+                        ? "인용 확인"
+                        : "Check evidence"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button slim"
                     disabled={!activePreviewCandidate || activeCandidateAnalysis?.status === "loading"}
                     onClick={() => void handleAnalyzeYouTubeCandidate(activePreviewCandidate)}
                   >
@@ -1422,6 +1704,12 @@ export function CrawlingPage() {
                       ? copy.breakoutAnalyzing
                       : copy.breakoutAnalyze}
                   </button>
+                  <span className={`workflow-slot-status ${activeTranscriptProbeLabel.className}`}>
+                    {activeTranscriptProbeLabel.text}
+                  </span>
+                  {activeTranscriptProbeReason ? (
+                    <p className="subtle">{activeTranscriptProbeReason}</p>
+                  ) : null}
                   {activeCandidateAnalysis ? (
                     <div className="youtube-breakout-analysis-panel">
                       <div className="youtube-breakout-analysis-header">
@@ -1461,12 +1749,13 @@ export function CrawlingPage() {
                                 <li key={`ev-${index}`}>{line}</li>
                               ))}
                             </ul>
-                          ) : (
+                          ) : (<>
                             <p className="subtle">
                               {isKorean
                                 ? "자막 근거를 찾지 못했습니다. (원문/ASR 자막 없음)"
                                 : "No transcript evidence found (manual/ASR captions unavailable)."}
                             </p>
+                            <p className="subtle">{transcriptEvidenceReasonMessage}</p></>
                           )}
                         </div>
                       )}

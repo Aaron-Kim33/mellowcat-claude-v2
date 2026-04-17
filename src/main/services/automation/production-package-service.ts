@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import type {
   AutomationJobSnapshot,
   AutomationJobStage,
@@ -10,7 +11,8 @@ import type {
   GeneratedMediaPackageManifest,
   ScenePlanDocument,
   SceneScriptCategory,
-  SceneScriptDocument
+  SceneScriptDocument,
+  SceneScriptItem
 } from "../../../common/types/media-generation";
 import { getMcpRuntimeContract } from "../../../common/contracts/mcp-contract-registry";
 import type {
@@ -211,7 +213,8 @@ export class ProductionPackageService {
             0
           )
         )
-      )
+      ),
+      cardNews: document.cardNews ? this.normalizeCardNewsOptions(document.cardNews) : undefined
     };
 
     this.fileService.writeJsonFile(path.join(packagePath, "scene-script.json"), normalizedDocument);
@@ -662,12 +665,16 @@ export class ProductionPackageService {
     const workflowConfig = this.workflowConfigService.get();
     const createModuleId = workflowConfig.createModuleId ?? "youtube-material-generator-mcp";
     const useBackgroundComposer = createModuleId === "background-subtitle-composer-mcp";
+    const isCardNewsModule = createModuleId === "card-news-generator-mcp";
     const createAssetSource = useBackgroundComposer
       ? "background"
       : (workflowConfig.createAssetSource ?? "pexels");
+    const effectiveAssetSource = isCardNewsModule ? "flux" : createAssetSource;
     const createProvider =
       createModuleId === "background-subtitle-composer-mcp"
         ? "background-subtitle-composer-mcp"
+        : createModuleId === "card-news-generator-mcp"
+          ? "card-news-generator-mcp"
         : createModuleId === "video-production-mcp"
           ? "video-production-mcp"
           : "youtube-material-generator-mcp";
@@ -731,9 +738,19 @@ export class ProductionPackageService {
       job.id,
       scenePlan,
       scriptCategory as ShortformScriptCategory,
+      createModuleId,
       this.resolveSceneStylePreset(createModuleId, workflowConfig.createSceneStylePresetId)
     );
-    this.fileService.writeJsonFile(path.join(packagePath, "scene-script.json"), sceneScriptDocument);
+    const effectiveSceneScriptDocument = isCardNewsModule
+      ? this.applyCardNewsCoverPrompt(sceneScriptDocument)
+      : sceneScriptDocument;
+    const effectiveCompositionOptions = isCardNewsModule
+      ? {
+          ...videoCompositionOptions,
+          ...this.resolveCardNewsCompositionOptions(effectiveSceneScriptDocument.cardNews)
+        }
+      : videoCompositionOptions;
+    this.fileService.writeJsonFile(path.join(packagePath, "scene-script.json"), effectiveSceneScriptDocument);
 
     this.fileService.writeJsonFile(path.join(packagePath, "package.json"), {
       jobId: job.id,
@@ -763,6 +780,8 @@ export class ProductionPackageService {
         "asset-prompts.md",
         "upload-metadata.json",
         "youtube-upload-request.json",
+        "card-news-manifest.json",
+        "instagram-carousel-request.json",
         "production-checklist.md"
       ]
     });
@@ -842,11 +861,18 @@ export class ProductionPackageService {
       }
     );
     const generatedMediaManifest: GeneratedMediaPackageManifest = this.buildManifestFromSceneScript(
-      sceneScriptDocument,
+      effectiveSceneScriptDocument,
       createProvider,
-      videoCompositionOptions
+      effectiveCompositionOptions
     );
-    const enrichedMediaManifest = useBackgroundComposer
+    const shouldFetchCoverFromProvider = !(
+      isCardNewsModule &&
+      effectiveSceneScriptDocument.cardNews?.coverSource === "manual_upload" &&
+      Boolean(effectiveSceneScriptDocument.cardNews.coverImagePath?.trim())
+    );
+    const targetSceneIndexes =
+      isCardNewsModule && shouldFetchCoverFromProvider ? [1] : undefined;
+    const enrichedMediaManifestBase = useBackgroundComposer
       ? this.enrichManifestWithBackgroundAsset(
           generatedMediaManifest,
           packagePath,
@@ -856,15 +882,15 @@ export class ProductionPackageService {
             scriptCategory
           ).path
         )
-      : createAssetSource === "flux"
+      : effectiveAssetSource === "flux"
         ? await (async () => {
-            if (!workflowConfig.fluxApiKey?.trim()) {
+            if (!workflowConfig.fluxApiKey?.trim() && !isCardNewsModule) {
               throw new Error("Flux API key is missing.");
             }
             return this.fluxAssetService.enrichManifestWithFlux(
               generatedMediaManifest,
-              sceneScriptDocument,
-              undefined,
+              effectiveSceneScriptDocument,
+              targetSceneIndexes,
               {
                 apiKey: workflowConfig.fluxApiKey?.trim(),
                 apiBaseUrl: workflowConfig.fluxApiBaseUrl,
@@ -876,16 +902,23 @@ export class ProductionPackageService {
             generatedMediaManifest,
             scenePlan,
             workflowConfig.pexelsApiKey,
-            undefined,
-            this.buildSceneQueryOverrideMap(sceneScriptDocument)
+            targetSceneIndexes,
+            this.buildSceneQueryOverrideMap(effectiveSceneScriptDocument)
           );
+    const enrichedMediaManifest = isCardNewsModule
+      ? this.applyCardNewsTemplateAssets(
+          enrichedMediaManifestBase,
+          packagePath,
+          effectiveSceneScriptDocument
+        )
+      : enrichedMediaManifestBase;
     this.writeCreateProgress(
       packagePath,
       "asset_prep",
       "completed",
       useBackgroundComposer
         ? "Background asset prepared."
-        : createAssetSource === "flux"
+        : effectiveAssetSource === "flux"
           ? "Flux scene assets prepared."
           : "Scene assets prepared."
     );
@@ -896,10 +929,119 @@ export class ProductionPackageService {
       stage: "asset_prep",
       detail: useBackgroundComposer
         ? "Background asset prepared."
-        : createAssetSource === "flux"
+        : effectiveAssetSource === "flux"
           ? "Flux scene assets prepared."
           : "Scene assets prepared."
     });
+    if (isCardNewsModule) {
+      const cardNewsPrepared = await this.materializeCardNewsImages(
+        enrichedMediaManifest,
+        packagePath,
+        effectiveSceneScriptDocument
+      );
+      this.fileService.writeJsonFile(
+        path.join(packagePath, "asset-manifest.json"),
+        cardNewsPrepared.manifest
+      );
+      this.fileService.writeJsonFile(path.join(packagePath, "card-news-manifest.json"), {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        outputFormat: effectiveSceneScriptDocument.cardNews?.outputFormat ?? "shorts_9_16",
+        layoutPreset: effectiveSceneScriptDocument.cardNews?.layoutPreset ?? "headline_focus",
+        transitionStyle: effectiveSceneScriptDocument.cardNews?.transitionStyle ?? "cut",
+        cards: cardNewsPrepared.cards.map((card) => ({
+          sceneIndex: card.sceneIndex,
+          imagePath: card.path,
+          text: card.text
+        }))
+      });
+      this.fileService.writeJsonFile(path.join(packagePath, "instagram-carousel-request.json"), {
+        platform: "instagram",
+        publishTarget: "carousel",
+        status: "draft",
+        caption: uploadDescription,
+        hashtags: hashtags.split(" "),
+        images: cardNewsPrepared.cards.map((card) => path.join(packagePath, card.path))
+      });
+      this.writeCreateProgress(
+        packagePath,
+        "voiceover",
+        "completed",
+        "Skipped for image card news package."
+      );
+      this.writeCreateProgress(
+        packagePath,
+        "composition",
+        "completed",
+        "Image card news package is ready."
+      );
+      await this.safeNotify({
+        type: "create_progress",
+        jobId: job.id,
+        title: job.title,
+        stage: "composition",
+        detail: "Card news image package is ready."
+      });
+
+      const imageCardsForCheckpoint = cardNewsPrepared.cards.map((card, index) => ({
+        label: `card-${String(index + 1).padStart(2, "0")}`,
+        path: card.path,
+        status: "ready" as const
+      }));
+      const placeholderUploadRequest = {
+        platform: "youtube" as const,
+        publishTarget: "video" as const,
+        status: "draft" as const,
+        videoFilePath: "",
+        thumbnailFilePath: cardNewsPrepared.cards[0]?.path
+          ? path.join(packagePath, cardNewsPrepared.cards[0].path)
+          : "",
+        scheduledPublishAt: "",
+        metadata: {
+          title: uploadTitle,
+          description: uploadDescription,
+          tags: hashtags.split(" "),
+          categoryId: workflowConfig.youtubeCategoryId ?? "22",
+          privacyStatus: workflowConfig.youtubePrivacyStatus ?? "private",
+          selfDeclaredMadeForKids:
+            (workflowConfig.youtubeAudience ?? "not_made_for_kids") === "made_for_kids"
+        }
+      };
+      this.checkpointWorkflowService.writeCreateCheckpoint({
+        job,
+        packagePath,
+        draft,
+        uploadRequest: placeholderUploadRequest,
+        createPayloadOverride: {
+          assetPlan: {
+            ttsRequired: false,
+            imageGenerationRequired: true,
+            videoCompositionRequired: false,
+            thumbnailRequired: false
+          },
+          assets: {
+            audio: [],
+            images: imageCardsForCheckpoint,
+            video: [],
+            thumbnail: {
+              path: "",
+              status: "pending"
+            }
+          },
+          metadata: {
+            title: uploadTitle,
+            description: uploadDescription,
+            hashtags: hashtags.split(" ")
+          }
+        }
+      });
+      this.checkpointWorkflowService.writeOutputCheckpoint({
+        job,
+        uploadRequest: placeholderUploadRequest
+      });
+
+      return packagePath;
+    }
     this.writeCreateProgress(packagePath, "voiceover", "running", "Voiceover generation started.");
     const voiceoverResult = await this.voiceoverService.generateVoiceover(
       enrichedMediaManifest.voiceoverCues,
@@ -1068,6 +1210,7 @@ export class ProductionPackageService {
       scenes: Array<{ index: number; text: string; durationSec: number; keywords: string[] }>;
     },
     scriptCategory: ShortformScriptCategory,
+    createModuleId: string,
     preset?: {
       subtitleStyle: SceneScriptDocument["subtitleStyle"];
       voiceProfile: SceneScriptDocument["voiceProfile"];
@@ -1106,11 +1249,22 @@ export class ProductionPackageService {
       targetDurationSec: scenePlan.totalDurationSec,
       scenes: scenePlan.scenes.map((scene) => ({
         sceneNo: scene.index,
-        text: scene.text,
+        text:
+          createModuleId === "card-news-generator-mcp"
+            ? this.toCardNewsCardText(scene.text, scene.index)
+            : scene.text,
         fluxPrompt: buildFluxPrompt(normalizedCategory, scene.keywords),
         assetSearchQuery: scene.keywords.slice(0, 3).join(" "),
         motion: "zoom-in",
-        durationSec: scene.durationSec
+        durationSec: scene.durationSec,
+        cardDesign:
+          createModuleId === "card-news-generator-mcp"
+            ? this.buildDefaultCardDesign(scene.index)
+            : undefined,
+        cardDesignBoxes:
+          createModuleId === "card-news-generator-mcp"
+            ? [{ ...this.buildDefaultCardDesign(scene.index), id: `box-${scene.index}-1` }]
+            : undefined
       })),
       subtitleStyle:
         preset?.subtitleStyle ?? {
@@ -1129,7 +1283,11 @@ export class ProductionPackageService {
           similarityBoost: 0.75,
           style: 0.06,
           useSpeakerBoost: true
-        }
+        },
+      cardNews:
+        createModuleId === "card-news-generator-mcp"
+          ? this.normalizeCardNewsOptions(undefined)
+          : undefined
     };
   }
 
@@ -1268,6 +1426,521 @@ export class ProductionPackageService {
       subtitleStyle: match.subtitleStyle,
       voiceProfile: match.voiceProfile
     };
+  }
+
+  private normalizeCardNewsOptions(
+    cardNews: SceneScriptDocument["cardNews"]
+  ): NonNullable<SceneScriptDocument["cardNews"]> {
+    return {
+      layoutPreset:
+        cardNews?.layoutPreset === "split_story" || cardNews?.layoutPreset === "data_highlight"
+          ? cardNews.layoutPreset
+          : "headline_focus",
+      transitionStyle:
+        cardNews?.transitionStyle === "slide" ||
+        cardNews?.transitionStyle === "fade" ||
+        cardNews?.transitionStyle === "wipe"
+          ? cardNews.transitionStyle
+          : "cut",
+      outputFormat:
+        cardNews?.outputFormat === "feed_4_5" || cardNews?.outputFormat === "square_1_1"
+          ? cardNews.outputFormat
+          : "shorts_9_16",
+      coverSource: cardNews?.coverSource === "manual_upload" ? "manual_upload" : "ai_generate",
+      coverPrompt: cardNews?.coverPrompt?.trim() || undefined,
+      coverImagePath: cardNews?.coverImagePath?.trim() || undefined,
+      templateBackgroundPath: cardNews?.templateBackgroundPath?.trim() || undefined
+    };
+  }
+
+  private applyCardNewsCoverPrompt(document: SceneScriptDocument): SceneScriptDocument {
+    const cardNews = this.normalizeCardNewsOptions(document.cardNews);
+    const coverPrompt = cardNews.coverPrompt?.trim();
+    if (!coverPrompt) {
+      return {
+        ...document,
+        cardNews
+      };
+    }
+
+    return {
+      ...document,
+      cardNews,
+      scenes: document.scenes.map((scene) =>
+        scene.sceneNo === 1
+          ? {
+              ...scene,
+              fluxPrompt: coverPrompt,
+              assetSearchQuery: coverPrompt.slice(0, 120)
+            }
+          : scene
+      )
+    };
+  }
+
+  private resolveCardNewsCompositionOptions(
+    cardNews: SceneScriptDocument["cardNews"]
+  ): NonNullable<GeneratedMediaPackageManifest["compositionOptions"]> {
+    const normalized = this.normalizeCardNewsOptions(cardNews);
+    const output =
+      normalized.outputFormat === "feed_4_5"
+        ? { outputWidth: 1080, outputHeight: 1350 }
+        : normalized.outputFormat === "square_1_1"
+          ? { outputWidth: 1080, outputHeight: 1080 }
+          : { outputWidth: 1080, outputHeight: 1920 };
+    return {
+      ...output
+    };
+  }
+
+  private mapCardNewsTransitionToMotion(
+    transitionStyle: NonNullable<SceneScriptDocument["cardNews"]>["transitionStyle"]
+  ): SceneScriptItem["motion"] {
+    if (transitionStyle === "slide") {
+      return "pan-right";
+    }
+    if (transitionStyle === "wipe") {
+      return "wipe-transition";
+    }
+    if (transitionStyle === "fade") {
+      return "zoom-in";
+    }
+    return "none";
+  }
+
+  private toCardNewsCardText(rawText: string, sceneNo: number): string {
+    const compact = rawText
+      .replace(/\r?\n+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!compact) {
+      return rawText;
+    }
+    const chunks = compact
+      .split(/[.!?。！？]\s*/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const picked = (sceneNo === 1 ? chunks.slice(0, 1) : chunks.slice(0, 2)).join(" ");
+    const limit = sceneNo === 1 ? 32 : 54;
+    const clamped = picked.length > limit ? `${picked.slice(0, limit - 1).trim()}…` : picked;
+    const maxLineLength = sceneNo === 1 ? 14 : 18;
+    const maxLines = sceneNo === 1 ? 2 : 3;
+    const words = clamped.split(" ");
+    const lines: string[] = [];
+    let currentLine = "";
+    for (const word of words) {
+      const nextLine = currentLine ? `${currentLine} ${word}` : word;
+      if (nextLine.length > maxLineLength && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = nextLine;
+      }
+      if (lines.length >= maxLines) {
+        break;
+      }
+    }
+    if (currentLine && lines.length < maxLines) {
+      lines.push(currentLine);
+    }
+    return lines.slice(0, maxLines).join("\n");
+  }
+
+  private buildDefaultCardDesign(sceneNo: number): NonNullable<SceneScriptItem["cardDesign"]> {
+    return {
+      xPct: 8,
+      yPct: sceneNo === 1 ? 72 : 58,
+      widthPct: 84,
+      heightPct: sceneNo === 1 ? 20 : 30,
+      align: "center",
+      verticalAlign: "middle",
+      fontSize: sceneNo === 1 ? 72 : 52,
+      fontWeight: 700,
+      textColor: "#FFFFFF",
+      backgroundColor: "rgba(0,0,0,0.52)",
+      lineHeight: 1.28,
+      padding: 28
+    };
+  }
+
+  private applyCardNewsTemplateAssets(
+    manifest: GeneratedMediaPackageManifest,
+    packagePath: string,
+    document: SceneScriptDocument
+  ): GeneratedMediaPackageManifest {
+    const cardNews = this.normalizeCardNewsOptions(document.cardNews);
+    const transitionMotion = this.mapCardNewsTransitionToMotion(cardNews.transitionStyle);
+    const templateSourcePath = this.resolveExistingPath(
+      cardNews.templateBackgroundPath,
+      this.pathService.getBundledBackgroundPath("community")
+    );
+    const copiedTemplatePath = templateSourcePath
+      ? this.copyAssetToPackage(packagePath, templateSourcePath, "card-news-template")
+      : undefined;
+    const copiedCoverPath =
+      cardNews.coverSource === "manual_upload"
+        ? this.copyAssetToPackage(packagePath, cardNews.coverImagePath, "card-news-cover")
+        : undefined;
+
+    return {
+      ...manifest,
+      scenes: manifest.scenes.map((scene) => {
+        if (scene.sceneIndex === 1) {
+          if (copiedCoverPath) {
+            return {
+              ...scene,
+              motion: "none",
+              selectedAsset: {
+                provider: "local",
+                assetType: "image",
+                localPath: copiedCoverPath
+              },
+              fallbackUsed: false
+            };
+          }
+          return {
+            ...scene,
+            motion: "none"
+          };
+        }
+
+        if (!copiedTemplatePath) {
+          return scene;
+        }
+        return {
+          ...scene,
+          motion: transitionMotion,
+          selectedAsset: {
+            provider: "local",
+            assetType: "image",
+            localPath: copiedTemplatePath
+          },
+          fallbackUsed: false
+        };
+      })
+    };
+  }
+
+  private resolveExistingPath(...candidates: Array<string | undefined>): string | undefined {
+    for (const candidate of candidates) {
+      const resolved = candidate?.trim();
+      if (!resolved) {
+        continue;
+      }
+      if (fs.existsSync(resolved)) {
+        return resolved;
+      }
+    }
+    return undefined;
+  }
+
+  private copyAssetToPackage(
+    packagePath: string,
+    sourcePath?: string,
+    targetStem?: string
+  ): string | undefined {
+    const resolvedSource = sourcePath?.trim();
+    if (!resolvedSource || !fs.existsSync(resolvedSource)) {
+      return undefined;
+    }
+    const extension = path.extname(resolvedSource) || ".png";
+    const safeStem = (targetStem ?? "asset").replace(/[^\w.-]+/g, "_");
+    const relativePath = path.join("assets", `${safeStem}${extension}`);
+    const absoluteTargetPath = path.join(packagePath, relativePath);
+    this.fileService.ensureDir(path.dirname(absoluteTargetPath));
+    fs.copyFileSync(resolvedSource, absoluteTargetPath);
+    return relativePath;
+  }
+
+  private async materializeCardNewsImages(
+    manifest: GeneratedMediaPackageManifest,
+    packagePath: string,
+    sceneScript: SceneScriptDocument
+  ): Promise<{
+    manifest: GeneratedMediaPackageManifest;
+    cards: Array<{ sceneIndex: number; path: string; text: string }>;
+  }> {
+    const assetDir = path.join(packagePath, "assets");
+    this.fileService.ensureDir(assetDir);
+    const cards: Array<{ sceneIndex: number; path: string; text: string }> = [];
+    const sceneByIndex = new Map(
+      sceneScript.scenes.map((scene) => [scene.sceneNo, scene] as const)
+    );
+    const scenes = await Promise.all(
+      manifest.scenes.map(async (scene) => {
+        const selected = scene.selectedAsset;
+        const targetName = `card-${String(scene.sceneIndex).padStart(2, "0")}.jpg`;
+        const relativeTargetPath = path.join("assets", targetName);
+        const absoluteTargetPath = path.join(packagePath, relativeTargetPath);
+        const sceneScriptItem = sceneByIndex.get(scene.sceneIndex);
+        const cardText = sceneScriptItem?.text ?? "";
+        const cardDesignBoxes = this.normalizeCardDesignBoxes(sceneScriptItem, scene.sceneIndex);
+        let materialized = false;
+
+        if (selected?.localPath) {
+          const absoluteLocalPath = path.join(packagePath, selected.localPath);
+          if (fs.existsSync(absoluteLocalPath)) {
+            if (path.resolve(absoluteLocalPath) !== path.resolve(absoluteTargetPath)) {
+              fs.copyFileSync(absoluteLocalPath, absoluteTargetPath);
+            }
+            materialized = true;
+          }
+        }
+
+        if (!materialized && !selected?.sourceUrl) {
+          return scene;
+        }
+
+        if (!materialized) {
+          const decoded = this.decodeDataImageSource(selected?.sourceUrl);
+          if (decoded) {
+            this.fileService.writeBinaryFile(path.join(assetDir, targetName), decoded);
+          } else {
+            const response = await fetch(selected?.sourceUrl ?? "");
+            if (!response.ok) {
+              throw new Error(`Card image download failed: HTTP ${response.status}`);
+            }
+            const buffer = Buffer.from(await response.arrayBuffer());
+            this.fileService.writeBinaryFile(path.join(assetDir, targetName), buffer);
+          }
+          materialized = true;
+        }
+
+        if (materialized && scene.sceneIndex > 1) {
+          await this.renderCardTextOverlays(
+            absoluteTargetPath,
+            absoluteTargetPath,
+            cardText,
+            cardDesignBoxes
+          );
+        }
+
+        cards.push({
+          sceneIndex: scene.sceneIndex,
+          path: relativeTargetPath,
+          text: cardText
+        });
+        return {
+          ...scene,
+          selectedAsset: {
+            ...(selected ?? {
+              provider: "local",
+              assetType: "image"
+            }),
+            provider: "local" as const,
+            assetType: "image" as const,
+            localPath: relativeTargetPath
+          }
+        };
+      })
+    );
+
+    return {
+      manifest: {
+        ...manifest,
+        scenes
+      },
+      cards: cards.sort((left, right) => left.sceneIndex - right.sceneIndex)
+    };
+  }
+
+  private normalizeCardDesignBoxes(
+    sceneScriptItem: SceneScriptItem | undefined,
+    sceneIndex: number
+  ): Array<NonNullable<SceneScriptItem["cardDesign"]>> {
+    const fallback = this.buildDefaultCardDesign(sceneIndex);
+    const rawBoxes =
+      sceneScriptItem?.cardDesignBoxes && sceneScriptItem.cardDesignBoxes.length > 0
+        ? sceneScriptItem.cardDesignBoxes
+        : [sceneScriptItem?.cardDesign ?? fallback];
+    return rawBoxes.map((box) => ({
+      ...fallback,
+      ...(box ?? {}),
+      text: box?.text?.trim() || undefined
+    }));
+  }
+
+  private async renderCardTextOverlays(
+    inputImagePath: string,
+    outputImagePath: string,
+    fallbackText: string,
+    designs: Array<NonNullable<SceneScriptItem["cardDesign"]>>
+  ): Promise<void> {
+    const ffmpegExecutable = this.resolveBundledFfmpegExecutable();
+    if (!ffmpegExecutable) {
+      throw new Error("Bundled FFmpeg was not found for card image text rendering.");
+    }
+    const fontFile = this.resolveCardNewsFontFile();
+    const escapedFont = fontFile
+      ? fontFile.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'")
+      : "";
+    const filters = designs
+      .map((design, index) => {
+        const textSource = design.text?.trim() || (index === 0 ? fallbackText : "");
+        if (!textSource) {
+          return "";
+        }
+        const escapedText = this.escapeFfmpegDrawtext(textSource);
+        const textAlign = design.align;
+        const xExpr =
+          textAlign === "left"
+            ? `w*${(design.xPct / 100).toFixed(4)}+${design.padding}`
+            : textAlign === "right"
+              ? `w*${((design.xPct + design.widthPct) / 100).toFixed(4)}-text_w-${design.padding}`
+              : `w*${(design.xPct / 100).toFixed(4)}+(w*${(design.widthPct / 100).toFixed(4)}-text_w)/2`;
+        const yExpr =
+          design.verticalAlign === "top"
+            ? `h*${(design.yPct / 100).toFixed(4)}+${design.padding}`
+            : design.verticalAlign === "bottom"
+              ? `h*${((design.yPct + design.heightPct) / 100).toFixed(4)}-text_h-${design.padding}`
+              : `h*${(design.yPct / 100).toFixed(4)}+(h*${(design.heightPct / 100).toFixed(4)}-text_h)/2`;
+        const bgAlpha = this.extractRgbaAlpha(design.backgroundColor);
+        return [
+          `drawbox=x=w*${(design.xPct / 100).toFixed(4)}:y=h*${(design.yPct / 100).toFixed(4)}:w=w*${(design.widthPct / 100).toFixed(4)}:h=h*${(design.heightPct / 100).toFixed(4)}:color=black@${bgAlpha}:t=fill`,
+          `drawtext=${fontFile ? `fontfile='${escapedFont}':` : ""}text='${escapedText}':fontcolor=${this.toFfmpegColor(design.textColor)}:fontsize=${Math.max(20, Math.round(design.fontSize))}:line_spacing=${Math.max(0, Math.round((design.lineHeight - 1) * design.fontSize))}:x=${xExpr}:y=${yExpr}`
+        ].join(",");
+      })
+      .filter(Boolean);
+    if (filters.length === 0) {
+      return;
+    }
+    const filter = filters.join(",");
+    const samePath = path.resolve(inputImagePath) === path.resolve(outputImagePath);
+    const resolvedOutputPath = samePath
+      ? path.join(path.dirname(outputImagePath), `${path.basename(outputImagePath, path.extname(outputImagePath))}.overlay${path.extname(outputImagePath)}`)
+      : outputImagePath;
+
+    await this.runFfmpegSingleFrame(ffmpegExecutable, [
+      "-y",
+      "-i",
+      inputImagePath,
+      "-vf",
+      filter,
+      "-frames:v",
+      "1",
+      resolvedOutputPath
+    ]);
+    if (samePath) {
+      fs.copyFileSync(resolvedOutputPath, outputImagePath);
+      fs.unlinkSync(resolvedOutputPath);
+    }
+  }
+
+  private runFfmpegSingleFrame(ffmpegExecutable: string, args: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(ffmpegExecutable, args, {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let stderr = "";
+      let stdout = "";
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on("data", (chunk: Buffer | string) => {
+        stderr += chunk.toString();
+      });
+      child.on("error", (error) => reject(error));
+      child.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(stderr.trim() || stdout.trim() || `ffmpeg exited with code ${code}`));
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  private resolveBundledFfmpegExecutable(): string | undefined {
+    const candidates =
+      process.platform === "win32"
+        ? [
+            this.pathService.getBundledToolPath("ffmpeg.exe"),
+            this.pathService.getBundledToolPath("ffmpeg")
+          ]
+        : [
+            this.pathService.getBundledToolPath("ffmpeg"),
+            this.pathService.getBundledToolPath("ffmpeg.exe")
+          ];
+    return candidates.find((candidate) => fs.existsSync(candidate));
+  }
+
+  private resolveCardNewsFontFile(): string | undefined {
+    const fontsDir = this.pathService.getBundledFontsPath();
+    if (!fs.existsSync(fontsDir)) {
+      return undefined;
+    }
+    const preferred = ["GmarketSansTTFMedium.ttf", "GmarketSansTTFBold.ttf"];
+    for (const fileName of preferred) {
+      const candidate = path.join(fontsDir, fileName);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    const fallback = fs
+      .readdirSync(fontsDir)
+      .find((name) => /\.(ttf|otf)$/i.test(name));
+    return fallback ? path.join(fontsDir, fallback) : undefined;
+  }
+
+  private escapeFfmpegDrawtext(text: string): string {
+    return text
+      .replace(/\\/g, "\\\\")
+      .replace(/:/g, "\\:")
+      .replace(/,/g, "\\,")
+      .replace(/'/g, "\\'")
+      .replace(/%/g, "\\%")
+      .replace(/\r?\n/g, "\\n");
+  }
+
+  private toFfmpegColor(value: string): string {
+    const raw = value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(raw)) {
+      return raw;
+    }
+    return "#FFFFFF";
+  }
+
+  private extractRgbaAlpha(value: string): string {
+    const match = value.match(/rgba?\([^)]*?([0-9.]+)\s*\)$/i);
+    if (!match) {
+      return "0.52";
+    }
+    const alpha = Number.parseFloat(match[1]);
+    if (!Number.isFinite(alpha)) {
+      return "0.52";
+    }
+    if (alpha > 1) {
+      return "1";
+    }
+    if (alpha < 0) {
+      return "0";
+    }
+    return alpha.toFixed(2);
+  }
+
+  private decodeDataImageSource(sourceUrl?: string): Buffer | undefined {
+    if (!sourceUrl || !sourceUrl.startsWith("data:image/")) {
+      return undefined;
+    }
+
+    const splitIndex = sourceUrl.indexOf(",");
+    if (splitIndex <= 0) {
+      return undefined;
+    }
+
+    const header = sourceUrl.slice(0, splitIndex).toLowerCase();
+    if (!header.includes(";base64")) {
+      return undefined;
+    }
+
+    try {
+      const encoded = sourceUrl.slice(splitIndex + 1);
+      const buffer = Buffer.from(encoded, "base64");
+      return buffer.length ? buffer : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private buildSceneQueryOverrideMap(document?: SceneScriptDocument): Record<number, string> | undefined {

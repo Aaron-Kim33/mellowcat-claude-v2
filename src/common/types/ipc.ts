@@ -25,7 +25,9 @@ import type {
   YouTubeBreakoutDiscoveryRequest,
   YouTubeBreakoutDiscoveryResult,
   YouTubeCandidateAnalysisRequest,
-  YouTubeCandidateAnalysisResult
+  YouTubeCandidateAnalysisResult,
+  YouTubeTranscriptProbeRequest,
+  YouTubeTranscriptProbeResult
 } from "./trend";
 import type {
   AutoProcessDraftPayload,
@@ -98,6 +100,9 @@ export interface MellowCatAPI {
     analyzeYouTubeCandidate: (
       request: YouTubeCandidateAnalysisRequest
     ) => Promise<YouTubeCandidateAnalysisResult>;
+    probeYouTubeTranscript: (
+      request: YouTubeTranscriptProbeRequest
+    ) => Promise<YouTubeTranscriptProbeResult>;
     getYouTubeStatus: () => Promise<YouTubeAuthStatus>;
     connectYouTube: () => Promise<YouTubeAuthStatus>;
     disconnectYouTube: () => Promise<YouTubeAuthStatus>;

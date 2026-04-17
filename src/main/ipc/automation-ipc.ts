@@ -15,7 +15,8 @@ import type {
 } from "../../common/types/slot-workflow";
 import type {
   YouTubeBreakoutDiscoveryRequest,
-  YouTubeCandidateAnalysisRequest
+  YouTubeCandidateAnalysisRequest,
+  YouTubeTranscriptProbeRequest
 } from "../../common/types/trend";
 import type { TrendCandidate } from "../../common/types/trend";
 import { CheckpointWorkflowService } from "../services/automation/checkpoint-workflow-service";
@@ -59,6 +60,11 @@ export function registerAutomationIpc(
     "automation:crawl:analyzeYouTubeCandidate",
     (_event, request: YouTubeCandidateAnalysisRequest) =>
       shortformScriptService.analyzeYouTubeCandidate(request)
+  );
+  ipcMain.handle(
+    "automation:crawl:probeYouTubeTranscript",
+    (_event, request: YouTubeTranscriptProbeRequest) =>
+      shortformScriptService.probeYouTubeTranscript(request)
   );
   ipcMain.handle("automation:youtube:getStatus", () => youTubeAuthService.getStatus());
   ipcMain.handle("automation:youtube:connect", () => youTubeAuthService.connect());

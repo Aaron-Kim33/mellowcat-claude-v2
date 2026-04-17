@@ -32,6 +32,38 @@ export interface SceneScriptItem {
   assetSearchQuery?: string;
   motion: "none" | "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "wipe-transition" | "shake";
   durationSec: number;
+  cardDesign?: {
+    id?: string;
+    text?: string;
+    xPct: number;
+    yPct: number;
+    widthPct: number;
+    heightPct: number;
+    align: "left" | "center" | "right";
+    verticalAlign: "top" | "middle" | "bottom";
+    fontSize: number;
+    fontWeight: 400 | 500 | 600 | 700 | 800;
+    textColor: string;
+    backgroundColor: string;
+    lineHeight: number;
+    padding: number;
+  };
+  cardDesignBoxes?: Array<{
+    id?: string;
+    text?: string;
+    xPct: number;
+    yPct: number;
+    widthPct: number;
+    heightPct: number;
+    align: "left" | "center" | "right";
+    verticalAlign: "top" | "middle" | "bottom";
+    fontSize: number;
+    fontWeight: 400 | 500 | 600 | 700 | 800;
+    textColor: string;
+    backgroundColor: string;
+    lineHeight: number;
+    padding: number;
+  }>;
 }
 
 export interface SceneScriptSubtitleStyle {
@@ -53,6 +85,21 @@ export interface SceneScriptVoiceProfile {
   useSpeakerBoost?: boolean;
 }
 
+export type CardNewsLayoutPreset = "headline_focus" | "split_story" | "data_highlight";
+export type CardNewsTransitionStyle = "cut" | "slide" | "fade" | "wipe";
+export type CardNewsOutputFormat = "shorts_9_16" | "feed_4_5" | "square_1_1";
+export type CardNewsCoverSource = "ai_generate" | "manual_upload";
+
+export interface SceneScriptCardNewsOptions {
+  layoutPreset: CardNewsLayoutPreset;
+  transitionStyle: CardNewsTransitionStyle;
+  outputFormat: CardNewsOutputFormat;
+  coverSource: CardNewsCoverSource;
+  coverPrompt?: string;
+  coverImagePath?: string;
+  templateBackgroundPath?: string;
+}
+
 export interface SceneScriptDocument {
   schemaVersion: 1;
   jobId: string;
@@ -62,6 +109,7 @@ export interface SceneScriptDocument {
   scenes: SceneScriptItem[];
   subtitleStyle: SceneScriptSubtitleStyle;
   voiceProfile: SceneScriptVoiceProfile;
+  cardNews?: SceneScriptCardNewsOptions;
 }
 
 export interface ScenePlanScene {
@@ -132,6 +180,7 @@ export interface GeneratedMediaPackageManifest {
   generatedAt: string;
   provider:
     | "youtube-material-generator-mcp"
+    | "card-news-generator-mcp"
     | "background-subtitle-composer-mcp"
     | "video-production-mcp";
   language: "ko";
@@ -141,6 +190,8 @@ export interface GeneratedMediaPackageManifest {
     videoCrf?: number;
     videoPreset?: "fast" | "medium" | "slow";
     speedFactor?: number;
+    outputWidth?: number;
+    outputHeight?: number;
   };
   subtitleStyle?: SceneScriptSubtitleStyle;
   voiceProfile?: SceneScriptVoiceProfile;

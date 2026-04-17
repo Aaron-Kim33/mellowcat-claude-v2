@@ -54,6 +54,19 @@ export class MediaCompositionService {
       options?.rerenderSceneIndexes && options.rerenderSceneIndexes.length > 0
         ? new Set(options.rerenderSceneIndexes)
         : undefined;
+    const compositionOptions = manifest.compositionOptions;
+    const outputWidth =
+      typeof compositionOptions?.outputWidth === "number" &&
+      Number.isFinite(compositionOptions.outputWidth) &&
+      compositionOptions.outputWidth > 0
+        ? Math.round(compositionOptions.outputWidth)
+        : 1080;
+    const outputHeight =
+      typeof compositionOptions?.outputHeight === "number" &&
+      Number.isFinite(compositionOptions.outputHeight) &&
+      compositionOptions.outputHeight > 0
+        ? Math.round(compositionOptions.outputHeight)
+        : 1920;
     const preparedScenes: string[] = [];
     const updatedScenes: GeneratedMediaPackageManifest["scenes"] = [];
 
@@ -90,7 +103,12 @@ export class MediaCompositionService {
         scene.trim.sourceEndSec - scene.trim.sourceStartSec || 1
       );
       const sourceAssetPath = path.resolve(packagePath, resolvedAsset.localPath);
-      const sceneFilter = this.buildSceneFilter(scene.motion, durationSec);
+      const sceneFilter = this.buildSceneFilter(
+        scene.motion,
+        durationSec,
+        outputWidth,
+        outputHeight
+      );
       const inputArgs =
         resolvedAsset.assetType === "image"
           ? ["-loop", "1", "-i", sourceAssetPath]
@@ -161,7 +179,6 @@ export class MediaCompositionService {
     ];
 
     const hasSubtitle = Boolean(subtitlePath && fs.existsSync(subtitlePath));
-    const compositionOptions = manifest.compositionOptions;
     const burnSubtitles =
       hasSubtitle &&
       (manifest.provider === "background-subtitle-composer-mcp" ||
@@ -494,37 +511,48 @@ export class MediaCompositionService {
 
   private buildSceneFilter(
     motion: GeneratedMediaPackageManifest["scenes"][number]["motion"] | undefined,
-    durationSec: number
+    durationSec: number,
+    outputWidth: number,
+    outputHeight: number
   ): string {
     const safeDuration = Math.max(1, Number(durationSec) || 1);
-    const base = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1";
+    const width = Math.max(360, Math.round(outputWidth || 1080));
+    const height = Math.max(360, Math.round(outputHeight || 1920));
+    const base = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
+    const zoomWidthDelta = Math.max(40, Math.round(width * 0.15));
+    const zoomHeightDelta = Math.max(70, Math.round(height * 0.15));
+    const expandedWidth = width + zoomWidthDelta;
+    const expandedHeight = height + zoomHeightDelta;
+    const panDelta = Math.max(40, Math.round(width * 0.1));
+    const shakeX = Math.max(6, Math.round(width * 0.013));
+    const shakeY = Math.max(5, Math.round(height * 0.006));
 
     if (!motion || motion === "none") {
       return base;
     }
 
     if (motion === "zoom-in") {
-      return `scale='1080+160*(t/${safeDuration})':'1920+284*(t/${safeDuration})':eval=frame,crop=1080:1920,setsar=1`;
+      return `scale='${width}+${zoomWidthDelta}*(t/${safeDuration})':'${height}+${zoomHeightDelta}*(t/${safeDuration})':eval=frame,crop=${width}:${height},setsar=1`;
     }
 
     if (motion === "zoom-out") {
-      return `scale='1240-160*(t/${safeDuration})':'2204-284*(t/${safeDuration})':eval=frame,crop=1080:1920,setsar=1`;
+      return `scale='${expandedWidth}-${zoomWidthDelta}*(t/${safeDuration})':'${expandedHeight}-${zoomHeightDelta}*(t/${safeDuration})':eval=frame,crop=${width}:${height},setsar=1`;
     }
 
     if (motion === "pan-left") {
-      return `scale=1240:2204,crop=1080:1920:x='(in_w-out_w)/2-100*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
+      return `scale=${expandedWidth}:${expandedHeight},crop=${width}:${height}:x='(in_w-out_w)/2-${panDelta}*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
     }
 
     if (motion === "pan-right") {
-      return `scale=1240:2204,crop=1080:1920:x='(in_w-out_w)/2+100*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
+      return `scale=${expandedWidth}:${expandedHeight},crop=${width}:${height}:x='(in_w-out_w)/2+${panDelta}*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
     }
 
     if (motion === "shake") {
-      return "scale=1160:2062,crop=1080:1920:x='(in_w-out_w)/2+14*sin(25*t)':y='(in_h-out_h)/2+10*sin(33*t)',setsar=1";
+      return `scale=${expandedWidth}:${expandedHeight},crop=${width}:${height}:x='(in_w-out_w)/2+${shakeX}*sin(25*t)':y='(in_h-out_h)/2+${shakeY}*sin(33*t)',setsar=1`;
     }
 
     if (motion === "wipe-transition") {
-      return `scale=1240:2204,crop=1080:1920:x='(in_w-out_w)*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
+      return `scale=${expandedWidth}:${expandedHeight},crop=${width}:${height}:x='(in_w-out_w)*(t/${safeDuration})':y='(in_h-out_h)/2',setsar=1`;
     }
 
     return base;

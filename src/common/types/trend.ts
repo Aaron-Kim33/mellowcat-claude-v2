@@ -132,3 +132,31 @@ export interface YouTubeCandidateAnalysisResult {
   }>;
   error?: string;
 }
+
+export interface YouTubeTranscriptProbeRequest {
+  sourceUrl?: string;
+  language?: "ko" | "en";
+}
+
+export interface YouTubeTranscriptProbeResult {
+  ok: boolean;
+  captionMode: "manual" | "asr" | "none";
+  evidenceCount: number;
+  reasonCode:
+    | "ok"
+    | "no_video_id"
+    | "no_caption_tracks"
+    | "no_base_url"
+    | "player_only_caption"
+    | "watch_http_error"
+    | "watch_fetch_error"
+    | "player_response_missing"
+    | "player_parse_error"
+    | "transcript_http_error"
+    | "transcript_fetch_error"
+    | "transcript_empty"
+    | "filtered_out"
+    | "unknown";
+  reasonMessage: string;
+  debug?: string[];
+}

@@ -94,6 +94,8 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:crawl:discoverYouTubeBreakouts", request),
   analyzeYouTubeCandidate: (request) =>
     ipcRenderer.invoke("automation:crawl:analyzeYouTubeCandidate", request),
+  probeYouTubeTranscript: (request) =>
+    ipcRenderer.invoke("automation:crawl:probeYouTubeTranscript", request),
   getYouTubeStatus: (): Promise<YouTubeAuthStatus> =>
     ipcRenderer.invoke("automation:youtube:getStatus"),
   connectYouTube: (): Promise<YouTubeAuthStatus> =>

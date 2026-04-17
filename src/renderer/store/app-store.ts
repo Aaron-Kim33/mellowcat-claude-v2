@@ -19,7 +19,9 @@ import type {
   YouTubeBreakoutDiscoveryRequest,
   YouTubeBreakoutDiscoveryResult,
   YouTubeCandidateAnalysisRequest,
-  YouTubeCandidateAnalysisResult
+  YouTubeCandidateAnalysisResult,
+  YouTubeTranscriptProbeRequest,
+  YouTubeTranscriptProbeResult
 } from "@common/types/trend";
 import type {
   AutoProcessDraftPayload,
@@ -70,6 +72,9 @@ interface AppState {
   analyzeYouTubeCandidate: (
     request: YouTubeCandidateAnalysisRequest
   ) => Promise<YouTubeCandidateAnalysisResult>;
+  probeYouTubeTranscript: (
+    request: YouTubeTranscriptProbeRequest
+  ) => Promise<YouTubeTranscriptProbeResult>;
   refreshYouTubeStatus: () => Promise<void>;
   connectYouTube: () => Promise<void>;
   disconnectYouTube: () => Promise<void>;
@@ -309,6 +314,7 @@ export const useAppStore = create<AppState>((set) => ({
     window.mellowcat.automation.discoverYouTubeBreakoutCandidates(request),
   analyzeYouTubeCandidate: async (request) =>
     window.mellowcat.automation.analyzeYouTubeCandidate(request),
+  probeYouTubeTranscript: async (request) => window.mellowcat.automation.probeYouTubeTranscript(request),
   refreshYouTubeStatus: async () => {
     const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
     set({ youTubeAuthStatus });

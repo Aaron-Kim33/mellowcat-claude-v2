@@ -174,11 +174,66 @@ export class CheckpointWorkflowService {
     packagePath: string;
     draft: ShortformScriptDraft;
     uploadRequest: YouTubeUploadRequest;
+    createPayloadOverride?: {
+      assetPlan?: {
+        ttsRequired?: boolean;
+        imageGenerationRequired?: boolean;
+        videoCompositionRequired?: boolean;
+        thumbnailRequired?: boolean;
+      };
+      assets?: {
+        audio?: Array<{ label: string; path: string; status: "pending" | "ready" }>;
+        images?: Array<{ label: string; path: string; status: "pending" | "ready" }>;
+        video?: Array<{ label: string; path: string; status: "pending" | "ready" }>;
+        thumbnail?: { path: string; status: "pending" | "ready" };
+      };
+      metadata?: {
+        title?: string;
+        description?: string;
+        hashtags?: string[];
+      };
+    };
   }): void {
     this.ensureJobRecord(input.job, input.packagePath);
     const packagePath = this.toJobRelativePath(input.job.id, input.packagePath);
     const videoFilePath = this.toJobRelativePath(input.job.id, input.uploadRequest.videoFilePath);
     const thumbnailFilePath = this.toJobRelativePath(input.job.id, input.uploadRequest.thumbnailFilePath);
+
+    const defaultPayload = {
+      assetPlan: {
+        ttsRequired: true,
+        imageGenerationRequired: true,
+        videoCompositionRequired: true,
+        thumbnailRequired: true
+      },
+      assets: {
+        audio: [] as Array<{ label: string; path: string; status: "pending" | "ready" }>,
+        images: [] as Array<{ label: string; path: string; status: "pending" | "ready" }>,
+        video: videoFilePath
+          ? [
+              {
+                label: "final-cut",
+                path: videoFilePath,
+                status: input.uploadRequest.videoFilePath ? "ready" : "pending"
+              }
+            ]
+          : [],
+        thumbnail: {
+          path: thumbnailFilePath,
+          status: input.uploadRequest.thumbnailFilePath ? "ready" : "pending"
+        }
+      },
+      metadata: {
+        title: input.uploadRequest.metadata.title,
+        description: input.uploadRequest.metadata.description,
+        hashtags: input.uploadRequest.metadata.tags,
+        titleOptions: input.draft.titleOptions,
+        hook: input.draft.hook,
+        narration: input.draft.narration,
+        callToAction: input.draft.callToAction
+      },
+      packagePath
+    };
 
     this.writeCheckpoint({
       job: input.job,
@@ -188,36 +243,16 @@ export class CheckpointWorkflowService {
       attachments: [packagePath].filter(Boolean),
       payload: {
         assetPlan: {
-          ttsRequired: true,
-          imageGenerationRequired: true,
-          videoCompositionRequired: true,
-          thumbnailRequired: true
+          ...defaultPayload.assetPlan,
+          ...(input.createPayloadOverride?.assetPlan ?? {})
         },
         assets: {
-          audio: [],
-          images: [],
-          video: videoFilePath
-            ? [
-                {
-                  label: "final-cut",
-                  path: videoFilePath,
-                  status: input.uploadRequest.videoFilePath ? "ready" : "pending"
-                }
-              ]
-            : [],
-          thumbnail: {
-            path: thumbnailFilePath,
-            status: input.uploadRequest.thumbnailFilePath ? "ready" : "pending"
-          }
+          ...defaultPayload.assets,
+          ...(input.createPayloadOverride?.assets ?? {})
         },
         metadata: {
-          title: input.uploadRequest.metadata.title,
-          description: input.uploadRequest.metadata.description,
-          hashtags: input.uploadRequest.metadata.tags,
-          titleOptions: input.draft.titleOptions,
-          hook: input.draft.hook,
-          narration: input.draft.narration,
-          callToAction: input.draft.callToAction
+          ...defaultPayload.metadata,
+          ...(input.createPayloadOverride?.metadata ?? {})
         },
         packagePath
       }

@@ -1351,6 +1351,11 @@ code {
   align-items: start;
 }
 
+.generation-shell--canvas {
+  grid-template-columns: minmax(330px, 0.95fr) minmax(620px, 1.7fr) minmax(300px, 0.9fr);
+  gap: 14px;
+}
+
 .generation-prebuild {
   display: grid;
   gap: 12px;
@@ -1360,6 +1365,14 @@ code {
 .generation-preview {
   display: grid;
   gap: 12px;
+}
+
+.generation-inspector {
+  display: grid;
+  gap: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 246, 242, 0.98)),
+    radial-gradient(circle at top right, rgba(248, 190, 70, 0.12), transparent 52%);
 }
 
 .generation-editor {
@@ -1424,6 +1437,24 @@ code {
     radial-gradient(circle at top right, rgba(248, 190, 70, 0.16), transparent 48%);
 }
 
+.generation-shell--canvas .generation-editor {
+  grid-column: 1;
+}
+
+.generation-shell--canvas .generation-preview {
+  grid-column: 2;
+  min-height: calc(100vh - 220px);
+  grid-template-rows: auto auto 1fr;
+  position: sticky;
+  top: 14px;
+}
+
+.generation-shell--canvas .generation-inspector {
+  grid-column: 3;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
 .generation-preview-banner {
   padding: 10px 12px;
   border-radius: 12px;
@@ -1441,11 +1472,20 @@ code {
   overflow: hidden;
 }
 
+.generation-preview-media--canvas {
+  min-height: 640px;
+}
+
 .generation-preview-media img,
 .generation-preview-media video {
   width: 100%;
   max-height: 420px;
   object-fit: contain;
+}
+
+.generation-preview-media--canvas img,
+.generation-preview-media--canvas video {
+  max-height: 780px;
 }
 
 .generation-preview-media .subtle {
@@ -1530,6 +1570,14 @@ code {
   background: #f8f2ff;
 }
 
+.generation-shell--canvas .generation-preview .meta-list,
+.generation-shell--canvas .generation-preview .generation-preview-text,
+.generation-shell--canvas .generation-preview .generation-preview-prompt,
+.generation-shell--canvas .generation-preview .generation-timeline,
+.generation-shell--canvas .generation-preview .generation-thumb-strip {
+  display: none;
+}
+
 @media (max-width: 980px) {
   .shell {
     grid-template-columns: 1fr;
@@ -1556,6 +1604,23 @@ code {
 
   .generation-shell {
     grid-template-columns: 1fr;
+  }
+
+  .generation-shell--canvas {
+    grid-template-columns: 1fr;
+  }
+
+  .generation-shell--canvas .generation-preview,
+  .generation-shell--canvas .generation-inspector {
+    grid-column: auto;
+    position: static;
+    max-height: none;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .generation-preview-media--canvas {
+    min-height: 380px;
   }
 
   .crawling-input-grid {

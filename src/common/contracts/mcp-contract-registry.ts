@@ -418,6 +418,167 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       }
     }
   },
+  "card-news-generator-mcp": {
+    id: "card-news-generator-mcp",
+    name: "Card News Generator",
+    aiCapable: true,
+    builtinAvailable: true,
+    slot: "create",
+    category: "packaging",
+    compatibility: {
+      inputs: [
+        { contract: "script_draft_v1", required: true },
+        { contract: "scene_script_v1", required: false }
+      ],
+      outputs: [{ contract: "production_package_v1", required: true }],
+      executionModes: ["on_demand"]
+    },
+    dependencies: [
+      {
+        mcpId: "shortform-script-mcp",
+        reason: "Needs a script draft to build card-news scene packages.",
+        required: true
+      }
+    ],
+    configScopes: ["pack", "mcp"],
+    sceneStylePresets: [
+      {
+        id: "news_clean",
+        label: "뉴스 클린",
+        subtitleStyle: {
+          mode: "outline",
+          fontFamily: "Gmarket Sans",
+          fontSize: 26,
+          outline: 3,
+          color: "#ffffff",
+          outlineColor: "#111111"
+        },
+        voiceProfile: {
+          provider: "elevenlabs",
+          modelId: "eleven_multilingual_v2",
+          stability: 0.52,
+          similarityBoost: 0.74,
+          style: 0.04,
+          useSpeakerBoost: true
+        }
+      },
+      {
+        id: "insight_bold",
+        label: "인사이트 볼드",
+        subtitleStyle: {
+          mode: "outline",
+          fontFamily: "Gmarket Sans",
+          fontSize: 28,
+          outline: 4,
+          color: "#ffffff",
+          outlineColor: "#000000"
+        },
+        voiceProfile: {
+          provider: "elevenlabs",
+          modelId: "eleven_multilingual_v2",
+          stability: 0.48,
+          similarityBoost: 0.76,
+          style: 0.07,
+          useSpeakerBoost: true
+        }
+      }
+    ],
+    slotUi: {
+      create: {
+        slot: "create",
+        title: "카드뉴스 생성기",
+        description:
+          "스크립트를 카드뉴스 장면 계획으로 변환하고, 이미지 소스·더빙·자막·합성으로 이어질 제작 패키지를 준비합니다.",
+        fields: [
+          {
+            id: "assetSource",
+            label: "Asset Source",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "Pexels", value: "pexels" },
+              { label: "Flux", value: "flux" }
+            ]
+          },
+          {
+            id: "pexelsApiKey",
+            label: "Pexels API Key",
+            type: "secret",
+            width: "half"
+          },
+          {
+            id: "fluxApiKey",
+            label: "Flux API Key",
+            type: "secret",
+            width: "half"
+          },
+          {
+            id: "fluxApiBaseUrl",
+            label: "Flux API Base URL",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "fluxModel",
+            label: "Flux Model",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "targetDurationSec",
+            label: "목표 길이(초)",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "minimumSceneCount",
+            label: "최소 카드 수",
+            type: "text",
+            width: "half"
+          },
+          {
+            id: "cardNewsLayoutPreset",
+            label: "레이아웃 프리셋",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "헤드라인 집중", value: "headline_focus" },
+              { label: "좌우 분할 스토리", value: "split_story" },
+              { label: "데이터 하이라이트", value: "data_highlight" }
+            ]
+          },
+          {
+            id: "cardNewsTransitionStyle",
+            label: "카드 전환 스타일",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "컷", value: "cut" },
+              { label: "슬라이드", value: "slide" },
+              { label: "페이드", value: "fade" },
+              { label: "와이프", value: "wipe" }
+            ]
+          },
+          {
+            id: "cardNewsOutputFormat",
+            label: "출력 포맷",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "쇼츠 9:16", value: "shorts_9_16" },
+              { label: "피드 4:5", value: "feed_4_5" },
+              { label: "정사각 1:1", value: "square_1_1" }
+            ]
+          }
+        ],
+        actions: [
+          { id: "run_create_pipeline", label: "카드뉴스 생성 실행", kind: "primary" },
+          { id: "generate_scene_plan", label: "씬 플랜 생성", kind: "secondary" },
+          { id: "save_checkpoint_3", label: "checkpoint-3 저장", kind: "primary" }
+        ]
+      }
+    }
+  },
   "video-production-mcp": {
     id: "video-production-mcp",
     name: "Video Production",

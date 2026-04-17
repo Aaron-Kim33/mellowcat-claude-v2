@@ -10,7 +10,9 @@ import type {
 } from "../../../common/types/automation";
 import type {
   YouTubeCandidateAnalysisRequest,
-  YouTubeCandidateAnalysisResult
+  YouTubeCandidateAnalysisResult,
+  YouTubeTranscriptProbeRequest,
+  YouTubeTranscriptProbeResult
 } from "../../../common/types/trend";
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 import { SettingsRepository } from "../storage/settings-repository";
@@ -62,6 +64,12 @@ type CandidateContext = {
 
 export class ShortformScriptService {
   private readonly trendDiscoveryService = new TrendDiscoveryService();
+  private youtubeCaptionQueue: Promise<void> = Promise.resolve();
+  private youtubeCaptionCooldownUntil = 0;
+  private readonly transcriptProbeCache = new Map<
+    string,
+    { expiresAt: number; result: YouTubeTranscriptProbeResult }
+  >();
 
   constructor(
     private readonly settingsRepository: SettingsRepository,
@@ -236,6 +244,82 @@ export class ShortformScriptService {
     };
   }
 
+  async probeYouTubeTranscript(
+    input: YouTubeTranscriptProbeRequest
+  ): Promise<YouTubeTranscriptProbeResult> {
+    const language = input.language === "en" ? "en" : "ko";
+    const videoId = this.extractYouTubeVideoId(input.sourceUrl);
+    const cacheKey = `${language}:${videoId ?? "unknown"}`;
+    const cached = this.transcriptProbeCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.result;
+    }
+
+    const result = await this.enqueueCaptionProbe(async () => {
+      const transcript = await this.fetchYouTubeTranscriptContext(
+        {
+          title: "",
+          sourceUrl: input.sourceUrl
+        },
+        language
+      );
+      const evidenceCount = transcript.transcriptEvidence?.length ?? 0;
+      const debug = transcript.debug;
+      const hasTranscript = Boolean(transcript.transcriptExcerpt?.trim());
+      const captionMode: "manual" | "asr" | "none" =
+        transcript.transcriptMode === "stt_fallback"
+          ? "asr"
+          : transcript.transcriptMode === "caption"
+            ? "manual"
+            : debug.some((line) => line.includes("transcript:tracks="))
+              ? "asr"
+              : "none";
+
+      if (evidenceCount > 0) {
+        return {
+          ok: true,
+          captionMode,
+          evidenceCount,
+          reasonCode: "ok",
+          reasonMessage: "Transcript evidence is available.",
+          debug
+        } satisfies YouTubeTranscriptProbeResult;
+      }
+      if (hasTranscript) {
+        return {
+          ok: false,
+          captionMode,
+          evidenceCount: 0,
+          reasonCode: "filtered_out",
+          reasonMessage: "Transcript was fetched, but no evidence lines survived filtering.",
+          debug
+        } satisfies YouTubeTranscriptProbeResult;
+      }
+
+      const reasonFromDebug = this.resolveTranscriptProbeReason(debug);
+      return {
+        ok: false,
+        captionMode,
+        evidenceCount: 0,
+        reasonCode: reasonFromDebug.code,
+        reasonMessage: reasonFromDebug.message,
+        debug
+      } satisfies YouTubeTranscriptProbeResult;
+    });
+
+    const debug = result.debug ?? [];
+    if (
+      debug.some((line) => line.includes("transcript:http_429")) ||
+      debug.some((line) => line.includes("transcript:watch_http_429"))
+    ) {
+      this.youtubeCaptionCooldownUntil = Math.max(this.youtubeCaptionCooldownUntil, Date.now() + 45_000);
+    }
+
+    const ttl = result.ok ? 10 * 60_000 : debug.some((line) => line.includes("429")) ? 60_000 : 2 * 60_000;
+    this.transcriptProbeCache.set(cacheKey, { expiresAt: Date.now() + ttl, result });
+    return result;
+  }
+
   private normalizeCandidateAnalysisOutput(text: string): string {
     return text
       .split(/\r?\n/)
@@ -243,6 +327,27 @@ export class ShortformScriptService {
       .join("\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+  }
+
+  private async enqueueCaptionProbe<T>(task: () => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      const waitMs = this.youtubeCaptionCooldownUntil - Date.now();
+      if (waitMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+      }
+      try {
+        return await task();
+      } finally {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+      }
+    };
+
+    const next = this.youtubeCaptionQueue.then(run, run);
+    this.youtubeCaptionQueue = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
   }
 
   private async fetchCandidateContext(
@@ -483,7 +588,12 @@ export class ShortformScriptService {
   private async fetchYouTubeTranscriptContext(
     input: YouTubeCandidateAnalysisRequest,
     language: "ko" | "en"
-  ): Promise<{ transcriptExcerpt?: string; transcriptEvidence?: string[]; debug: string[] }> {
+  ): Promise<{
+    transcriptExcerpt?: string;
+    transcriptEvidence?: string[];
+    transcriptMode?: "caption" | "stt_fallback";
+    debug: string[];
+  }> {
     const debug: string[] = [];
     const videoId = this.extractYouTubeVideoId(input.sourceUrl);
     if (!videoId) {
@@ -508,22 +618,37 @@ export class ShortformScriptService {
 
     const mode =
       selectedTrack.kind === "asr" || selectedTrack.vssId?.includes(".asr") ? "stt_fallback" : "caption";
-    const xmlUrl = selectedTrack.baseUrl.includes("fmt=")
-      ? selectedTrack.baseUrl
-      : `${selectedTrack.baseUrl}&fmt=srv3`;
-    let response: Response;
-    try {
-      response = await fetch(xmlUrl);
-    } catch (error) {
-      debug.push(`transcript:fetch_error:${error instanceof Error ? error.message : String(error)}`);
-      return { debug };
+    const captionUrls = this.buildYouTubeCaptionCandidateUrls(selectedTrack.baseUrl);
+    let transcript = "";
+    for (const captionUrl of captionUrls) {
+      let response: Response;
+      try {
+        response = await this.fetchWithRetry(
+          captionUrl,
+          {
+            headers: this.buildYouTubeCaptionHeaders(preferredLanguage, input.sourceUrl)
+          },
+          2,
+          10_000
+        );
+      } catch (error) {
+        debug.push(`transcript:fetch_error:${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      if (!response.ok) {
+        debug.push(`transcript:http_${response.status}`);
+        if (response.status === 429) {
+          break;
+        }
+        continue;
+      }
+      const captionContent = await response.text();
+      debug.push(`transcript:body_${response.status}:${captionContent.length}`);
+      transcript = this.parseYouTubeCaptionContent(captionContent);
+      if (transcript.length > 0) {
+        break;
+      }
     }
-    if (!response.ok) {
-      debug.push(`transcript:http_${response.status}`);
-      return { debug };
-    }
-    const xml = await response.text();
-    const transcript = this.parseYouTubeCaptionXml(xml);
     if (!transcript) {
       debug.push(`transcript:empty:${mode}`);
       return { debug };
@@ -531,10 +656,105 @@ export class ShortformScriptService {
 
     const excerpt = transcript.slice(0, 2400);
     const transcriptEvidence = this.buildTranscriptEvidenceLines(transcript);
+    debug.push(`transcript:evidence_count=${transcriptEvidence.length}`);
+    if (transcriptEvidence.length === 0) {
+      debug.push("transcript:empty:evidence_after_filter");
+    }
     debug.push(
       `transcript:ok:${mode}:lang=${selectedTrack.languageCode ?? "-"}:chars=${excerpt.length}`
     );
-    return { transcriptExcerpt: excerpt, transcriptEvidence, debug };
+    return { transcriptExcerpt: excerpt, transcriptEvidence, transcriptMode: mode, debug };
+  }
+
+  private resolveTranscriptProbeReason(
+    debug: string[]
+  ): { code: YouTubeTranscriptProbeResult["reasonCode"]; message: string } {
+    if (debug.some((line) => line.includes("transcript:skip:no_video_id"))) {
+      return { code: "no_video_id", message: "videoId could not be extracted from source URL." };
+    }
+    if (debug.some((line) => line.includes("transcript:empty:no_caption_tracks"))) {
+      return { code: "no_caption_tracks", message: "No manual/ASR caption tracks were found." };
+    }
+    if (debug.some((line) => line.includes("transcript:empty:no_base_url"))) {
+      return { code: "no_base_url", message: "Caption track exists but baseUrl was missing." };
+    }
+    if (debug.some((line) => line.includes("transcript:empty:caption"))) {
+      const bodyDebug = debug.filter((line) => line.startsWith("transcript:body_"));
+      const hasOnlyHttp200EmptyBody =
+        bodyDebug.length > 0 &&
+        bodyDebug.every((line) => line.startsWith("transcript:body_200:0"));
+      if (hasOnlyHttp200EmptyBody) {
+        return {
+          code: "player_only_caption",
+          message:
+            "Caption track is visible in YouTube player, but timedtext response was empty (player-only caption)."
+        };
+      }
+      return { code: "transcript_empty", message: "Manual caption track returned empty text." };
+    }
+    if (debug.some((line) => line.includes("transcript:empty:stt_fallback"))) {
+      const bodyDebug = debug.filter((line) => line.startsWith("transcript:body_"));
+      const hasOnlyHttp200EmptyBody =
+        bodyDebug.length > 0 &&
+        bodyDebug.every((line) => line.startsWith("transcript:body_200:0"));
+      if (hasOnlyHttp200EmptyBody) {
+        return {
+          code: "player_only_caption",
+          message:
+            "ASR track is visible in YouTube player, but timedtext response was empty (player-only caption)."
+        };
+      }
+      return { code: "transcript_empty", message: "ASR caption track returned empty text." };
+    }
+    if (debug.some((line) => line.includes("transcript:watch_http_"))) {
+      const line = debug.find((entry) => entry.includes("transcript:watch_http_"));
+      const status = line?.split("transcript:watch_http_")[1] ?? "?";
+      return {
+        code: "watch_http_error",
+        message: `Failed to read YouTube player caption metadata. (HTTP ${status})`
+      };
+    }
+    if (debug.some((line) => line.includes("transcript:watch_fetch_error:"))) {
+      const line = debug.find((entry) => entry.includes("transcript:watch_fetch_error:"));
+      const detail = line?.split("transcript:watch_fetch_error:")[1]?.trim();
+      return {
+        code: "watch_fetch_error",
+        message: detail
+          ? `Network error while reading caption metadata. (${detail})`
+          : "Network error while reading caption metadata."
+      };
+    }
+    if (debug.some((line) => line.includes("transcript:player_response_missing"))) {
+      return { code: "player_response_missing", message: "YouTube player response did not expose captions." };
+    }
+    if (debug.some((line) => line.includes("transcript:player_parse_error:"))) {
+      return { code: "player_parse_error", message: "Failed to parse YouTube player response." };
+    }
+    if (debug.some((line) => line.includes("transcript:http_"))) {
+      const line = debug.find((entry) => entry.includes("transcript:http_"));
+      const status = line?.split("transcript:http_")[1] ?? "?";
+      return {
+        code: "transcript_http_error",
+        message: `Caption file request returned HTTP ${status}.`
+      };
+    }
+    if (debug.some((line) => line.includes("transcript:fetch_error:"))) {
+      const line = debug.find((entry) => entry.includes("transcript:fetch_error:"));
+      const detail = line?.split("transcript:fetch_error:")[1]?.trim();
+      return {
+        code: "transcript_fetch_error",
+        message: detail
+          ? `Network error while fetching caption file. (${detail})`
+          : "Network error while fetching caption file."
+      };
+    }
+    if (debug.some((line) => line.includes("transcript:empty:evidence_after_filter"))) {
+      return {
+        code: "filtered_out",
+        message: "Transcript was fetched, but evidence lines were filtered out."
+      };
+    }
+    return { code: "unknown", message: "Transcript evidence is unavailable for an unknown reason." };
   }
 
   private extractYouTubeVideoId(sourceUrl?: string): string | undefined {
@@ -579,11 +799,14 @@ export class ShortformScriptService {
     const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
     let response: Response;
     try {
-      response = await fetch(watchUrl, {
-        headers: {
-          "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9"
-        }
-      });
+      response = await this.fetchWithRetry(
+        watchUrl,
+        {
+          headers: this.buildYouTubeRequestHeaders(preferredLanguage)
+        },
+        2,
+        10_000
+      );
     } catch (error) {
       debug.push(`transcript:watch_fetch_error:${error instanceof Error ? error.message : String(error)}`);
       return null;
@@ -622,6 +845,48 @@ export class ShortformScriptService {
   }
 
   private extractPlayerResponseJson(html: string): string | undefined {
+    const marker = "ytInitialPlayerResponse";
+    const markerIndex = html.indexOf(marker);
+    if (markerIndex >= 0) {
+      const start = html.indexOf("{", markerIndex);
+      if (start >= 0) {
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+        for (let index = start; index < html.length; index += 1) {
+          const char = html[index];
+          if (inString) {
+            if (escaped) {
+              escaped = false;
+              continue;
+            }
+            if (char === "\\") {
+              escaped = true;
+              continue;
+            }
+            if (char === "\"") {
+              inString = false;
+            }
+            continue;
+          }
+          if (char === "\"") {
+            inString = true;
+            continue;
+          }
+          if (char === "{") {
+            depth += 1;
+            continue;
+          }
+          if (char === "}") {
+            depth -= 1;
+            if (depth === 0) {
+              return html.slice(start, index + 1);
+            }
+          }
+        }
+      }
+    }
+
     const patterns = [
       /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*var\s+meta/i,
       /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*<\/script>/i,
@@ -652,10 +917,12 @@ export class ShortformScriptService {
   }
 
   private parseYouTubeCaptionXml(xml: string): string {
-    const chunks = xml.match(/<text[\s\S]*?>([\s\S]*?)<\/text>/g) ?? [];
+    const textChunks = xml.match(/<text[\s\S]*?>([\s\S]*?)<\/text>/gi) ?? [];
+    const paragraphChunks = xml.match(/<p[\s\S]*?>([\s\S]*?)<\/p>/gi) ?? [];
+    const chunks = [...textChunks, ...paragraphChunks];
     const lines: string[] = [];
     for (const chunk of chunks) {
-      const match = chunk.match(/<text[\s\S]*?>([\s\S]*?)<\/text>/i);
+      const match = chunk.match(/<(?:text|p)[\s\S]*?>([\s\S]*?)<\/(?:text|p)>/i);
       const text = this.decodeHtmlEntities(match?.[1] ?? "")
         .replace(/<[^>]+>/g, " ")
         .replace(/\s+/g, " ")
@@ -668,6 +935,28 @@ export class ShortformScriptService {
       }
     }
     return lines.join(" ");
+  }
+
+  private parseYouTubeCaptionVtt(vtt: string): string {
+    const lines = vtt
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => !line.startsWith("WEBVTT"))
+      .filter((line) => !line.startsWith("NOTE"))
+      .filter((line) => !/^\d+$/.test(line))
+      .filter((line) => !/^\d{1,2}:\d{2}(?::\d{2})?\.\d{3}\s+-->\s+\d{1,2}:\d{2}(?::\d{2})?\.\d{3}/.test(line))
+      .map((line) => line.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      .filter((line) => line.length > 0);
+    return lines.join(" ");
+  }
+
+  private parseYouTubeCaptionContent(content: string): string {
+    const xml = this.parseYouTubeCaptionXml(content);
+    if (xml.length > 0) {
+      return xml;
+    }
+    return this.parseYouTubeCaptionVtt(content);
   }
 
   private buildTranscriptEvidenceLines(transcript: string): string[] {
@@ -685,6 +974,89 @@ export class ShortformScriptService {
       }
     }
     return deduped;
+  }
+
+  private buildYouTubeRequestHeaders(preferredLanguage: "ko" | "en"): Record<string, string> {
+    return {
+      "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    };
+  }
+
+  private ensureYouTubeCaptionSrv3Url(baseUrl: string): string {
+    try {
+      const parsed = new URL(baseUrl);
+      parsed.searchParams.set("fmt", "srv3");
+      return parsed.toString();
+    } catch {
+      if (baseUrl.includes("fmt=")) {
+        return baseUrl.replace(/([?&])fmt=[^&]*/i, "$1fmt=srv3");
+      }
+      return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=srv3`;
+    }
+  }
+
+  private ensureYouTubeCaptionVttUrl(baseUrl: string): string {
+    try {
+      const parsed = new URL(baseUrl);
+      parsed.searchParams.set("fmt", "vtt");
+      return parsed.toString();
+    } catch {
+      if (baseUrl.includes("fmt=")) {
+        return baseUrl.replace(/([?&])fmt=[^&]*/i, "$1fmt=vtt");
+      }
+      return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=vtt`;
+    }
+  }
+
+  private buildYouTubeCaptionCandidateUrls(baseUrl: string): string[] {
+    const urls = [baseUrl, this.ensureYouTubeCaptionSrv3Url(baseUrl), this.ensureYouTubeCaptionVttUrl(baseUrl)];
+    return Array.from(new Set(urls));
+  }
+
+  private buildYouTubeCaptionHeaders(
+    preferredLanguage: "ko" | "en",
+    sourceUrl?: string
+  ): Record<string, string> {
+    return {
+      "Accept-Language": preferredLanguage === "ko" ? "ko-KR,ko;q=0.9,en;q=0.6" : "en-US,en;q=0.9",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "*/*",
+      Referer: sourceUrl?.trim() || "https://www.youtube.com/",
+      Origin: "https://www.youtube.com"
+    };
+  }
+
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    retries: number,
+    timeoutMs: number
+  ): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          ...init,
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+        return response;
+      } catch (error) {
+        clearTimeout(timer);
+        lastError = error;
+        if (attempt >= retries) {
+          break;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 500 + attempt * 700));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   private async fetchCommunityReferences(
