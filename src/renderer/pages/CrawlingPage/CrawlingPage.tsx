@@ -517,6 +517,12 @@ export function CrawlingPage() {
       processResultCta: "CTA",
       breakoutContextPanel: isKorean ? "참고 정보" : "Reference context",
       breakoutNoReferences: isKorean ? "참고 자료를 찾지 못했습니다." : "No references found."
+      ,
+      trendCardsTitle: isKorean ? "트렌드 후보 카드" : "Trend candidate cards",
+      trendCardsHint: isKorean
+        ? "검색 실행 결과를 카드로 확인하고 바로 후보 선택/가공 단계로 넘길 수 있습니다."
+        : "Review fetched trend results as cards and move directly to candidate processing.",
+      trendPickCandidate: isKorean ? "이 후보 사용" : "Use this candidate"
     }),
     [isKorean]
   );
@@ -571,6 +577,7 @@ export function CrawlingPage() {
   );
   const hasUnsavedYouTubeCandidates =
     selectedModuleId === "youtube-breakout-crawler-mcp" && discoveredCandidates.length > 0;
+  const isTrendDiscoveryModule = selectedModuleId === "trend-discovery-mcp";
   const processCandidates = useMemo(() => {
     if (!hasUnsavedYouTubeCandidates) {
       return checkpointCandidates;
@@ -628,6 +635,18 @@ export function CrawlingPage() {
   );
   const previewCandidates =
     youtubePreviewCandidates.length > 0 ? youtubePreviewCandidates : processPreviewCandidates;
+  const trendCardCandidates = useMemo(
+    () =>
+      processCandidates.map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        summary: candidate.summary,
+        sourceLabel: candidate.sourceLabel,
+        sourceUrl: candidate.sourceUrl,
+        thumbnailUrl: candidate.thumbnailUrl
+      })),
+    [processCandidates]
+  );
   const activePreviewCandidate =
     previewCandidates.find((candidate) => candidate.id === activePreviewCandidateId) ??
     previewCandidates[0];
@@ -702,6 +721,9 @@ export function CrawlingPage() {
     setFieldValues((current) => ({
       ...current,
       trendWindow: workflowConfig?.trendWindow ?? current.trendWindow ?? "24h",
+      trendDiscoveryMode:
+        workflowConfig?.trendDiscoveryMode ?? current.trendDiscoveryMode ?? "shortform_story",
+      trendFocusCategory: workflowConfig?.trendFocusCategory ?? current.trendFocusCategory ?? "all",
       telegramBotToken: workflowConfig?.telegramBotToken ?? current.telegramBotToken ?? "",
       telegramAdminChatId: workflowConfig?.telegramAdminChatId ?? current.telegramAdminChatId ?? "",
       youtubeDataApiKey: workflowConfig?.youtubeDataApiKey ?? current.youtubeDataApiKey ?? "",
@@ -719,6 +741,8 @@ export function CrawlingPage() {
   }, [
     workflowConfig?.telegramAdminChatId,
     workflowConfig?.telegramBotToken,
+    workflowConfig?.trendDiscoveryMode,
+    workflowConfig?.trendFocusCategory,
     workflowConfig?.trendWindow,
     workflowConfig?.youtubeDataApiKey
   ]);
@@ -905,6 +929,17 @@ export function CrawlingPage() {
 
   const handleRunShortlist = async () => {
     setMessage("");
+    await saveWorkflowConfig({
+      trendWindow: fieldValues.trendWindow === "3d" ? "3d" : "24h",
+      trendDiscoveryMode:
+        fieldValues.trendDiscoveryMode === "news_card" ? "news_card" : "shortform_story",
+      trendFocusCategory:
+        fieldValues.trendFocusCategory === "world" ||
+        fieldValues.trendFocusCategory === "breaking" ||
+        fieldValues.trendFocusCategory === "china"
+          ? fieldValues.trendFocusCategory
+          : "all"
+    });
     await sendMockShortlist();
     await refreshTelegramStatus();
     const nextJobId = useAppStore.getState().telegramStatus?.activeJob?.id;
@@ -1110,6 +1145,14 @@ export function CrawlingPage() {
     if (actionId === "save_telegram_config") {
       await saveWorkflowConfig({
         trendWindow: fieldValues.trendWindow === "3d" ? "3d" : "24h",
+        trendDiscoveryMode:
+          fieldValues.trendDiscoveryMode === "news_card" ? "news_card" : "shortform_story",
+        trendFocusCategory:
+          fieldValues.trendFocusCategory === "world" ||
+          fieldValues.trendFocusCategory === "breaking" ||
+          fieldValues.trendFocusCategory === "china"
+            ? fieldValues.trendFocusCategory
+            : "all",
         telegramBotToken: fieldValues.telegramBotToken?.trim() || undefined,
         telegramAdminChatId: fieldValues.telegramAdminChatId?.trim() || undefined
       });
@@ -1120,6 +1163,11 @@ export function CrawlingPage() {
     if (actionId === "sync_telegram") {
       await refreshTelegramStatus();
       setMessage(copy.telegramSynced);
+      return;
+    }
+
+    if (actionId === "fetch_trend_candidates") {
+      await handleRunShortlist();
       return;
     }
 
@@ -1223,9 +1271,20 @@ export function CrawlingPage() {
 
     if (actionId === "save_checkpoint_1") {
       const currentCandidate = toCandidate(fieldValues);
+      const hydratedProcessCandidates: ManualInputCandidateDraft[] = processCandidates.map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        summary: candidate.summary,
+        operatorSummary: candidate.summary,
+        sourceLabel: candidate.sourceLabel,
+        sourceUrl: candidate.sourceUrl,
+        sourceKind: "mock",
+        sourceRegion: "domestic"
+      }));
       const aggregateCandidates = [
         ...discoveredCandidates,
         ...queuedCandidates,
+        ...hydratedProcessCandidates,
         ...(currentCandidate ? [currentCandidate] : [])
       ];
       const uniqueById = new Map<string, ManualInputCandidateDraft>();
@@ -1248,7 +1307,15 @@ export function CrawlingPage() {
         request: {
           regions: ["global", "domestic"],
           limit: 10,
-          timeWindow: fieldValues.trendWindow === "3d" ? "3d" : "24h"
+          timeWindow: fieldValues.trendWindow === "3d" ? "3d" : "24h",
+          discoveryMode:
+            fieldValues.trendDiscoveryMode === "news_card" ? "news_card" : "shortform_story",
+          focusCategory:
+            fieldValues.trendFocusCategory === "world" ||
+            fieldValues.trendFocusCategory === "breaking" ||
+            fieldValues.trendFocusCategory === "china"
+              ? fieldValues.trendFocusCategory
+              : "all"
         },
         candidates,
         attachmentPaths: attachments.map((item) => item.path)
@@ -1352,6 +1419,13 @@ export function CrawlingPage() {
           >
             {selectedInputUi.fields
               .filter((field) => field.id !== "youtubeRequireCaptions")
+              .filter((field) =>
+                isTrendDiscoveryModule
+                  ? field.id === "trendDiscoveryMode" ||
+                    field.id === "trendFocusCategory" ||
+                    field.id === "trendWindow"
+                  : true
+              )
               .map((field) => {
               const className = field.width === "half" ? "field" : "field field-span-2";
               const value = fieldValues[field.id] ?? "";
@@ -1445,7 +1519,7 @@ export function CrawlingPage() {
           <div className="meta-list">
             <div>
               <strong>{copy.queuedCandidates}</strong>
-              <span>{queuedCandidates.length}</span>
+              <span>{isTrendDiscoveryModule ? 0 : queuedCandidates.length}</span>
             </div>
             <div>
               <strong>{copy.breakoutPreviewTitle}</strong>
@@ -1457,9 +1531,54 @@ export function CrawlingPage() {
             </div>
             <div>
               <strong>{copy.attachments}</strong>
-              <span>{attachments.length}</span>
+              <span>{isTrendDiscoveryModule ? 0 : attachments.length}</span>
             </div>
           </div>
+
+          {isTrendDiscoveryModule && trendCardCandidates.length > 0 ? (
+            <div className="workflow-slot-preview">
+              <strong>{copy.trendCardsTitle}</strong>
+              <span className="subtle">{copy.trendCardsHint}</span>
+              <div className="trend-card-gallery">
+                {trendCardCandidates.map((candidate) => (
+                  <article
+                    key={candidate.id}
+                    className={`trend-candidate-card ${
+                      processCandidateId === candidate.id ? "active" : ""
+                    }`}
+                  >
+                    <strong>{candidate.title}</strong>
+                    <p className="subtle">{candidate.summary}</p>
+                    <span className="subtle">{candidate.sourceLabel ?? "-"}</span>
+                    <div className="trend-candidate-card-actions">
+                      {candidate.sourceUrl ? (
+                        <a
+                          className="inline-link"
+                          href={candidate.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {copy.breakoutOpenVideo}
+                        </a>
+                      ) : (
+                        <span className="subtle">{copy.breakoutNoVideo}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="secondary-button slim"
+                        onClick={() => {
+                          setProcessCandidateId(candidate.id);
+                          setActivePreviewCandidateId(candidate.id);
+                        }}
+                      >
+                        {copy.trendPickCandidate}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {discoveredCandidates.length > 0 && (
             <div className="workflow-slot-preview">

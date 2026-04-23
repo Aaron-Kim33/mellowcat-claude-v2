@@ -35,6 +35,9 @@ export interface SceneScriptItem {
   cardDesign?: {
     id?: string;
     text?: string;
+    layerOrder?: number;
+    hidden?: boolean;
+    locked?: boolean;
     xPct: number;
     yPct: number;
     widthPct: number;
@@ -51,6 +54,9 @@ export interface SceneScriptItem {
   cardDesignBoxes?: Array<{
     id?: string;
     text?: string;
+    layerOrder?: number;
+    hidden?: boolean;
+    locked?: boolean;
     xPct: number;
     yPct: number;
     widthPct: number;

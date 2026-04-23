@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import type { OpenDialogOptions } from "electron";
 import type {
@@ -156,6 +158,67 @@ export function registerAutomationIpc(
     "automation:create:updateSceneScript",
     (_event, packagePath: string, document: SceneScriptDocument) =>
       productionPackageService.updateSceneScript(packagePath, document)
+  );
+  ipcMain.handle(
+    "automation:create:saveSceneCard",
+    (_event, packagePath: string, document: SceneScriptDocument, sceneNo: number) =>
+      productionPackageService.saveSceneCard(packagePath, document, sceneNo)
+  );
+  ipcMain.handle(
+    "automation:create:saveCardPreviewImageAs",
+    async (event, packagePath: string, sceneNo: number, pngBase64: string) => {
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      const saveResult = ownerWindow
+        ? await dialog.showSaveDialog(ownerWindow, {
+            title: "Save Card Preview",
+            defaultPath: path.join(packagePath, `card-${String(sceneNo).padStart(2, "0")}-preview.png`),
+            filters: [{ name: "PNG Image", extensions: ["png"] }]
+          })
+        : await dialog.showSaveDialog({
+            title: "Save Card Preview",
+            defaultPath: path.join(packagePath, `card-${String(sceneNo).padStart(2, "0")}-preview.png`),
+            filters: [{ name: "PNG Image", extensions: ["png"] }]
+          });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return undefined;
+      }
+      fs.mkdirSync(path.dirname(saveResult.filePath), { recursive: true });
+      fs.writeFileSync(saveResult.filePath, Buffer.from(pngBase64, "base64"));
+      return saveResult.filePath;
+    }
+  );
+  ipcMain.handle(
+    "automation:create:captureCardPreviewImageAs",
+    async (
+      event,
+      packagePath: string,
+      sceneNo: number,
+      bounds: { x: number; y: number; width: number; height: number }
+    ) => {
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!ownerWindow) {
+        throw new Error("Owner window was not found.");
+      }
+
+      const captureRect = {
+        x: Math.max(0, Math.round(bounds.x)),
+        y: Math.max(0, Math.round(bounds.y)),
+        width: Math.max(1, Math.round(bounds.width)),
+        height: Math.max(1, Math.round(bounds.height))
+      };
+      const captured = await ownerWindow.capturePage(captureRect);
+      const saveResult = await dialog.showSaveDialog(ownerWindow, {
+        title: "Save Card Preview",
+        defaultPath: path.join(packagePath, `card-${String(sceneNo).padStart(2, "0")}-preview.png`),
+        filters: [{ name: "PNG Image", extensions: ["png"] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return undefined;
+      }
+      fs.mkdirSync(path.dirname(saveResult.filePath), { recursive: true });
+      fs.writeFileSync(saveResult.filePath, captured.toPNG());
+      return saveResult.filePath;
+    }
   );
   ipcMain.handle("automation:workflow:runCreatePipeline", (_event, jobId: string) =>
     productionPackageService.runCreatePipeline(jobId)

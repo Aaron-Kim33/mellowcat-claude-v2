@@ -46,6 +46,7 @@ interface TelegramControlStateFile {
 }
 
 export class TelegramControlService {
+  private static readonly SHORTLIST_DISPLAY_LIMIT = 15;
   private pollTimer?: NodeJS.Timeout;
   private syncInFlight = false;
   private readonly debugInstanceId = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
@@ -265,8 +266,10 @@ export class TelegramControlService {
     const now = new Date().toISOString();
     const trendResult = await this.trendDiscoveryService.discoverCandidates({
       regions: ["global", "domestic"],
-      limit: 4,
-      timeWindow: workflowConfig.trendWindow ?? "24h"
+      limit: TelegramControlService.SHORTLIST_DISPLAY_LIMIT,
+      timeWindow: workflowConfig.trendWindow ?? "24h",
+      discoveryMode: workflowConfig.trendDiscoveryMode ?? "shortform_story",
+      focusCategory: workflowConfig.trendFocusCategory ?? "all"
     });
     const shouldUseAiSummary = workflowConfig.inputAiSummaryEnabled !== false;
     const enrichedGlobalCandidates = shouldUseAiSummary
@@ -306,8 +309,10 @@ export class TelegramControlService {
         job: nextState.activeJob,
         request: {
           regions: ["global", "domestic"],
-          limit: 4,
-          timeWindow: workflowConfig.trendWindow ?? "24h"
+          limit: TelegramControlService.SHORTLIST_DISPLAY_LIMIT,
+          timeWindow: workflowConfig.trendWindow ?? "24h",
+          discoveryMode: workflowConfig.trendDiscoveryMode ?? "shortform_story",
+          focusCategory: workflowConfig.trendFocusCategory ?? "all"
         },
         candidates: shortlistSelection.combinedCandidates,
         sourceDebug: trendResult.sourceDebug
@@ -2156,9 +2161,18 @@ export class TelegramControlService {
     globalCount: number;
     domesticCount: number;
   } {
-    const topGlobal = this.pickDiverseCandidates(globalCandidates, 2);
-    const topDomestic = this.pickDiverseCandidates(domesticCandidates, 2);
+    const displayLimit = TelegramControlService.SHORTLIST_DISPLAY_LIMIT;
+    const topGlobal = this.pickDiverseCandidates(globalCandidates, Math.ceil(displayLimit / 2));
+    const topDomestic = this.pickDiverseCandidates(domesticCandidates, Math.floor(displayLimit / 2));
     const combinedCandidates = [...topGlobal, ...topDomestic];
+
+    if (combinedCandidates.length < displayLimit) {
+      const usedIds = new Set(combinedCandidates.map((candidate) => candidate.id));
+      const fillPool = [...globalCandidates, ...domesticCandidates].filter(
+        (candidate) => !usedIds.has(candidate.id)
+      );
+      combinedCandidates.push(...fillPool.slice(0, displayLimit - combinedCandidates.length));
+    }
 
     const formatCandidateLines = (
       candidates: TrendCandidate[],
@@ -2176,8 +2190,14 @@ export class TelegramControlService {
 
     return {
       combinedCandidates,
-      globalLines: formatCandidateLines(topGlobal, 1),
-      domesticLines: formatCandidateLines(topDomestic, 1 + topGlobal.length),
+      globalLines: formatCandidateLines(
+        combinedCandidates.filter((candidate) => candidate.sourceRegion === "global"),
+        1
+      ),
+      domesticLines: formatCandidateLines(
+        combinedCandidates.filter((candidate) => candidate.sourceRegion === "domestic"),
+        1 + combinedCandidates.filter((candidate) => candidate.sourceRegion === "global").length
+      ),
       globalCount: globalCandidates.length,
       domesticCount: domesticCandidates.length
     };

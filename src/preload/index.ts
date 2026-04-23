@@ -126,6 +126,24 @@ const automationBridge: MellowCatAPI["automation"] = {
     document: SceneScriptDocument
   ): Promise<SceneScriptDocument> =>
     ipcRenderer.invoke("automation:create:updateSceneScript", packagePath, document),
+  saveSceneCard: (
+    packagePath: string,
+    document: SceneScriptDocument,
+    sceneNo: number
+  ): Promise<SceneScriptDocument> =>
+    ipcRenderer.invoke("automation:create:saveSceneCard", packagePath, document, sceneNo),
+  saveCardPreviewImageAs: (
+    packagePath: string,
+    sceneNo: number,
+    pngBase64: string
+  ): Promise<string | undefined> =>
+    ipcRenderer.invoke("automation:create:saveCardPreviewImageAs", packagePath, sceneNo, pngBase64),
+  captureCardPreviewImageAs: (
+    packagePath: string,
+    sceneNo: number,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<string | undefined> =>
+    ipcRenderer.invoke("automation:create:captureCardPreviewImageAs", packagePath, sceneNo, bounds),
   inspectWorkflowJob: (jobId: string) =>
     ipcRenderer.invoke("automation:workflow:inspectJob", jobId),
   getCreateReadiness: (jobId: string) =>

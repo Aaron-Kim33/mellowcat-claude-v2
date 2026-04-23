@@ -42,6 +42,9 @@ export interface TrendDiscoveryRequest {
   regions: TrendSourceRegion[];
   limit: number;
   timeWindow: "24h" | "3d";
+  discoveryMode?: "shortform_story" | "news_card";
+  focusCategory?: "all" | "world" | "breaking" | "china";
+  redditSubreddits?: string[];
 }
 
 export interface TrendDiscoveryResult {

@@ -231,6 +231,8 @@ export class ShortformWorkflowConfigService {
       createAiGenerationEnabled: false,
       outputAiGenerationEnabled: false,
       trendWindow: "24h",
+      trendDiscoveryMode: "shortform_story",
+      trendFocusCategory: "all",
       createTargetDurationSec: 60,
       createMinimumSceneCount: 3,
       createAssetSource: "pexels",
@@ -259,6 +261,17 @@ export class ShortformWorkflowConfigService {
 
   private normalizeConfig(config: ShortformWorkflowConfig): ShortformWorkflowConfig {
     const normalized = { ...config };
+
+    if (normalized.trendDiscoveryMode !== "news_card") {
+      normalized.trendDiscoveryMode = "shortform_story";
+    }
+    if (
+      normalized.trendFocusCategory !== "world" &&
+      normalized.trendFocusCategory !== "breaking" &&
+      normalized.trendFocusCategory !== "china"
+    ) {
+      normalized.trendFocusCategory = "all";
+    }
 
     if ((normalized.fluxApiBaseUrl ?? "").trim()) {
       normalized.fluxApiBaseUrl = this.normalizeFluxBaseUrl(normalized.fluxApiBaseUrl);

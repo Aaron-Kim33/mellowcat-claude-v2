@@ -31,6 +31,8 @@ export type ShortformScriptCategory = "horror" | "romance" | "community";
 export type ShortformIdeaStrategy = "pattern_remix" | "comment_gap" | "series_ip";
 export type ScriptLengthMode = "auto" | "shortform" | "longform";
 export type ProcessDraftMode = "auto_generate" | "manual_polish";
+export type TrendDiscoveryMode = "shortform_story" | "news_card";
+export type TrendFocusCategory = "all" | "world" | "breaking" | "china";
 
 export interface ShortformScriptResult {
   source: "claude" | "openrouter" | "openai" | "mock";
@@ -102,6 +104,8 @@ export interface ShortformWorkflowConfig {
   createAiGenerationEnabled?: boolean;
   outputAiGenerationEnabled?: boolean;
   trendWindow: "24h" | "3d";
+  trendDiscoveryMode?: TrendDiscoveryMode;
+  trendFocusCategory?: TrendFocusCategory;
   scriptProvider: WorkflowAiProvider;
   openRouterApiKey?: string;
   openRouterModel?: string;

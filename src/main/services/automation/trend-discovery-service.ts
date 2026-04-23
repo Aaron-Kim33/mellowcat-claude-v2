@@ -36,10 +36,16 @@ type RedditListingResponse = {
         upvote_ratio?: number;
         over_18?: boolean;
         is_self?: boolean;
+        url?: string;
+        domain?: string;
       };
     }>;
   };
 };
+
+type RedditPostData = NonNullable<
+  NonNullable<NonNullable<RedditListingResponse["data"]>["children"]>[number]["data"]
+>;
 
 type YouTubeApiVideosResponse = {
   items?: Array<{
@@ -94,13 +100,36 @@ type YouTubeApiErrorPayload = {
   };
 };
 
-const REDDIT_SUBREDDITS = [
+type TrendFocusCategory = "all" | "world" | "breaking" | "china";
+
+const REDDIT_SHORTFORM_SUBREDDITS = [
   "TrueOffMyChest",
   "tifu",
   "confession",
   "relationship_advice",
   "AmItheAsshole"
 ] as const;
+const REDDIT_NEWS_CARD_SUBREDDITS = [
+  "worldnews",
+  "news",
+  "China",
+  "technology",
+  "science",
+  "economics",
+  "geopolitics",
+  "business",
+  "OutOfTheLoop"
+] as const;
+const REDDIT_NEWS_TRUST_BONUS: Record<string, number> = {
+  worldnews: 10,
+  news: 10,
+  technology: 8,
+  science: 8,
+  economics: 7,
+  geopolitics: 7,
+  business: 6,
+  outoftheloop: 5
+};
 
 const REDDIT_USER_AGENT = "MellowCatTrendDiscovery/0.1";
 const HTML_HEADERS = {
@@ -110,6 +139,53 @@ const YOUTUBE_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+};
+
+type RedditDiscoveryMode = "shortform_story" | "news_card";
+
+const REDDIT_FOCUS_KEYWORDS: Record<Exclude<TrendFocusCategory, "all">, string[]> = {
+  world: [
+    "world",
+    "global",
+    "geopolit",
+    "foreign policy",
+    "diplom",
+    "sanction",
+    "war",
+    "conflict",
+    "nato",
+    "united nations",
+    "세계",
+    "정세",
+    "국제",
+    "외교"
+  ],
+  breaking: [
+    "breaking",
+    "urgent",
+    "developing",
+    "just in",
+    "alert",
+    "속보",
+    "긴급",
+    "실시간"
+  ],
+  china: [
+    "china",
+    "chinese",
+    "beijing",
+    "ccp",
+    "xi jinping",
+    "hong kong",
+    "taiwan",
+    "xinjiang",
+    "tibet",
+    "중국",
+    "시진핑",
+    "홍콩",
+    "대만",
+    "중화"
+  ]
 };
 
 export class TrendDiscoveryService {
@@ -478,18 +554,27 @@ export class TrendDiscoveryService {
       id: "reddit-global",
       region: "global",
       fetchCandidates: async (request) => {
+        const discoveryMode = this.resolveRedditDiscoveryMode(request);
+        const focusCategory = this.resolveRedditFocusCategory(request);
+        const subreddits = this.resolveRedditSubreddits(request);
         try {
           const batches = await Promise.all(
-            REDDIT_SUBREDDITS.map((subreddit) =>
-              this.fetchRedditSubredditCandidates(subreddit, request.timeWindow)
+            subreddits.map((subreddit) =>
+              this.fetchRedditSubredditCandidates(
+                subreddit,
+                request.timeWindow,
+                discoveryMode,
+                focusCategory
+              )
             )
           );
           const candidates = batches.flat().sort((left, right) => right.score - left.score);
 
           if (candidates.length > 0) {
             return {
-              candidates: candidates.slice(0, 5),
-              status: "ok" as const
+              candidates: candidates.slice(0, 12),
+              status: "ok" as const,
+              message: `mode=${discoveryMode} / focus=${focusCategory} / subs=${subreddits.join(",")}`
             };
           }
         } catch {
@@ -520,9 +605,9 @@ export class TrendDiscoveryService {
               fitReason:
                 "High engagement, first-person storytelling, easy to localize for Korean viewers."
             }
-          ],
+        ],
           status: "fallback" as const,
-          message: "Reddit live fetch returned no candidates. Using fallback seed."
+          message: `Reddit live fetch returned no candidates. Using fallback seed. mode=${discoveryMode} / focus=${focusCategory}`
         };
       }
     };
@@ -561,6 +646,83 @@ export class TrendDiscoveryService {
     };
   }
 
+  private resolveRedditDiscoveryMode(request: TrendDiscoveryRequest): RedditDiscoveryMode {
+    return request.discoveryMode === "news_card" ? "news_card" : "shortform_story";
+  }
+
+  private resolveRedditSubreddits(request: TrendDiscoveryRequest): string[] {
+    const rawCustom = request.redditSubreddits
+      ?.map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (rawCustom && rawCustom.length > 0) {
+      return [...new Set(rawCustom)];
+    }
+    const mode = this.resolveRedditDiscoveryMode(request);
+    if (mode !== "news_card") {
+      return [...REDDIT_SHORTFORM_SUBREDDITS];
+    }
+    const focusCategory = this.resolveRedditFocusCategory(request);
+    if (focusCategory === "all") {
+      return [...REDDIT_NEWS_CARD_SUBREDDITS];
+    }
+    if (focusCategory === "world") {
+      return ["worldnews", "geopolitics", "news", "economics", "business"];
+    }
+    if (focusCategory === "breaking") {
+      return ["news", "worldnews", "OutOfTheLoop", "geopolitics"];
+    }
+    return ["China", "worldnews", "geopolitics", "news", "technology"];
+  }
+
+  private resolveRedditFocusCategory(request: TrendDiscoveryRequest): TrendFocusCategory {
+    return request.focusCategory === "world" ||
+      request.focusCategory === "breaking" ||
+      request.focusCategory === "china"
+      ? request.focusCategory
+      : "all";
+  }
+
+  private matchesRedditPostType(
+    post: RedditPostData | undefined,
+    mode: RedditDiscoveryMode
+  ): boolean {
+    if (!post) {
+      return false;
+    }
+    if (mode === "news_card") {
+      return post.is_self === false;
+    }
+    return post.is_self !== false;
+  }
+
+  private matchesRedditQualityGate(
+    post: RedditPostData | undefined,
+    mode: RedditDiscoveryMode
+  ): boolean {
+    const ratio = post?.upvote_ratio ?? 0;
+    const comments = post?.num_comments ?? 0;
+    const upvotes = post?.ups ?? 0;
+    const selfTextLength = post?.selftext?.trim().length ?? 0;
+
+    if (mode === "news_card") {
+      return ratio >= 0.72 && comments >= 20 && upvotes >= 120;
+    }
+    return ratio >= 0.9 && selfTextLength >= 500 && selfTextLength <= 1000;
+  }
+
+  private resolveRedditSourceUrl(
+    post: RedditPostData | undefined
+  ): string | undefined {
+    const link = post?.url?.trim();
+    if (link && /^https?:\/\//i.test(link)) {
+      return link;
+    }
+    if (post?.permalink) {
+      return `https://www.reddit.com${post.permalink}`;
+    }
+    return undefined;
+  }
+
   private createDomesticCommunityAdapter(): TrendAdapter {
     return {
       id: "domestic-community",
@@ -595,7 +757,7 @@ export class TrendDiscoveryService {
 
         if (candidates.length > 0) {
           return {
-            candidates: this.pickDiverseTopCandidates(candidates, 5),
+            candidates: this.pickDiverseTopCandidates(candidates, 12),
             status: "ok" as const,
             message: messages.join(" | ")
           };
@@ -633,10 +795,12 @@ export class TrendDiscoveryService {
 
   private async fetchRedditSubredditCandidates(
     subreddit: string,
-    timeWindow: "24h" | "3d"
+    timeWindow: "24h" | "3d",
+    mode: RedditDiscoveryMode,
+    focusCategory: TrendFocusCategory
   ): Promise<TrendCandidate[]> {
     const response = await fetch(
-      `https://www.reddit.com/r/${subreddit}/top.json?raw_json=1&limit=15&t=${
+      `https://www.reddit.com/r/${subreddit}/top.json?raw_json=1&limit=30&t=${
         timeWindow === "24h" ? "day" : "week"
       }`,
       {
@@ -655,28 +819,29 @@ export class TrendDiscoveryService {
     return (payload.data?.children ?? [])
       .map((entry) => entry.data)
       .filter((post): post is NonNullable<typeof post> => Boolean(post?.id && post.title))
-      .filter((post) => post.is_self !== false)
+      .filter((post) => this.matchesRedditPostType(post, mode))
       .filter((post) => !post.over_18)
       .filter((post) => (post.created_utc ?? 0) >= minCreatedUtc)
-      .filter((post) => (post.upvote_ratio ?? 0) >= 0.9)
-      .filter((post) => {
-        const length = post.selftext?.trim().length ?? 0;
-        return length >= 500 && length <= 1000;
-      })
+      .filter((post) => this.matchesRedditQualityGate(post, mode))
+      .filter((post) => this.matchesRedditFocusCategory(post, focusCategory, mode))
       .map((post) => {
-        const summary = this.buildRedditSummary(post.selftext ?? "");
+        const summary = this.buildRedditSummary(post.selftext ?? "", mode, post.domain);
+        const sourceUrl = this.resolveRedditSourceUrl(post);
         return {
           id: `reddit-${post.id}`,
           title: post.title ?? "Untitled Reddit story",
           summary,
-          operatorSummary: this.buildRedditOperatorSummary(post.title ?? "", summary),
+          operatorSummary: this.buildRedditOperatorSummary(post.title ?? "", summary, mode),
           contentAngle: this.buildRedditContentAngle(post.title ?? "", post.selftext ?? ""),
           media: this.buildMediaMetadata(),
           sourceKind: "reddit" as const,
           sourceRegion: "global" as const,
           sourceLabel: `r/${post.subreddit ?? subreddit}`,
-          sourceUrl: post.permalink ? `https://www.reddit.com${post.permalink}` : undefined,
+          sourceUrl,
           score: this.calculateRedditScore({
+            subreddit: post.subreddit ?? subreddit,
+            mode,
+            focusCategory,
             title: post.title,
             created_utc: post.created_utc,
             ups: post.ups,
@@ -690,17 +855,67 @@ export class TrendDiscoveryService {
             comments: post.num_comments
           },
           fitReason:
-            "Strong first-person story format with high approval ratio and enough detail for a Korean shortform rewrite."
+            mode === "news_card"
+              ? `News-card profile: high signal subreddit, recent reaction volume, and ${focusCategory === "all" ? "external-source compatibility" : `${focusCategory} angle relevance`}.`
+              : "Strong first-person story format with high approval ratio and enough detail for a Korean shortform rewrite."
         };
       });
   }
 
-  private buildRedditSummary(selftext: string): string {
+  private matchesRedditFocusCategory(
+    post: RedditPostData,
+    focusCategory: TrendFocusCategory,
+    mode: RedditDiscoveryMode
+  ): boolean {
+    if (focusCategory === "all" || mode !== "news_card") {
+      return true;
+    }
+
+    const title = post.title?.toLowerCase() ?? "";
+    const body = post.selftext?.toLowerCase() ?? "";
+    const domain = post.domain?.toLowerCase() ?? "";
+    const subreddit = post.subreddit?.toLowerCase() ?? "";
+    const joined = `${title} ${body} ${domain} ${subreddit}`;
+    const keywords = REDDIT_FOCUS_KEYWORDS[focusCategory];
+    const matchedByKeyword = keywords.some((keyword) => joined.includes(keyword));
+
+    if (matchedByKeyword) {
+      return true;
+    }
+    if (focusCategory === "world") {
+      return subreddit === "worldnews" || subreddit === "geopolitics" || subreddit === "news";
+    }
+    if (focusCategory === "breaking") {
+      const recencyHours = post.created_utc
+        ? (Date.now() / 1000 - post.created_utc) / 3600
+        : Number.POSITIVE_INFINITY;
+      const comments = post.num_comments ?? 0;
+      return recencyHours <= 12 && comments >= 80;
+    }
+    return subreddit.includes("china");
+  }
+
+  private buildRedditSummary(selftext: string, mode: RedditDiscoveryMode, domain?: string): string {
+    if (mode === "news_card") {
+      const sourceHint = domain ? `Source domain: ${domain}.` : "";
+      const compactNews = selftext.replace(/\s+/g, " ").trim();
+      if (compactNews.length === 0) {
+        return `${sourceHint} Community reaction potential detected from a news-oriented subreddit.`.trim();
+      }
+      return compactNews.length > 140 ? `${compactNews.slice(0, 137)}...` : compactNews;
+    }
     const compact = selftext.replace(/\s+/g, " ").trim();
     return compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
   }
 
-  private buildRedditOperatorSummary(title: string, summary: string): string {
+  private buildRedditOperatorSummary(
+    title: string,
+    summary: string,
+    mode: RedditDiscoveryMode
+  ): string {
+    if (mode === "news_card") {
+      return `${title}. ${summary || "News-driven community reaction candidate with clear card-news remix potential."}`;
+    }
     return `${title}. ${summary || "A high-retention personal story candidate from Reddit."}`;
   }
 
@@ -719,6 +934,9 @@ export class TrendDiscoveryService {
   }
 
   private calculateRedditScore(post: {
+    subreddit?: string;
+    mode: RedditDiscoveryMode;
+    focusCategory: TrendFocusCategory;
     title?: string;
     created_utc?: number;
     ups?: number;
@@ -726,6 +944,25 @@ export class TrendDiscoveryService {
     upvote_ratio?: number;
     selftext?: string;
   }): number {
+    const focusBoost = this.calculateRedditFocusBoost(post);
+    if (post.mode === "news_card") {
+      const upvotes = Math.min((post.ups ?? 0) / 350, 26);
+      const comments = Math.min((post.num_comments ?? 0) / 20, 22);
+      const ratio = Math.round((post.upvote_ratio ?? 0) * 16);
+      const recencyHours = post.created_utc ? (Date.now() / 1000 - post.created_utc) / 3600 : 999;
+      const recency = recencyHours <= 12 ? 18 : recencyHours <= 24 ? 12 : recencyHours <= 72 ? 6 : 2;
+      const discussionDensity = Math.min(
+        (((post.num_comments ?? 0) / Math.max(post.ups ?? 1, 1)) * 140),
+        12
+      );
+      const sourceTrust =
+        REDDIT_NEWS_TRUST_BONUS[(post.subreddit ?? "").toLowerCase()] ?? 0;
+      const hookFit = this.calculateShortformHookScore(post.title ?? "", post.selftext ?? "") * 0.5;
+      return Math.round(
+        upvotes + comments + ratio + recency + discussionDensity + sourceTrust + hookFit + focusBoost
+      );
+    }
+
     const upvotes = Math.min((post.ups ?? 0) / 250, 40);
     const comments = Math.min((post.num_comments ?? 0) / 15, 25);
     const ratio = Math.round((post.upvote_ratio ?? 0) * 25);
@@ -739,8 +976,32 @@ export class TrendDiscoveryService {
       10
     );
     return Math.round(
-      upvotes + comments + ratio + lengthFit + recencyBoost + hookFit + discussionDensity
+      upvotes + comments + ratio + lengthFit + recencyBoost + hookFit + discussionDensity + focusBoost * 0.5
     );
+  }
+
+  private calculateRedditFocusBoost(post: {
+    subreddit?: string;
+    focusCategory: TrendFocusCategory;
+    title?: string;
+    selftext?: string;
+  }): number {
+    if (post.focusCategory === "all") {
+      return 0;
+    }
+
+    const joined = `${post.title ?? ""} ${post.selftext ?? ""} ${post.subreddit ?? ""}`.toLowerCase();
+    const keywords = REDDIT_FOCUS_KEYWORDS[post.focusCategory];
+    const hits = keywords.reduce((count, keyword) => (joined.includes(keyword) ? count + 1 : count), 0);
+
+    if (post.focusCategory === "china") {
+      const subredditBonus = (post.subreddit ?? "").toLowerCase().includes("china") ? 8 : 0;
+      return Math.min(18, hits * 5 + subredditBonus);
+    }
+    if (post.focusCategory === "breaking") {
+      return Math.min(14, hits * 4);
+    }
+    return Math.min(12, hits * 3);
   }
 
   private async fetchPannRankingCandidates(timeWindow: "24h" | "3d"): Promise<TrendCandidate[]> {
@@ -793,7 +1054,7 @@ export class TrendDiscoveryService {
       });
     });
 
-    return candidates.slice(0, 5);
+    return candidates.slice(0, 10);
   }
 
   private async fetchFmKoreaBestCandidates(timeWindow: "24h" | "3d"): Promise<TrendCandidate[]> {
@@ -874,7 +1135,7 @@ export class TrendDiscoveryService {
       });
     });
 
-    return candidates.slice(0, 5);
+    return candidates.slice(0, 10);
   }
 
   private async fetchDcHitGalleryCandidates(timeWindow: "24h" | "3d"): Promise<TrendCandidate[]> {
@@ -931,7 +1192,7 @@ export class TrendDiscoveryService {
       });
     });
 
-    return candidates.slice(0, 5);
+    return candidates.slice(0, 10);
   }
 
   private calculateDomesticScore(input: {

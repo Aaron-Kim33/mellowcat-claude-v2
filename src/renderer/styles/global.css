@@ -502,6 +502,49 @@ textarea {
   align-content: start;
 }
 
+.trend-card-gallery {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trend-candidate-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid #d6d0c5;
+  background: linear-gradient(180deg, #fffef8, #f8f3e7);
+}
+
+.trend-candidate-card strong {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #21201d;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.trend-candidate-card .subtle {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #6c6558;
+}
+
+.trend-candidate-card.active {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.trend-candidate-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .youtube-breakout-card {
   display: grid;
   gap: 6px;
@@ -944,6 +987,20 @@ textarea {
   gap: 8px;
 }
 
+.workflow-slot-candidate-list.compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-slot-candidate-list.compact .pill-button {
+  padding: 4px 9px;
+  min-height: 28px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.1;
+}
+
 .workflow-slot-attachment-item,
 .workflow-slot-candidate-card {
   display: grid;
@@ -1352,8 +1409,12 @@ code {
 }
 
 .generation-shell--canvas {
-  grid-template-columns: minmax(330px, 0.95fr) minmax(620px, 1.7fr) minmax(300px, 0.9fr);
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  grid-template-areas:
+    "editor preview"
+    "inspector preview";
   gap: 14px;
+  width: 100%;
 }
 
 .generation-prebuild {
@@ -1438,11 +1499,11 @@ code {
 }
 
 .generation-shell--canvas .generation-editor {
-  grid-column: 1;
+  grid-area: editor;
 }
 
 .generation-shell--canvas .generation-preview {
-  grid-column: 2;
+  grid-area: preview;
   min-height: calc(100vh - 220px);
   grid-template-rows: auto auto 1fr;
   position: sticky;
@@ -1450,9 +1511,9 @@ code {
 }
 
 .generation-shell--canvas .generation-inspector {
-  grid-column: 3;
-  max-height: calc(100vh - 220px);
-  overflow: auto;
+  grid-area: inspector;
+  max-height: none;
+  overflow: visible;
 }
 
 .generation-preview-banner {
@@ -1473,7 +1534,12 @@ code {
 }
 
 .generation-preview-media--canvas {
-  min-height: 640px;
+  min-height: calc(100vh - 290px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 10px;
 }
 
 .generation-preview-media img,
@@ -1486,6 +1552,34 @@ code {
 .generation-preview-media--canvas img,
 .generation-preview-media--canvas video {
   max-height: 780px;
+}
+
+.generation-card-stage-shell {
+  width: 1080px;
+  height: 1920px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.generation-card-stage {
+  position: relative;
+  width: 1080px;
+  height: 1920px;
+  flex: 0 0 auto;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  transform-origin: top left;
+  transform: scale(1);
+}
+
+.generation-card-stage > img,
+.generation-card-stage > video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  background: #000;
 }
 
 .generation-preview-media .subtle {
@@ -1552,6 +1646,15 @@ code {
   text-align: left;
 }
 
+.generation-thumb-select {
+  display: grid;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
 .generation-thumb-card img {
   width: 82px;
   height: 126px;
@@ -1568,6 +1671,145 @@ code {
 .generation-thumb-card.active {
   border-color: #cfb4ff;
   background: #f8f2ff;
+}
+
+.card-layer-field {
+  gap: 8px;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cdd6ef;
+}
+
+.checkbox-inline input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
+.card-layer-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.card-layer-item {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #3b4050;
+  background: rgba(18, 20, 24, 0.84);
+  color: #e7ebff;
+  text-align: left;
+}
+
+.card-layer-item.active {
+  border-color: #ff9b7a;
+  box-shadow: 0 0 0 1px rgba(255, 155, 122, 0.45) inset;
+}
+
+.layer-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.layer-meta {
+  font-size: 10px;
+  color: #aeb6cf;
+}
+
+.layer-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.layer-icon-btn {
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #4d5262;
+  background: rgba(30, 33, 42, 0.95);
+  color: #f2f5ff;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.layer-drag-handle {
+  margin-left: auto;
+  color: #93a0c3;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.card-layer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.card-preset-row {
+  margin-top: 0;
+  gap: 4px;
+}
+
+.card-preset-row .card-tool-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.card-tool-btn {
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid #4a5061;
+  background: rgba(21, 24, 30, 0.9);
+  color: #e9eeff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.card-tool-btn.danger {
+  border-color: #6f3b49;
+  background: rgba(69, 29, 42, 0.95);
+}
+
+.card-tool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.card-path-compact-grid {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.card-path-compact-item {
+  display: grid;
+  gap: 6px;
+}
+
+.card-path-compact-item > span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.card-path-compact-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.generation-inspector.card .generation-preview-prompt:first-of-type {
+  display: none;
 }
 
 .generation-shell--canvas .generation-preview .meta-list,
@@ -1608,6 +1850,10 @@ code {
 
   .generation-shell--canvas {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "editor"
+      "preview"
+      "inspector";
   }
 
   .generation-shell--canvas .generation-preview,
@@ -1621,6 +1867,11 @@ code {
 
   .generation-preview-media--canvas {
     min-height: 380px;
+  }
+
+  .generation-card-stage-shell {
+    width: 100%;
+    height: auto;
   }
 
   .crawling-input-grid {

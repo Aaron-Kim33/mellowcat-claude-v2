@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type {
-  CardNewsCoverSource,
   CardNewsLayoutPreset,
-  CardNewsOutputFormat,
   CardNewsTransitionStyle,
   SceneScriptDocument,
   SceneScriptItem,
@@ -30,35 +28,6 @@ const VOICE_PROVIDER_OPTIONS: Array<SceneScriptVoiceProfile["provider"]> = [
   "azure",
   "openai"
 ];
-const CARD_NEWS_LAYOUT_OPTIONS: Array<{ value: CardNewsLayoutPreset; labelKo: string; labelEn: string }> = [
-  { value: "headline_focus", labelKo: "헤드라인 집중", labelEn: "Headline Focus" },
-  { value: "split_story", labelKo: "좌우 분할 스토리", labelEn: "Split Story" },
-  { value: "data_highlight", labelKo: "데이터 하이라이트", labelEn: "Data Highlight" }
-];
-const CARD_NEWS_TRANSITION_OPTIONS: Array<{
-  value: CardNewsTransitionStyle;
-  labelKo: string;
-  labelEn: string;
-}> = [
-  { value: "cut", labelKo: "컷", labelEn: "Cut" },
-  { value: "slide", labelKo: "슬라이드", labelEn: "Slide" },
-  { value: "fade", labelKo: "페이드", labelEn: "Fade" },
-  { value: "wipe", labelKo: "와이프", labelEn: "Wipe" }
-];
-const CARD_NEWS_OUTPUT_OPTIONS: Array<{ value: CardNewsOutputFormat; labelKo: string; labelEn: string }> = [
-  { value: "shorts_9_16", labelKo: "쇼츠 9:16", labelEn: "Shorts 9:16" },
-  { value: "feed_4_5", labelKo: "피드 4:5", labelEn: "Feed 4:5" },
-  { value: "square_1_1", labelKo: "정사각 1:1", labelEn: "Square 1:1" }
-];
-const CARD_NEWS_COVER_SOURCE_OPTIONS: Array<{
-  value: CardNewsCoverSource;
-  labelKo: string;
-  labelEn: string;
-}> = [
-  { value: "ai_generate", labelKo: "AI 생성", labelEn: "AI Generate" },
-  { value: "manual_upload", labelKo: "직접 업로드", labelEn: "Manual Upload" }
-];
-
 const CARD_NEWS_TEXT_PRESETS = [
   { id: "headline", labelKo: "헤드라인", labelEn: "Headline", fontSize: 64, fontWeight: 800 as const, lineHeight: 1.2 },
   { id: "story", labelKo: "스토리", labelEn: "Story", fontSize: 48, fontWeight: 700 as const, lineHeight: 1.28 },
@@ -179,6 +148,9 @@ function getCardLayoutSubtitlePreset(layoutPreset: CardNewsLayoutPreset): Partia
 
 function buildDefaultCardDesign(sceneNo: number): NonNullable<SceneScriptItem["cardDesign"]> {
   return {
+    layerOrder: 0,
+    hidden: false,
+    locked: false,
     xPct: 8,
     yPct: sceneNo === 1 ? 72 : 58,
     widthPct: 84,
@@ -205,6 +177,10 @@ function toFriendlySceneScriptErrorMessage(error: unknown, isKorean: boolean): s
   return raw;
 }
 
+function cloneSceneScriptDocument(document: SceneScriptDocument): SceneScriptDocument {
+  return JSON.parse(JSON.stringify(document)) as SceneScriptDocument;
+}
+
 export function GenerationPage() {
   const {
     settings,
@@ -215,6 +191,8 @@ export function GenerationPage() {
     workflowJobSnapshot,
     inspectSceneScript,
     saveSceneScript,
+    saveSceneCard,
+    captureCardPreviewImageAs,
     saveWorkflowConfig,
     pickCreateBackgroundFile,
     pickYouTubePackageFolder
@@ -237,6 +215,15 @@ export function GenerationPage() {
   const [cardDesignDrag, setCardDesignDrag] = useState<CardDesignDragState | null>(null);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState(0);
   const [snapGuides, setSnapGuides] = useState<{ verticalPct?: number; horizontalPct?: number }>({});
+  const [draggingLayerIndex, setDraggingLayerIndex] = useState<number | null>(null);
+  const [dragOverLayerIndex, setDragOverLayerIndex] = useState<number | null>(null);
+  const [undoStack, setUndoStack] = useState<SceneScriptDocument[]>([]);
+  const [redoStack, setRedoStack] = useState<SceneScriptDocument[]>([]);
+  const [showCardBoxOutline, setShowCardBoxOutline] = useState(true);
+  const editableDocumentRef = useRef<SceneScriptDocument | null>(null);
+  const previewStageRef = useRef<HTMLDivElement | null>(null);
+  const previewViewportRef = useRef<HTMLDivElement | null>(null);
+  const [cardStageScale, setCardStageScale] = useState(1);
   const isKorean = settings?.launcherLanguage === "ko";
   const createModuleId = workflowConfig?.createModuleId ?? "youtube-material-generator-mcp";
   const sceneStylePresets = useMemo(
@@ -285,8 +272,71 @@ export function GenerationPage() {
       : "Quickly review selected scene narration, keyword, and motion here.";
 
   useEffect(() => {
+    editableDocumentRef.current = editableDocument;
+  }, [editableDocument]);
+
+  const applyDocumentUpdate = (
+    updater: (current: SceneScriptDocument) => SceneScriptDocument,
+    options?: { recordHistory?: boolean }
+  ) => {
+    const current = editableDocumentRef.current;
+    if (!current) {
+      return;
+    }
+    const next = updater(current);
+    const currentSnapshot = cloneSceneScriptDocument(current);
+    const nextSnapshot = cloneSceneScriptDocument(next);
+    if (JSON.stringify(currentSnapshot) === JSON.stringify(nextSnapshot)) {
+      return;
+    }
+    if (options?.recordHistory !== false) {
+      setUndoStack((prev) => [...prev.slice(-79), currentSnapshot]);
+      setRedoStack([]);
+    }
+    editableDocumentRef.current = nextSnapshot;
+    setEditableDocument(nextSnapshot);
+  };
+
+  const undoDocumentChange = () => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) {
+        return prev;
+      }
+      const current = editableDocumentRef.current;
+      const previous = prev[prev.length - 1];
+      if (current) {
+        setRedoStack((redoPrev) => [...redoPrev.slice(-79), cloneSceneScriptDocument(current)]);
+      }
+      const previousSnapshot = cloneSceneScriptDocument(previous);
+      editableDocumentRef.current = previousSnapshot;
+      setEditableDocument(previousSnapshot);
+      return prev.slice(0, -1);
+    });
+  };
+
+  const redoDocumentChange = () => {
+    setRedoStack((prev) => {
+      if (prev.length === 0) {
+        return prev;
+      }
+      const current = editableDocumentRef.current;
+      const next = prev[prev.length - 1];
+      if (current) {
+        setUndoStack((undoPrev) => [...undoPrev.slice(-79), cloneSceneScriptDocument(current)]);
+      }
+      const nextSnapshot = cloneSceneScriptDocument(next);
+      editableDocumentRef.current = nextSnapshot;
+      setEditableDocument(nextSnapshot);
+      return prev.slice(0, -1);
+    });
+  };
+
+  useEffect(() => {
     if (!resolvedPackagePath) {
       setEditableDocument(null);
+      editableDocumentRef.current = null;
+      setUndoStack([]);
+      setRedoStack([]);
       return;
     }
     void inspectSceneScript(resolvedPackagePath).catch((error) => {
@@ -297,9 +347,12 @@ export function GenerationPage() {
   useEffect(() => {
     if (!sceneScript) {
       setEditableDocument(null);
+      editableDocumentRef.current = null;
+      setUndoStack([]);
+      setRedoStack([]);
       return;
     }
-    setEditableDocument({
+    const loadedDocument: SceneScriptDocument = {
       ...sceneScript,
       scenes: sceneScript.scenes.map((scene) => ({
         ...scene,
@@ -314,12 +367,22 @@ export function GenerationPage() {
         cardDesignBoxes:
           isCardNewsModule && scene.sceneNo > 1
             ? (scene.cardDesignBoxes && scene.cardDesignBoxes.length > 0
-                ? scene.cardDesignBoxes
+                ? scene.cardDesignBoxes.map((box, index) => ({
+                    ...buildDefaultCardDesign(scene.sceneNo),
+                    ...(box ?? {}),
+                    id: box?.id ?? `box-${scene.sceneNo}-${index + 1}`,
+                    layerOrder: box?.layerOrder ?? index,
+                    hidden: Boolean(box?.hidden),
+                    locked: Boolean(box?.locked)
+                  }))
                 : [
                     {
                       ...buildDefaultCardDesign(scene.sceneNo),
                       ...(scene.cardDesign ?? {}),
-                      id: `box-${scene.sceneNo}-1`
+                      id: `box-${scene.sceneNo}-1`,
+                      layerOrder: 0,
+                      hidden: false,
+                      locked: false
                     }
                   ])
             : scene.cardDesignBoxes
@@ -335,7 +398,11 @@ export function GenerationPage() {
             templateBackgroundPath: sceneScript.cardNews?.templateBackgroundPath ?? ""
           }
         : sceneScript.cardNews
-    });
+    };
+    setEditableDocument(loadedDocument);
+    editableDocumentRef.current = loadedDocument;
+    setUndoStack([]);
+    setRedoStack([]);
     setSelectedSceneNo(sceneScript.scenes[0]?.sceneNo ?? 1);
   }, [isCardNewsModule, sceneScript]);
 
@@ -348,9 +415,13 @@ export function GenerationPage() {
       return [] as Array<NonNullable<SceneScriptItem["cardDesign"]>>;
     }
     if (selectedScene.cardDesignBoxes && selectedScene.cardDesignBoxes.length > 0) {
-      return selectedScene.cardDesignBoxes.map((box) => ({
+      return selectedScene.cardDesignBoxes.map((box, index) => ({
         ...buildDefaultCardDesign(selectedScene.sceneNo),
-        ...(box ?? {})
+        ...(box ?? {}),
+        id: box?.id ?? `box-${selectedScene.sceneNo}-${index + 1}`,
+        layerOrder: box?.layerOrder ?? index,
+        hidden: Boolean(box?.hidden),
+        locked: Boolean(box?.locked)
       }));
     }
     return [
@@ -366,6 +437,23 @@ export function GenerationPage() {
         ? selectedCardDesignBoxes[Math.min(selectedBoxIndex, selectedCardDesignBoxes.length - 1)] ?? null
         : null,
     [selectedBoxIndex, selectedCardDesignBoxes]
+  );
+  const isCardBoxTextMode = Boolean(
+    isCardNewsModule && selectedScene && selectedScene.sceneNo > 1 && selectedCardDesign
+  );
+  const activeTextValue = isCardBoxTextMode
+    ? selectedCardDesign?.text ?? ""
+    : selectedScene?.text ?? "";
+  const previewCardDesignBoxes = useMemo(
+    () =>
+      selectedCardDesignBoxes
+        .map((box, index) => ({
+          ...box,
+          _sourceIndex: index
+        }))
+        .filter((box) => !box.hidden)
+        .sort((left, right) => (left.layerOrder ?? left._sourceIndex) - (right.layerOrder ?? right._sourceIndex)),
+    [selectedCardDesignBoxes]
   );
   const totalDurationSec = useMemo(
     () =>
@@ -389,6 +477,37 @@ export function GenerationPage() {
       setSelectedBoxIndex(0);
     }
   }, [selectedBoxIndex, selectedCardDesignBoxes.length]);
+
+  useEffect(() => {
+    setDraggingLayerIndex(null);
+    setDragOverLayerIndex(null);
+  }, [selectedSceneNo]);
+
+  useEffect(() => {
+    if (!isCardNewsModule) {
+      setCardStageScale(1);
+      return;
+    }
+    const viewport = previewViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const updateScale = () => {
+      const rect = viewport.getBoundingClientRect();
+      const maxWidth = Math.max(120, rect.width - 24);
+      const maxHeight = Math.max(120, rect.height - 24);
+      const scale = Math.min(maxWidth / 1080, maxHeight / 1920, 1);
+      setCardStageScale(Number.isFinite(scale) && scale > 0 ? Math.max(0.2, scale) : 1);
+    };
+    updateScale();
+    const observer = new ResizeObserver(() => updateScale());
+    observer.observe(viewport);
+    window.addEventListener("resize", updateScale);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateScale);
+    };
+  }, [isCardNewsModule, selectedSceneNo, hasGeneratedAssets]);
   const sceneAssetCandidates = useMemo(() => {
     if (!resolvedPackagePath || !selectedScene) {
       return [];
@@ -443,10 +562,7 @@ export function GenerationPage() {
   };
 
   const updateScene = (sceneNo: number, patch: Partial<SceneScriptItem>) => {
-    setEditableDocument((current) => {
-      if (!current) {
-        return current;
-      }
+    applyDocumentUpdate((current) => {
       const scenes = current.scenes.map((scene) =>
         scene.sceneNo === sceneNo ? { ...scene, ...patch } : scene
       );
@@ -463,10 +579,7 @@ export function GenerationPage() {
     boxIndex: number,
     patch: Partial<NonNullable<SceneScriptItem["cardDesign"]>>
   ) => {
-    setEditableDocument((current) => {
-      if (!current) {
-        return current;
-      }
+    applyDocumentUpdate((current) => {
       const scenes = current.scenes.map((scene) => {
         if (scene.sceneNo !== sceneNo) {
           return scene;
@@ -489,9 +602,20 @@ export function GenerationPage() {
               ? {
                   ...buildDefaultCardDesign(scene.sceneNo),
                   ...(box ?? {}),
+                  id: box?.id ?? `box-${scene.sceneNo}-${index + 1}`,
+                  layerOrder: box?.layerOrder ?? index,
+                  hidden: Boolean(box?.hidden),
+                  locked: Boolean(box?.locked),
                   ...patch
                 }
-              : box
+              : {
+                  ...buildDefaultCardDesign(scene.sceneNo),
+                  ...(box ?? {}),
+                  id: box?.id ?? `box-${scene.sceneNo}-${index + 1}`,
+                  layerOrder: box?.layerOrder ?? index,
+                  hidden: Boolean(box?.hidden),
+                  locked: Boolean(box?.locked)
+                }
           ),
           cardDesign: {
             ...buildDefaultCardDesign(scene.sceneNo),
@@ -510,16 +634,23 @@ export function GenerationPage() {
 
   const getCardDesignBoxesForScene = (scene: SceneScriptItem): Array<CardDesignBox> => {
     if (scene.cardDesignBoxes && scene.cardDesignBoxes.length > 0) {
-      return scene.cardDesignBoxes.map((box) => ({
+      return scene.cardDesignBoxes.map((box, index) => ({
         ...buildDefaultCardDesign(scene.sceneNo),
-        ...(box ?? {})
+        ...(box ?? {}),
+        id: box?.id ?? `box-${scene.sceneNo}-${index + 1}`,
+        layerOrder: box?.layerOrder ?? index,
+        hidden: Boolean(box?.hidden),
+        locked: Boolean(box?.locked)
       }));
     }
     return [
       {
         ...buildDefaultCardDesign(scene.sceneNo),
         ...(scene.cardDesign ?? {}),
-        id: `box-${scene.sceneNo}-1`
+        id: `box-${scene.sceneNo}-1`,
+        layerOrder: 0,
+        hidden: false,
+        locked: false
       }
     ];
   };
@@ -529,10 +660,7 @@ export function GenerationPage() {
     updater: (boxes: Array<CardDesignBox>) => Array<CardDesignBox>,
     nextSelectedIndex?: number
   ) => {
-    setEditableDocument((current) => {
-      if (!current) {
-        return current;
-      }
+    applyDocumentUpdate((current) => {
       const scenes = current.scenes.map((scene) => {
         if (scene.sceneNo !== sceneNo) {
           return scene;
@@ -541,7 +669,10 @@ export function GenerationPage() {
         const updatedBoxes = updater(currentBoxes).map((box, index) => ({
           ...buildDefaultCardDesign(scene.sceneNo),
           ...(box ?? {}),
-          id: box?.id ?? `box-${scene.sceneNo}-${index + 1}`
+          id: box?.id ?? `box-${scene.sceneNo}-${index + 1}`,
+          layerOrder: box?.layerOrder ?? index,
+          hidden: Boolean(box?.hidden),
+          locked: Boolean(box?.locked)
         }));
         const safePrimary = updatedBoxes[0] ?? buildDefaultCardDesign(scene.sceneNo);
         return {
@@ -575,6 +706,7 @@ export function GenerationPage() {
         {
           ...buildDefaultCardDesign(selectedScene.sceneNo),
           id: `box-${selectedScene.sceneNo}-${boxes.length + 1}`,
+          layerOrder: boxes.length,
           yPct: Math.max(0, Math.min(84, 12 + boxes.length * 10)),
           text: ""
         }
@@ -598,6 +730,7 @@ export function GenerationPage() {
         const copied = {
           ...source,
           id: `box-${selectedScene.sceneNo}-${boxes.length + 1}`,
+          layerOrder: Math.max(...boxes.map((box) => box.layerOrder ?? 0), 0) + 1,
           xPct: Math.max(0, Math.min(86, source.xPct + 2)),
           yPct: Math.max(0, Math.min(86, source.yPct + 2))
         };
@@ -617,6 +750,118 @@ export function GenerationPage() {
       (boxes) => boxes.filter((_, index) => index !== safeIndex),
       Math.max(0, safeIndex - 1)
     );
+  };
+
+  const toggleCardDesignLockAt = (index: number) => {
+    if (!selectedScene) {
+      return;
+    }
+    const target = selectedCardDesignBoxes[Math.max(0, Math.min(index, selectedCardDesignBoxes.length - 1))];
+    if (!target) {
+      return;
+    }
+    updateCardDesign(selectedScene.sceneNo, index, {
+      locked: !target.locked
+    });
+  };
+
+  const toggleCardDesignHiddenAt = (index: number) => {
+    if (!selectedScene) {
+      return;
+    }
+    const target = selectedCardDesignBoxes[Math.max(0, Math.min(index, selectedCardDesignBoxes.length - 1))];
+    if (!target) {
+      return;
+    }
+    updateCardDesign(selectedScene.sceneNo, index, {
+      hidden: !target.hidden
+    });
+  };
+
+  const moveCardDesignLayer = (direction: "up" | "down") => {
+    if (!selectedScene || selectedCardDesignBoxes.length <= 1) {
+      return;
+    }
+    const safeIndex = Math.max(0, Math.min(selectedBoxIndex, selectedCardDesignBoxes.length - 1));
+    const targetIndex =
+      direction === "up"
+        ? Math.min(selectedCardDesignBoxes.length - 1, safeIndex + 1)
+        : Math.max(0, safeIndex - 1);
+    if (targetIndex === safeIndex) {
+      return;
+    }
+    updateCardDesignBoxes(
+      selectedScene.sceneNo,
+      (boxes) => {
+        const next = [...boxes];
+        const temp = next[safeIndex];
+        next[safeIndex] = next[targetIndex];
+        next[targetIndex] = temp;
+        return next.map((box, index) => ({
+          ...box,
+          layerOrder: index
+        }));
+      },
+      targetIndex
+    );
+  };
+
+  const reorderCardDesignLayer = (fromIndex: number, toIndex: number) => {
+    if (!selectedScene || selectedCardDesignBoxes.length <= 1) {
+      return;
+    }
+    const safeFrom = Math.max(0, Math.min(fromIndex, selectedCardDesignBoxes.length - 1));
+    const safeTo = Math.max(0, Math.min(toIndex, selectedCardDesignBoxes.length - 1));
+    if (safeFrom === safeTo) {
+      return;
+    }
+    updateCardDesignBoxes(
+      selectedScene.sceneNo,
+      (boxes) => {
+        const next = [...boxes];
+        const [moving] = next.splice(safeFrom, 1);
+        if (!moving) {
+          return boxes;
+        }
+        next.splice(safeTo, 0, moving);
+        return next.map((box, index) => ({
+          ...box,
+          layerOrder: index
+        }));
+      },
+      safeTo
+    );
+  };
+
+  const handleLayerDragStart = (event: ReactDragEvent<HTMLButtonElement>, index: number) => {
+    setDraggingLayerIndex(index);
+    setDragOverLayerIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  };
+
+  const handleLayerDragOver = (event: ReactDragEvent<HTMLButtonElement>, index: number) => {
+    event.preventDefault();
+    if (dragOverLayerIndex !== index) {
+      setDragOverLayerIndex(index);
+    }
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleLayerDrop = (event: ReactDragEvent<HTMLButtonElement>, targetIndex: number) => {
+    event.preventDefault();
+    const raw = event.dataTransfer.getData("text/plain");
+    const fromIndex = Number(raw);
+    if (Number.isFinite(fromIndex)) {
+      reorderCardDesignLayer(fromIndex, targetIndex);
+    }
+    setDraggingLayerIndex(null);
+    setDragOverLayerIndex(null);
+  };
+
+  const handleLayerDragEnd = () => {
+    setDraggingLayerIndex(null);
+    setDragOverLayerIndex(null);
   };
 
   const applyCardTextPreset = (presetId: string) => {
@@ -655,6 +900,9 @@ export function GenerationPage() {
     boxIndex: number,
     design: NonNullable<SceneScriptItem["cardDesign"]>
   ) => {
+    if (design.locked || design.hidden) {
+      return;
+    }
     const previewHost = event.currentTarget.parentElement;
     if (!previewHost) {
       return;
@@ -753,64 +1001,89 @@ export function GenerationPage() {
     };
   }, [cardDesignDrag]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isCardNewsModule) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTextEditable =
+        tag === "input" || tag === "textarea" || Boolean(target && target.isContentEditable);
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
+        if (isTextEditable) {
+          return;
+        }
+        event.preventDefault();
+        if (event.shiftKey) {
+          redoDocumentChange();
+        } else {
+          undoDocumentChange();
+        }
+        return;
+      }
+
+      if (isTextEditable) {
+        return;
+      }
+
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedScene?.sceneNo && selectedScene.sceneNo > 1) {
+        event.preventDefault();
+        removeCardDesignBox();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isCardNewsModule, redoDocumentChange, removeCardDesignBox, selectedScene?.sceneNo, undoDocumentChange]);
+
   const updateSubtitleStyle = (patch: Partial<SceneScriptSubtitleStyle>) => {
-    setEditableDocument((current) =>
-      current
-        ? {
-            ...current,
-            subtitleStyle: {
-              ...current.subtitleStyle,
-              ...patch
-            }
-          }
-        : current
-    );
+    applyDocumentUpdate((current) => ({
+      ...current,
+      subtitleStyle: {
+        ...current.subtitleStyle,
+        ...patch
+      }
+    }));
   };
 
   const updateVoiceProfile = (patch: Partial<SceneScriptVoiceProfile>) => {
-    setEditableDocument((current) =>
-      current
-        ? {
-            ...current,
-            voiceProfile: {
-              ...current.voiceProfile,
-              ...patch
-            }
-          }
-        : current
-    );
+    applyDocumentUpdate((current) => ({
+      ...current,
+      voiceProfile: {
+        ...current.voiceProfile,
+        ...patch
+      }
+    }));
   };
 
   const updateCardNewsOptions = (
     patch: Partial<NonNullable<SceneScriptDocument["cardNews"]>>
   ) => {
-    setEditableDocument((current) =>
-      current
-        ? (() => {
-            const nextCardNews = {
-              layoutPreset: current.cardNews?.layoutPreset ?? "headline_focus",
-              transitionStyle: current.cardNews?.transitionStyle ?? "cut",
-              outputFormat: current.cardNews?.outputFormat ?? "shorts_9_16",
-              ...patch
-            };
-            const transitionMotion = mapCardTransitionToMotion(nextCardNews.transitionStyle);
-            const subtitlePatch = patch.layoutPreset
-              ? getCardLayoutSubtitlePreset(nextCardNews.layoutPreset)
-              : {};
-            return {
-              ...current,
-              scenes: current.scenes.map((scene) =>
-                scene.sceneNo > 1 ? { ...scene, motion: transitionMotion } : scene
-              ),
-              subtitleStyle: {
-                ...current.subtitleStyle,
-                ...subtitlePatch
-              },
-              cardNews: nextCardNews
-            };
-          })()
-        : current
-    );
+    applyDocumentUpdate((current) => {
+      const nextCardNews = {
+        layoutPreset: current.cardNews?.layoutPreset ?? "headline_focus",
+        transitionStyle: current.cardNews?.transitionStyle ?? "cut",
+        outputFormat: current.cardNews?.outputFormat ?? "shorts_9_16",
+        ...patch
+      };
+      const transitionMotion = mapCardTransitionToMotion(nextCardNews.transitionStyle);
+      const subtitlePatch = patch.layoutPreset
+        ? getCardLayoutSubtitlePreset(nextCardNews.layoutPreset)
+        : {};
+      return {
+        ...current,
+        scenes: current.scenes.map((scene) =>
+          scene.sceneNo > 1 ? { ...scene, motion: transitionMotion } : scene
+        ),
+        subtitleStyle: {
+          ...current.subtitleStyle,
+          ...subtitlePatch
+        },
+        cardNews: nextCardNews
+      };
+    });
   };
 
   const applyStylePreset = (presetId: string) => {
@@ -819,15 +1092,11 @@ export function GenerationPage() {
       return;
     }
 
-    setEditableDocument((current) =>
-      current
-        ? {
-            ...current,
-            subtitleStyle: { ...preset.subtitleStyle },
-            voiceProfile: { ...preset.voiceProfile }
-          }
-        : current
-    );
+    applyDocumentUpdate((current) => ({
+      ...current,
+      subtitleStyle: { ...preset.subtitleStyle },
+      voiceProfile: { ...preset.voiceProfile }
+    }));
     void saveWorkflowConfig({ createSceneStylePresetId: presetId });
   };
 
@@ -840,6 +1109,26 @@ export function GenerationPage() {
     try {
       await saveSceneScript(editableDocument);
       setMessage(copy.saved);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : copy.saveError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveCurrentCard = async () => {
+    if (!editableDocument || !selectedScene) {
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      await saveSceneCard(editableDocument, selectedScene.sceneNo);
+      setMessage(
+        isKorean
+          ? `${selectedScene.sceneNo}장 카드 저장 완료 (card-drafts 생성).`
+          : `Card ${selectedScene.sceneNo} saved (card-drafts updated).`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : copy.saveError);
     } finally {
@@ -861,6 +1150,46 @@ export function GenerationPage() {
       return;
     }
     updateCardNewsOptions({ templateBackgroundPath: selectedPath });
+  };
+
+  const handleSaveCardPreviewImageAs = async (sceneNo: number) => {
+    if (!editableDocument || !resolvedPackagePath) {
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      if (selectedSceneNo !== sceneNo) {
+        setSelectedSceneNo(sceneNo);
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+      }
+      const stage = previewStageRef.current;
+      if (!stage) {
+        throw new Error(isKorean ? "프리뷰 스테이지를 찾지 못했습니다." : "Preview stage was not found.");
+      }
+      const rect = stage.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) {
+        throw new Error(isKorean ? "프리뷰 크기가 올바르지 않습니다." : "Preview bounds are invalid.");
+      }
+      const savedPath = await captureCardPreviewImageAs(
+        sceneNo,
+        { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+        resolvedPackagePath
+      );
+      if (savedPath) {
+        setMessage(
+          isKorean
+            ? `${sceneNo}장 프리뷰를 저장했습니다: ${savedPath}`
+            : `Saved scene ${sceneNo} preview: ${savedPath}`
+        );
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : copy.saveError);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -891,6 +1220,16 @@ export function GenerationPage() {
           >
             {busy ? copy.saving : copy.save}
           </button>
+          {isCardNewsModule ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!editableDocument || !selectedScene || busy}
+              onClick={() => void handleSaveCurrentCard()}
+            >
+              {isKorean ? "현재 카드 저장" : "Save Current Card"}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -921,7 +1260,13 @@ export function GenerationPage() {
                 : "Before assets are generated, you can quickly edit script, prompt, and duration. The advanced editor opens automatically after generation."}
             </p>
 
-            <div className="workflow-slot-candidate-list">
+            <div
+              className={
+                isCardNewsModule
+                  ? "workflow-slot-candidate-list compact"
+                  : "workflow-slot-candidate-list"
+              }
+            >
               {editableDocument.scenes.map((scene) => (
                 <button
                   key={scene.sceneNo}
@@ -955,10 +1300,16 @@ export function GenerationPage() {
                   <span>{textFieldLabel}</span>
                   <textarea
                     className="text-input textarea-input"
-                    value={selectedScene.text}
-                    onChange={(event) =>
-                      updateScene(selectedScene.sceneNo, { text: event.target.value })
-                    }
+                    value={activeTextValue}
+                    onChange={(event) => {
+                      if (isCardBoxTextMode) {
+                        updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                          text: event.target.value
+                        });
+                        return;
+                      }
+                      updateScene(selectedScene.sceneNo, { text: event.target.value });
+                    }}
                   />
                 </div>
                 {!isCardNewsModule || selectedScene.sceneNo === 1 ? (
@@ -988,21 +1339,23 @@ export function GenerationPage() {
                     </div>
                   </>
                 ) : null}
-                <div className="field">
-                  <span>{copy.durationSec}</span>
-                  <input
-                    className="text-input"
-                    type="number"
-                    min={1}
-                    max={30}
-                    value={selectedScene.durationSec}
-                    onChange={(event) =>
-                      updateScene(selectedScene.sceneNo, {
-                        durationSec: Number(event.target.value) || 1
-                      })
-                    }
-                  />
-                </div>
+                {!isCardNewsModule ? (
+                  <div className="field">
+                    <span>{copy.durationSec}</span>
+                    <input
+                      className="text-input"
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={selectedScene.durationSec}
+                      onChange={(event) =>
+                        updateScene(selectedScene.sceneNo, {
+                          durationSec: Number(event.target.value) || 1
+                        })
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -1014,29 +1367,29 @@ export function GenerationPage() {
                 <p className="eyebrow">{isKorean ? "Edit Suite" : "Edit Suite"}</p>
                 <h4>{moduleCopy.pageTitle}</h4>
                 <p className="subtle">
-                  {isKorean
+                  {isCardNewsModule ? `${editableDocument.scenes.length} cards` : isKorean
                     ? `씬 ${editableDocument.scenes.length}개 · 총 ${totalDurationSec}초`
                     : `${editableDocument.scenes.length} scenes · ${totalDurationSec}s total`}
                 </p>
               </div>
             </div>
 
-            <div className="generation-tab-row">
-              <button
-                type="button"
-                className={editorTab === "scene" ? "pill-button active" : "pill-button"}
-                onClick={() => setEditorTab("scene")}
-              >
-                {isKorean ? "Scene" : "Scene"}
-              </button>
-              <button
-                type="button"
-                className={editorTab === "subtitle" ? "pill-button active" : "pill-button"}
-                onClick={() => setEditorTab("subtitle")}
-              >
-                {isCardNewsModule ? (isKorean ? "Design" : "Design") : isKorean ? "Subtitle" : "Subtitle"}
-              </button>
-              {!isCardNewsModule ? (
+            {!isCardNewsModule ? (
+              <div className="generation-tab-row">
+                <button
+                  type="button"
+                  className={editorTab === "scene" ? "pill-button active" : "pill-button"}
+                  onClick={() => setEditorTab("scene")}
+                >
+                  {isKorean ? "Scene" : "Scene"}
+                </button>
+                <button
+                  type="button"
+                  className={editorTab === "subtitle" ? "pill-button active" : "pill-button"}
+                  onClick={() => setEditorTab("subtitle")}
+                >
+                  {isKorean ? "Subtitle" : "Subtitle"}
+                </button>
                 <button
                   type="button"
                   className={editorTab === "voice" ? "pill-button active" : "pill-button"}
@@ -1044,16 +1397,71 @@ export function GenerationPage() {
                 >
                   {isKorean ? "Voice" : "Voice"}
                 </button>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
 
             {editorTab === "scene" && (
               <>
+                {isCardNewsModule ? (
+                  <div className="card-path-compact-grid">
+                    <div className="card-path-compact-item">
+                      <span>{isKorean ? "1장 커버 이미지 경로" : "Cover Image Path (Card 1)"}</span>
+                      <div className="card-path-compact-row">
+                        <input
+                          className="text-input"
+                          type="text"
+                          value={editableDocument.cardNews?.coverImagePath ?? ""}
+                          onChange={(event) =>
+                            updateCardNewsOptions({
+                              coverImagePath: event.target.value
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="card-tool-btn"
+                          onClick={() => void handleChooseCardNewsCoverImage()}
+                        >
+                          {isKorean ? "찾아보기" : "Browse"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="card-path-compact-item">
+                      <span>{isKorean ? "2장 이후 템플릿 배경 경로" : "Template Background Path (Card 2+)"}</span>
+                      <div className="card-path-compact-row">
+                        <input
+                          className="text-input"
+                          type="text"
+                          value={editableDocument.cardNews?.templateBackgroundPath ?? ""}
+                          onChange={(event) =>
+                            updateCardNewsOptions({
+                              templateBackgroundPath: event.target.value
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="card-tool-btn"
+                          onClick={() => void handleChooseCardNewsTemplateImage()}
+                        >
+                          {isKorean ? "찾아보기" : "Browse"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="card-row">
                   <strong>{moduleCopy.sceneList}</strong>
                   <span className="pill">{editableDocument.scenes.length}</span>
                 </div>
-                <div className="workflow-slot-candidate-list">
+                <div
+                  className={
+                    isCardNewsModule
+                      ? "workflow-slot-candidate-list compact"
+                      : "workflow-slot-candidate-list"
+                  }
+                >
                   {editableDocument.scenes.map((scene) => (
                     <button
                       key={scene.sceneNo}
@@ -1087,36 +1495,111 @@ export function GenerationPage() {
                       <span>{textFieldLabel}</span>
                       <textarea
                         className="text-input textarea-input"
-                        value={selectedScene.text}
-                        onChange={(event) =>
-                          updateScene(selectedScene.sceneNo, { text: event.target.value })
-                        }
+                        value={activeTextValue}
+                        onChange={(event) => {
+                          if (isCardBoxTextMode) {
+                            updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                              text: event.target.value
+                            });
+                            return;
+                          }
+                          updateScene(selectedScene.sceneNo, { text: event.target.value });
+                        }}
                       />
                     </div>
                     {isCardNewsModule && selectedScene.sceneNo > 1 && selectedCardDesign ? (
                       <>
-                        <div className="field field-span-2">
+                        <div className="field field-span-2 card-layer-field">
                           <span>{isKorean ? "텍스트 박스" : "Text Boxes"}</span>
-                          <div className="button-row">
-                            {selectedCardDesignBoxes.map((_, index) => (
+                          <label className="checkbox-inline">
+                            <input
+                              type="checkbox"
+                              checked={showCardBoxOutline}
+                              onChange={(event) => setShowCardBoxOutline(event.target.checked)}
+                            />
+                            <span>{isKorean ? "박스 테두리 표시" : "Show Box Border"}</span>
+                          </label>
+                          <div className="card-layer-list">
+                            {selectedCardDesignBoxes.map((box, index) => (
                               <button
                                 key={`card-box-tab-${selectedScene.sceneNo}-${index}`}
                                 type="button"
-                                className={selectedBoxIndex === index ? "pill-button active" : "pill-button"}
+                                className={selectedBoxIndex === index ? "card-layer-item active" : "card-layer-item"}
                                 onClick={() => setSelectedBoxIndex(index)}
+                                draggable
+                                onDragStart={(event) => handleLayerDragStart(event, index)}
+                                onDragOver={(event) => handleLayerDragOver(event, index)}
+                                onDrop={(event) => handleLayerDrop(event, index)}
+                                onDragEnd={handleLayerDragEnd}
+                                style={{
+                                  opacity: draggingLayerIndex === index ? 0.55 : 1,
+                                  outline:
+                                    dragOverLayerIndex === index
+                                      ? "2px solid rgba(255,126,95,0.9)"
+                                      : undefined,
+                                  outlineOffset: dragOverLayerIndex === index ? "1px" : undefined
+                                }}
                               >
-                                {isKorean ? `박스 ${index + 1}` : `Box ${index + 1}`}
+                                <span className="layer-title">{`Box ${index + 1}`}</span>
+                                <span className="layer-meta">z{box.layerOrder ?? index}</span>
+                                <div className="layer-inline-actions">
+                                  <button
+                                    type="button"
+                                    className="layer-icon-btn"
+                                    title={box.hidden ? "Show layer" : "Hide layer"}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      toggleCardDesignHiddenAt(index);
+                                    }}
+                                  >
+                                    {box.hidden ? "🙈" : "👁"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="layer-icon-btn"
+                                    title={box.locked ? "Unlock layer" : "Lock layer"}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      toggleCardDesignLockAt(index);
+                                    }}
+                                  >
+                                    {box.locked ? "🔓" : "🔒"}
+                                  </button>
+                                  <span className="layer-drag-handle" title="Drag to reorder">
+                                    ::
+                                  </span>
+                                </div>
                               </button>
                             ))}
-                            <button type="button" className="pill-button" onClick={addCardDesignBox}>
+                          </div>
+                          <div className="card-layer-actions">
+                            <button type="button" className="card-tool-btn" onClick={addCardDesignBox}>
                               {isKorean ? "추가" : "Add"}
                             </button>
-                            <button type="button" className="pill-button" onClick={duplicateCardDesignBox}>
+                            <button type="button" className="card-tool-btn" onClick={duplicateCardDesignBox}>
                               {isKorean ? "복제" : "Duplicate"}
                             </button>
                             <button
                               type="button"
-                              className="pill-button"
+                              className="card-tool-btn"
+                              onClick={() => moveCardDesignLayer("up")}
+                              disabled={selectedBoxIndex >= selectedCardDesignBoxes.length - 1}
+                            >
+                              {isKorean ? "Bring Front" : "Bring Front"}
+                            </button>
+                            <button
+                              type="button"
+                              className="card-tool-btn"
+                              onClick={() => moveCardDesignLayer("down")}
+                              disabled={selectedBoxIndex <= 0}
+                            >
+                              {isKorean ? "Send Back" : "Send Back"}
+                            </button>
+                            <button
+                              type="button"
+                              className="card-tool-btn danger"
                               onClick={removeCardDesignBox}
                               disabled={selectedCardDesignBoxes.length <= 1}
                             >
@@ -1125,25 +1608,13 @@ export function GenerationPage() {
                           </div>
                         </div>
                         <div className="field field-span-2">
-                          <span>{isKorean ? "현재 박스 문구" : "Current Box Text"}</span>
-                          <textarea
-                            className="text-input textarea-input"
-                            value={selectedCardDesign.text ?? ""}
-                            onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                                text: event.target.value
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="field field-span-2">
                           <span>{isKorean ? "텍스트 프리셋" : "Text Presets"}</span>
-                          <div className="button-row">
+                          <div className="card-layer-actions card-preset-row">
                             {CARD_NEWS_TEXT_PRESETS.map((preset) => (
                               <button
                                 key={preset.id}
                                 type="button"
-                                className="pill-button"
+                                className="card-tool-btn"
                                 onClick={() => applyCardTextPreset(preset.id)}
                               >
                                 {isKorean ? preset.labelKo : preset.labelEn}
@@ -1153,78 +1624,18 @@ export function GenerationPage() {
                         </div>
                         <div className="field field-span-2">
                           <span>{isKorean ? "색상 프리셋" : "Color Presets"}</span>
-                          <div className="button-row">
+                          <div className="card-layer-actions card-preset-row">
                             {CARD_NEWS_COLOR_PRESETS.map((preset) => (
                               <button
                                 key={preset.id}
                                 type="button"
-                                className="pill-button"
+                                className="card-tool-btn"
                                 onClick={() => applyCardColorPreset(preset.id)}
                               >
                                 {isKorean ? preset.labelKo : preset.labelEn}
                               </button>
                             ))}
                           </div>
-                        </div>
-                        <div className="field">
-                          <span>{isKorean ? "텍스트 박스 X(%)" : "Text Box X (%)"}</span>
-                          <input
-                            className="text-input"
-                            type="number"
-                            min={0}
-                            max={90}
-                            value={selectedCardDesign.xPct}
-                            onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                                xPct: Number(event.target.value) || 0
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="field">
-                          <span>{isKorean ? "텍스트 박스 Y(%)" : "Text Box Y (%)"}</span>
-                          <input
-                            className="text-input"
-                            type="number"
-                            min={0}
-                            max={90}
-                            value={selectedCardDesign.yPct}
-                            onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                                yPct: Number(event.target.value) || 0
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="field">
-                          <span>{isKorean ? "박스 너비(%)" : "Box Width (%)"}</span>
-                          <input
-                            className="text-input"
-                            type="number"
-                            min={20}
-                            max={100}
-                            value={selectedCardDesign.widthPct}
-                            onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                                widthPct: Number(event.target.value) || 20
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="field">
-                          <span>{isKorean ? "박스 높이(%)" : "Box Height (%)"}</span>
-                          <input
-                            className="text-input"
-                            type="number"
-                            min={10}
-                            max={100}
-                            value={selectedCardDesign.heightPct}
-                            onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                                heightPct: Number(event.target.value) || 10
-                              })
-                            }
-                          />
                         </div>
                         <div className="field">
                           <span>{isKorean ? "폰트 크기" : "Font Size"}</span>
@@ -1383,46 +1794,50 @@ export function GenerationPage() {
                       </>
                     ) : null}
 
-                    <div className="field">
-                      <span>{copy.motion}</span>
-                      <select
-                        className="text-input"
-                        value={selectedScene.motion}
-                        onChange={(event) =>
-                          updateScene(selectedScene.sceneNo, {
-                            motion: event.target.value as SceneScriptItem["motion"]
-                          })
-                        }
-                      >
-                        {MOTION_OPTIONS.map((motion) => (
-                          <option key={motion} value={motion}>
-                            {motion}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {!isCardNewsModule ? (
+                      <div className="field">
+                        <span>{copy.motion}</span>
+                        <select
+                          className="text-input"
+                          value={selectedScene.motion}
+                          onChange={(event) =>
+                            updateScene(selectedScene.sceneNo, {
+                              motion: event.target.value as SceneScriptItem["motion"]
+                            })
+                          }
+                        >
+                          {MOTION_OPTIONS.map((motion) => (
+                            <option key={motion} value={motion}>
+                              {motion}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
 
-                    <div className="field">
-                      <span>{copy.durationSec}</span>
-                      <input
-                        className="text-input"
-                        type="number"
-                        min={1}
-                        max={30}
-                        value={selectedScene.durationSec}
-                        onChange={(event) =>
-                          updateScene(selectedScene.sceneNo, {
-                            durationSec: Number(event.target.value) || 1
-                          })
-                        }
-                      />
-                    </div>
+                    {!isCardNewsModule ? (
+                      <div className="field">
+                        <span>{copy.durationSec}</span>
+                        <input
+                          className="text-input"
+                          type="number"
+                          min={1}
+                          max={30}
+                          value={selectedScene.durationSec}
+                          onChange={(event) =>
+                            updateScene(selectedScene.sceneNo, {
+                              durationSec: Number(event.target.value) || 1
+                            })
+                          }
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </>
             )}
 
-            {editorTab === "subtitle" && (
+            {!isCardNewsModule && editorTab === "subtitle" && (
               <>
                 <h4>{copy.presetTitle}</h4>
                 <p className="subtle">{copy.presetSubtitle}</p>
@@ -1446,142 +1861,6 @@ export function GenerationPage() {
                     ))}
                   </div>
                 )}
-
-                {isCardNewsModule ? (
-                  <>
-                    <h4>{isKorean ? "카드뉴스 디테일" : "Card News Details"}</h4>
-                    <div className="form-grid">
-                      <div className="field">
-                        <span>{isKorean ? "1장 커버 소스" : "Cover Source (Card 1)"}</span>
-                        <select
-                          className="text-input"
-                          value={editableDocument.cardNews?.coverSource ?? "ai_generate"}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              coverSource: event.target.value as CardNewsCoverSource
-                            })
-                          }
-                        >
-                          {CARD_NEWS_COVER_SOURCE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {isKorean ? option.labelKo : option.labelEn}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field field-span-2">
-                        <span>{isKorean ? "1장 커버 프롬프트(어그로용)" : "Cover Prompt (Card 1)"}</span>
-                        <textarea
-                          className="text-input textarea-input"
-                          value={editableDocument.cardNews?.coverPrompt ?? ""}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              coverPrompt: event.target.value
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="field field-span-2">
-                        <span>{isKorean ? "1장 커버 이미지 경로" : "Cover Image Path (Card 1)"}</span>
-                        <div className="button-row">
-                          <input
-                            className="text-input"
-                            type="text"
-                            value={editableDocument.cardNews?.coverImagePath ?? ""}
-                            onChange={(event) =>
-                              updateCardNewsOptions({
-                                coverImagePath: event.target.value
-                              })
-                            }
-                          />
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={() => void handleChooseCardNewsCoverImage()}
-                          >
-                            {isKorean ? "찾아보기" : "Browse"}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="field field-span-2">
-                        <span>{isKorean ? "2장 이후 템플릿 배경 경로" : "Template Background Path (Card 2+)"}</span>
-                        <div className="button-row">
-                          <input
-                            className="text-input"
-                            type="text"
-                            value={editableDocument.cardNews?.templateBackgroundPath ?? ""}
-                            onChange={(event) =>
-                              updateCardNewsOptions({
-                                templateBackgroundPath: event.target.value
-                              })
-                            }
-                          />
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={() => void handleChooseCardNewsTemplateImage()}
-                          >
-                            {isKorean ? "찾아보기" : "Browse"}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="field">
-                        <span>{isKorean ? "레이아웃 프리셋" : "Layout Preset"}</span>
-                        <select
-                          className="text-input"
-                          value={editableDocument.cardNews?.layoutPreset ?? "headline_focus"}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              layoutPreset: event.target.value as CardNewsLayoutPreset
-                            })
-                          }
-                        >
-                          {CARD_NEWS_LAYOUT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {isKorean ? option.labelKo : option.labelEn}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <span>{isKorean ? "카드 전환 스타일" : "Card Transition Style"}</span>
-                        <select
-                          className="text-input"
-                          value={editableDocument.cardNews?.transitionStyle ?? "cut"}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              transitionStyle: event.target.value as CardNewsTransitionStyle
-                            })
-                          }
-                        >
-                          {CARD_NEWS_TRANSITION_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {isKorean ? option.labelKo : option.labelEn}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <span>{isKorean ? "출력 포맷" : "Output Format"}</span>
-                        <select
-                          className="text-input"
-                          value={editableDocument.cardNews?.outputFormat ?? "shorts_9_16"}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              outputFormat: event.target.value as CardNewsOutputFormat
-                            })
-                          }
-                        >
-                          {CARD_NEWS_OUTPUT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {isKorean ? option.labelKo : option.labelEn}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
 
                 <h4>{copy.subtitleStyleTitle}</h4>
                 <div className="form-grid">
@@ -1792,9 +2071,21 @@ export function GenerationPage() {
           <div className="generation-preview card">
             <div className="card-row">
               <strong>{isKorean ? "Preview" : "Preview"}</strong>
-              <span className="pill">
-                {moduleCopy.sceneLabel} {selectedScene?.sceneNo ?? "-"}
-              </span>
+              <div className="button-row">
+                <span className="pill">
+                  {moduleCopy.sceneLabel} {selectedScene?.sceneNo ?? "-"}
+                </span>
+                {isCardNewsModule && selectedScene ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => void handleSaveCardPreviewImageAs(selectedScene.sceneNo)}
+                  >
+                    {isKorean ? "미리보기 저장" : "Save Preview As"}
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {!selectedScene ? (
@@ -1810,123 +2101,159 @@ export function GenerationPage() {
                 </div>
 
                 <div
+                  ref={isCardNewsModule ? previewViewportRef : null}
                   className={
                     isCardNewsModule ? "generation-preview-media generation-preview-media--canvas" : "generation-preview-media"
                   }
                 >
                   {activePreviewAsset ? (
                     activePreviewAsset.kind === "image" ? (
-                      <div style={{ position: "relative", width: "100%", height: "100%" }}>
-                        <img
-                          src={activePreviewAsset.src}
-                          alt={`Scene ${selectedScene.sceneNo} preview`}
-                          onError={() =>
-                            setPreviewAssetIndex((current) =>
-                              Math.min(current + 1, sceneAssetCandidates.length)
-                            )
+                      <div
+                        ref={isCardNewsModule ? previewStageRef : null}
+                        className={isCardNewsModule ? "generation-card-stage-shell" : undefined}
+                        style={
+                          isCardNewsModule
+                            ? {
+                                width: `${Math.round(1080 * cardStageScale)}px`,
+                                height: `${Math.round(1920 * cardStageScale)}px`
+                              }
+                            : undefined
+                        }
+                      >
+                        <div
+                          className={isCardNewsModule ? "generation-card-stage" : undefined}
+                          style={
+                            isCardNewsModule
+                              ? { transform: `scale(${cardStageScale})` }
+                              : { position: "relative", width: "100%", height: "100%" }
                           }
-                        />
-                        {isCardNewsModule &&
-                        selectedScene.sceneNo > 1 &&
-                        selectedCardDesign ? (
-                          <div
-                            onMouseDown={(event) =>
-                              beginCardDesignDrag(
-                                event,
-                                "move",
-                                selectedScene.sceneNo,
-                                selectedBoxIndex,
-                                selectedCardDesign
+                        >
+                          <img
+                            src={activePreviewAsset.src}
+                            alt={`Scene ${selectedScene.sceneNo} preview`}
+                            onError={() =>
+                              setPreviewAssetIndex((current) =>
+                                Math.min(current + 1, sceneAssetCandidates.length)
                               )
                             }
-                            style={{
-                              position: "absolute",
-                              left: `${selectedCardDesign.xPct}%`,
-                              top: `${selectedCardDesign.yPct}%`,
-                              width: `${selectedCardDesign.widthPct}%`,
-                              height: `${selectedCardDesign.heightPct}%`,
-                              padding: selectedCardDesign.padding,
-                              background: selectedCardDesign.backgroundColor,
-                              color: selectedCardDesign.textColor,
-                              fontSize: selectedCardDesign.fontSize,
-                              fontWeight: selectedCardDesign.fontWeight,
-                              lineHeight: selectedCardDesign.lineHeight,
-                              display: "flex",
-                              alignItems:
-                                selectedCardDesign.verticalAlign === "top"
-                                  ? "flex-start"
-                                  : selectedCardDesign.verticalAlign === "bottom"
-                                    ? "flex-end"
-                                    : "center",
-                              justifyContent:
-                                selectedCardDesign.align === "left"
-                                  ? "flex-start"
-                                  : selectedCardDesign.align === "right"
-                                    ? "flex-end"
-                                    : "center",
-                              textAlign: selectedCardDesign.align,
-                              borderRadius: 12,
-                              boxSizing: "border-box",
-                              whiteSpace: "pre-wrap",
-                              cursor: cardDesignDrag?.sceneNo === selectedScene.sceneNo ? "grabbing" : "grab",
-                              userSelect: "none"
-                            }}
-                          >
-                            {selectedCardDesign.text && selectedCardDesign.text.trim()
-                              ? selectedCardDesign.text
-                              : selectedScene.text}
+                          />
+                          {isCardNewsModule && selectedScene.sceneNo > 1
+                            ? previewCardDesignBoxes.map((box) => {
+                              const sourceIndex = box._sourceIndex;
+                              const isActive = selectedBoxIndex === sourceIndex;
+                              const textValue =
+                                box.text && box.text.trim().length > 0
+                                  ? box.text
+                                  : sourceIndex === 0
+                                    ? selectedScene.text
+                                    : "";
+                              return (
+                                <div
+                                  key={box.id ?? `preview-box-${selectedScene.sceneNo}-${sourceIndex}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedBoxIndex(sourceIndex);
+                                  }}
+                                  onMouseDown={(event) =>
+                                    beginCardDesignDrag(event, "move", selectedScene.sceneNo, sourceIndex, box)
+                                  }
+                                  style={{
+                                    position: "absolute",
+                                    left: `${box.xPct}%`,
+                                    top: `${box.yPct}%`,
+                                    width: `${box.widthPct}%`,
+                                    height: `${box.heightPct}%`,
+                                    padding: box.padding,
+                                    background: box.backgroundColor,
+                                    color: box.textColor,
+                                    fontSize: box.fontSize,
+                                    fontWeight: box.fontWeight,
+                                    lineHeight: box.lineHeight,
+                                    display: "flex",
+                                    alignItems:
+                                      box.verticalAlign === "top"
+                                        ? "flex-start"
+                                        : box.verticalAlign === "bottom"
+                                          ? "flex-end"
+                                          : "center",
+                                    justifyContent:
+                                      box.align === "left"
+                                        ? "flex-start"
+                                        : box.align === "right"
+                                          ? "flex-end"
+                                          : "center",
+                                    textAlign: box.align,
+                                    borderRadius: 12,
+                                    boxSizing: "border-box",
+                                    whiteSpace: "pre-wrap",
+                                    cursor: box.locked ? "not-allowed" : cardDesignDrag?.sceneNo === selectedScene.sceneNo ? "grabbing" : "grab",
+                                    userSelect: "none",
+                                    border: showCardBoxOutline
+                                      ? isActive
+                                        ? "2px solid rgba(255,255,255,0.9)"
+                                        : "1px dashed rgba(255,255,255,0.45)"
+                                      : "none",
+                                    opacity: box.locked ? 0.75 : 1
+                                  }}
+                                >
+                                  {textValue || (isKorean ? "문구 입력" : "Write text")}
+                                  {!box.locked && showCardBoxOutline ? (
+                                    <div
+                                      onMouseDown={(event) => {
+                                        event.stopPropagation();
+                                        beginCardDesignDrag(
+                                          event,
+                                          "resize",
+                                          selectedScene.sceneNo,
+                                          sourceIndex,
+                                          box
+                                        );
+                                      }}
+                                      style={{
+                                        position: "absolute",
+                                        right: 8,
+                                        bottom: 8,
+                                        width: 14,
+                                        height: 14,
+                                        borderRadius: 3,
+                                        background: "rgba(255,255,255,0.85)",
+                                        border: "1px solid rgba(0,0,0,0.45)",
+                                        cursor: "nwse-resize"
+                                      }}
+                                      title={isKorean ? "드래그해서 박스 크기 조절" : "Drag to resize text box"}
+                                    />
+                                  ) : null}
+                                </div>
+                              );
+                            })
+                            : null}
+                          {snapGuides.verticalPct !== undefined ? (
                             <div
-                              onMouseDown={(event) => {
-                                event.stopPropagation();
-                                beginCardDesignDrag(
-                                  event,
-                                  "resize",
-                                  selectedScene.sceneNo,
-                                  selectedBoxIndex,
-                                  selectedCardDesign
-                                );
-                              }}
                               style={{
                                 position: "absolute",
-                                right: 8,
-                                bottom: 8,
-                                width: 14,
-                                height: 14,
-                                borderRadius: 3,
-                                background: "rgba(255,255,255,0.85)",
-                                border: "1px solid rgba(0,0,0,0.45)",
-                                cursor: "nwse-resize"
+                                left: `${snapGuides.verticalPct}%`,
+                                top: 0,
+                                bottom: 0,
+                                width: 1,
+                                background: "rgba(255,126,95,0.9)",
+                                pointerEvents: "none"
                               }}
-                              title={isKorean ? "드래그해서 박스 크기 조절" : "Drag to resize text box"}
                             />
-                          </div>
-                        ) : null}
-                        {snapGuides.verticalPct !== undefined ? (
-                          <div
-                            style={{
-                              position: "absolute",
-                              left: `${snapGuides.verticalPct}%`,
-                              top: 0,
-                              bottom: 0,
-                              width: 1,
-                              background: "rgba(255,126,95,0.9)",
-                              pointerEvents: "none"
-                            }}
-                          />
-                        ) : null}
-                        {snapGuides.horizontalPct !== undefined ? (
-                          <div
-                            style={{
-                              position: "absolute",
-                              top: `${snapGuides.horizontalPct}%`,
-                              left: 0,
-                              right: 0,
-                              height: 1,
-                              background: "rgba(255,126,95,0.9)",
-                              pointerEvents: "none"
-                            }}
-                          />
-                        ) : null}
+                          ) : null}
+                          {snapGuides.horizontalPct !== undefined ? (
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: `${snapGuides.horizontalPct}%`,
+                                left: 0,
+                                right: 0,
+                                height: 1,
+                                background: "rgba(255,126,95,0.9)",
+                                pointerEvents: "none"
+                              }}
+                            />
+                          ) : null}
+                        </div>
                       </div>
                     ) : (
                       <video
@@ -1962,14 +2289,12 @@ export function GenerationPage() {
                       <span>{isKorean ? "공통 템플릿 사용" : "Shared template background"}</span>
                     </div>
                   )}
-                  <div>
-                    <strong>{copy.motion}</strong>
-                    <span>{selectedScene.motion}</span>
-                  </div>
-                  <div>
-                    <strong>{copy.durationSec}</strong>
-                    <span>{selectedScene.durationSec}s</span>
-                  </div>
+                  {!isCardNewsModule ? (
+                    <div>
+                      <strong>{copy.motion}</strong>
+                      <span>{selectedScene.motion}</span>
+                    </div>
+                  ) : null}
                   {isCardNewsModule ? (
                     <>
                       <div>
@@ -2023,7 +2348,7 @@ export function GenerationPage() {
                       <span>
                         {moduleCopy.sceneLabel} {scene.sceneNo}
                       </span>
-                      <span>{scene.durationSec}s</span>
+                      {!isCardNewsModule ? <span>{scene.durationSec}s</span> : null}
                     </div>
                   ))}
                 </div>
@@ -2033,6 +2358,49 @@ export function GenerationPage() {
                   <div className="generation-thumb-row">
                     {editableDocument.scenes.map((scene) => {
                       const thumbSrc = buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[0]?.src;
+                      if (isCardNewsModule) {
+                        return (
+                          <div
+                            key={`thumb-${scene.sceneNo}`}
+                            className={
+                              scene.sceneNo === selectedSceneNo
+                                ? "generation-thumb-card active"
+                                : "generation-thumb-card"
+                            }
+                          >
+                            <button type="button" className="generation-thumb-select" onClick={() => setSelectedSceneNo(scene.sceneNo)}>
+                              {thumbSrc ? (
+                                <img
+                                  src={thumbSrc}
+                                  alt={`Scene ${scene.sceneNo} thumbnail`}
+                                  onError={(event) => {
+                                    const target = event.currentTarget;
+                                    if (target.dataset.fallbackApplied === "true") {
+                                      target.style.display = "none";
+                                      return;
+                                    }
+                                    target.dataset.fallbackApplied = "true";
+                                    target.src =
+                                      buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[1]?.src ??
+                                      "";
+                                  }}
+                                />
+                              ) : null}
+                              <span>
+                                {moduleCopy.sceneLabel} {scene.sceneNo}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button slim"
+                              disabled={busy}
+                              onClick={() => void handleSaveCardPreviewImageAs(scene.sceneNo)}
+                            >
+                              {isKorean ? "다른 이름 저장" : "Save As"}
+                            </button>
+                          </div>
+                        );
+                      }
                       return (
                         <button
                           key={`thumb-${scene.sceneNo}`}
@@ -2095,14 +2463,6 @@ export function GenerationPage() {
                       </div>
                     )}
                     <div>
-                      <strong>{copy.motion}</strong>
-                      <span>{selectedScene.motion}</span>
-                    </div>
-                    <div>
-                      <strong>{copy.durationSec}</strong>
-                      <span>{selectedScene.durationSec}s</span>
-                    </div>
-                    <div>
                       <strong>{isKorean ? "레이아웃" : "Layout"}</strong>
                       <span>{editableDocument.cardNews?.layoutPreset ?? "headline_focus"}</span>
                     </div>
@@ -2116,11 +2476,6 @@ export function GenerationPage() {
                     </div>
                   </div>
 
-                  <div className="generation-preview-text">
-                    <p className="eyebrow">{textFieldLabel}</p>
-                    <p>{selectedScene.text}</p>
-                  </div>
-
                   <div className="generation-preview-prompt">
                     <p className="eyebrow">{isKorean ? "템플릿 카드 안내" : "Template Card Note"}</p>
                     <p>
@@ -2130,65 +2485,17 @@ export function GenerationPage() {
                     </p>
                   </div>
 
-                  <div className="generation-timeline">
-                    <p className="eyebrow">{isKorean ? "Timeline" : "Timeline"}</p>
-                    {editableDocument.scenes.map((scene) => (
-                      <div
-                        key={`inspector-timeline-${scene.sceneNo}`}
-                        className={
-                          scene.sceneNo === selectedScene.sceneNo
-                            ? "generation-timeline-item active"
-                            : "generation-timeline-item"
-                        }
-                      >
-                        <span>
-                          {moduleCopy.sceneLabel} {scene.sceneNo}
-                        </span>
-                        <span>{scene.durationSec}s</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="generation-thumb-strip">
-                    <p className="eyebrow">{isKorean ? "Scene Thumbnails" : "Scene Thumbnails"}</p>
-                    <div className="generation-thumb-row">
-                      {editableDocument.scenes.map((scene) => {
-                        const thumbSrc = buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[0]?.src;
-                        return (
-                          <button
-                            key={`inspector-thumb-${scene.sceneNo}`}
-                            type="button"
-                            className={
-                              scene.sceneNo === selectedSceneNo
-                                ? "generation-thumb-card active"
-                                : "generation-thumb-card"
-                            }
-                            onClick={() => setSelectedSceneNo(scene.sceneNo)}
-                          >
-                            {thumbSrc ? (
-                              <img
-                                src={thumbSrc}
-                                alt={`Scene ${scene.sceneNo} thumbnail`}
-                                onError={(event) => {
-                                  const target = event.currentTarget;
-                                  if (target.dataset.fallbackApplied === "true") {
-                                    target.style.display = "none";
-                                    return;
-                                  }
-                                  target.dataset.fallbackApplied = "true";
-                                  target.src =
-                                    buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[1]?.src ??
-                                    "";
-                                }}
-                              />
-                            ) : null}
-                            <span>
-                              {moduleCopy.sceneLabel} {scene.sceneNo}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div className="generation-preview-prompt">
+                    <p className="eyebrow">{isKorean ? "Layer Status" : "Layer Status"}</p>
+                    <p>
+                      {(selectedScene.cardDesignBoxes?.length ?? 0) > 0
+                        ? `${
+                            selectedScene.cardDesignBoxes?.length ?? 0
+                          } layers · selected #${selectedBoxIndex + 1} · ${
+                            selectedCardDesign?.hidden ? "hidden" : "visible"
+                          } · ${selectedCardDesign?.locked ? "locked" : "editable"}`
+                        : "No configured text layers for this card."}
+                    </p>
                   </div>
                 </>
               )}

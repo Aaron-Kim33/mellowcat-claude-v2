@@ -90,6 +90,17 @@ interface AppState {
   uploadLastPackageToYouTube: (packagePath?: string) => Promise<void>;
   inspectSceneScript: (packagePath?: string) => Promise<void>;
   saveSceneScript: (document: SceneScriptDocument) => Promise<void>;
+  saveSceneCard: (document: SceneScriptDocument, sceneNo: number) => Promise<void>;
+  saveCardPreviewImageAs: (
+    sceneNo: number,
+    pngBase64: string,
+    packagePath?: string
+  ) => Promise<string | undefined>;
+  captureCardPreviewImageAs: (
+    sceneNo: number,
+    bounds: { x: number; y: number; width: number; height: number },
+    packagePath?: string
+  ) => Promise<string | undefined>;
   sendClaudeInput: (sessionId: string, input: string) => Promise<void>;
   installMcp: (mcpId: string) => Promise<void>;
   uninstallMcp: (mcpId: string) => Promise<void>;
@@ -401,6 +412,45 @@ export const useAppStore = create<AppState>((set) => ({
       document
     );
     set({ sceneScript, sceneScriptPackagePath: resolvedPackagePath });
+  },
+  saveSceneCard: async (document: SceneScriptDocument, sceneNo: number) => {
+    const resolvedPackagePath = resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      throw new Error("Package path was not found.");
+    }
+
+    const sceneScript = await window.mellowcat.automation.saveSceneCard(
+      resolvedPackagePath,
+      document,
+      sceneNo
+    );
+    set({ sceneScript, sceneScriptPackagePath: resolvedPackagePath });
+  },
+  saveCardPreviewImageAs: async (sceneNo: number, pngBase64: string, packagePath?: string) => {
+    const resolvedPackagePath = packagePath ?? resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      throw new Error("Package path was not found.");
+    }
+    return window.mellowcat.automation.saveCardPreviewImageAs(
+      resolvedPackagePath,
+      sceneNo,
+      pngBase64
+    );
+  },
+  captureCardPreviewImageAs: async (
+    sceneNo: number,
+    bounds: { x: number; y: number; width: number; height: number },
+    packagePath?: string
+  ) => {
+    const resolvedPackagePath = packagePath ?? resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      throw new Error("Package path was not found.");
+    }
+    return window.mellowcat.automation.captureCardPreviewImageAs(
+      resolvedPackagePath,
+      sceneNo,
+      bounds
+    );
   },
   sendClaudeInput: async (sessionId: string, input: string) => {
     await window.mellowcat.claude.sendInput(sessionId, input);

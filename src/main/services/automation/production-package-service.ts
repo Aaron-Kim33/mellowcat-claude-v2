@@ -221,6 +221,32 @@ export class ProductionPackageService {
     return normalizedDocument;
   }
 
+  saveSceneCard(
+    packagePath: string,
+    document: SceneScriptDocument,
+    sceneNo: number
+  ): SceneScriptDocument {
+    const normalizedDocument = this.updateSceneScript(packagePath, document);
+    const targetScene =
+      normalizedDocument.scenes.find((scene) => scene.sceneNo === sceneNo) ?? normalizedDocument.scenes[0];
+    if (!targetScene) {
+      throw new Error("No scene was found to save.");
+    }
+
+    const cardExportDir = path.join(packagePath, "card-drafts");
+    const sceneLabel = String(targetScene.sceneNo).padStart(2, "0");
+    this.fileService.writeJsonFile(path.join(cardExportDir, `card-${sceneLabel}.json`), {
+      schemaVersion: 1,
+      savedAt: new Date().toISOString(),
+      sceneNo: targetScene.sceneNo,
+      scene: targetScene,
+      subtitleStyle: normalizedDocument.subtitleStyle,
+      cardNews: normalizedDocument.cardNews
+    });
+
+    return normalizedDocument;
+  }
+
   async runCreatePipeline(jobId: string): Promise<WorkflowJobSnapshot> {
     const readiness = this.getCreateReadiness(jobId);
     if (!readiness.canRun) {
@@ -1548,6 +1574,9 @@ export class ProductionPackageService {
 
   private buildDefaultCardDesign(sceneNo: number): NonNullable<SceneScriptItem["cardDesign"]> {
     return {
+      layerOrder: 0,
+      hidden: false,
+      locked: false,
       xPct: 8,
       yPct: sceneNo === 1 ? 72 : 58,
       widthPct: 84,
@@ -1753,11 +1782,16 @@ export class ProductionPackageService {
       sceneScriptItem?.cardDesignBoxes && sceneScriptItem.cardDesignBoxes.length > 0
         ? sceneScriptItem.cardDesignBoxes
         : [sceneScriptItem?.cardDesign ?? fallback];
-    return rawBoxes.map((box) => ({
-      ...fallback,
-      ...(box ?? {}),
-      text: box?.text?.trim() || undefined
-    }));
+    return rawBoxes
+      .map((box, index) => ({
+        ...fallback,
+        ...(box ?? {}),
+        text: box?.text?.trim() || undefined,
+        layerOrder: box?.layerOrder ?? index,
+        hidden: Boolean(box?.hidden),
+        locked: Boolean(box?.locked)
+      }))
+      .sort((left, right) => (left.layerOrder ?? 0) - (right.layerOrder ?? 0));
   }
 
   private async renderCardTextOverlays(
@@ -1775,6 +1809,7 @@ export class ProductionPackageService {
       ? fontFile.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'")
       : "";
     const filters = designs
+      .filter((design) => !design.hidden)
       .map((design, index) => {
         const textSource = design.text?.trim() || (index === 0 ? fallbackText : "");
         if (!textSource) {

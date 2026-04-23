@@ -121,6 +121,21 @@ export interface MellowCatAPI {
       packagePath: string,
       document: SceneScriptDocument
     ) => Promise<SceneScriptDocument>;
+    saveSceneCard: (
+      packagePath: string,
+      document: SceneScriptDocument,
+      sceneNo: number
+    ) => Promise<SceneScriptDocument>;
+    saveCardPreviewImageAs: (
+      packagePath: string,
+      sceneNo: number,
+      pngBase64: string
+    ) => Promise<string | undefined>;
+    captureCardPreviewImageAs: (
+      packagePath: string,
+      sceneNo: number,
+      bounds: { x: number; y: number; width: number; height: number }
+    ) => Promise<string | undefined>;
     inspectWorkflowJob: (jobId: string) => Promise<WorkflowJobSnapshot>;
     getCreateReadiness: (jobId: string) => Promise<CreateReadinessSnapshot>;
     runCreatePipeline: (jobId: string) => Promise<WorkflowJobSnapshot>;

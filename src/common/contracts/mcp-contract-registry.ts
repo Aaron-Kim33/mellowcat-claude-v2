@@ -31,6 +31,28 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
           { id: "telegramBotToken", label: "텔레그램 봇 토큰", type: "secret", width: "half" },
           { id: "telegramAdminChatId", label: "관리자 채팅 ID", type: "text", width: "half" },
           {
+            id: "trendDiscoveryMode",
+            label: "후보 수집 모드",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "스토리형 (기존)", value: "shortform_story" },
+              { label: "뉴스카드형", value: "news_card" }
+            ]
+          },
+          {
+            id: "trendFocusCategory",
+            label: "검색 카테고리",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "세계 정세", value: "world" },
+              { label: "속보", value: "breaking" },
+              { label: "중국", value: "china" }
+            ]
+          },
+          {
             id: "trendWindow",
             label: "트렌드 조회 범위",
             type: "select",
@@ -69,6 +91,28 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
         description: "자료 수집 범위와 후보 입력 방식을 정리합니다.",
         fields: [
           {
+            id: "trendDiscoveryMode",
+            label: "후보 수집 모드",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "스토리형 (기존)", value: "shortform_story" },
+              { label: "뉴스카드형", value: "news_card" }
+            ]
+          },
+          {
+            id: "trendFocusCategory",
+            label: "검색 카테고리",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "세계 정세", value: "world" },
+              { label: "속보", value: "breaking" },
+              { label: "중국", value: "china" }
+            ]
+          },
+          {
             id: "trendWindow",
             label: "트렌드 조회 범위",
             type: "select",
@@ -77,32 +121,10 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
               { label: "최근 24시간", value: "24h" },
               { label: "최근 3일", value: "3d" }
             ]
-          },
-          { id: "candidateTitle", label: "제목", type: "text", required: true },
-          { id: "candidateSourceLabel", label: "출처 라벨", type: "text" },
-          {
-            id: "candidateSummary",
-            label: "요약",
-            type: "textarea",
-            required: true,
-            width: "full"
-          },
-          {
-            id: "candidateSourceUrl",
-            label: "원문 링크",
-            type: "text",
-            width: "half"
-          },
-          {
-            id: "candidateFitReason",
-            label: "선정 이유",
-            type: "text",
-            width: "half"
           }
         ],
         actions: [
-          { id: "add_candidate", label: "후보 추가", kind: "secondary" },
-          { id: "attach_files", label: "파일 첨부", kind: "secondary" },
+          { id: "fetch_trend_candidates", label: "트렌드 후보 조회", kind: "primary" },
           { id: "save_checkpoint_1", label: "checkpoint-1 저장", kind: "primary" }
         ]
       }
