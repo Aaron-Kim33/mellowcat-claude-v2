@@ -4,6 +4,8 @@ import { app } from "electron";
 import iconv from "iconv-lite";
 import { load } from "cheerio";
 import type {
+  NewsKnowledgeDiscoveryRequest,
+  NewsKnowledgeDiscoveryResult,
   TrendCandidate,
   TrendDiscoveryRequest,
   TrendDiscoveryResult,
@@ -101,6 +103,32 @@ type YouTubeApiErrorPayload = {
 };
 
 type TrendFocusCategory = "all" | "world" | "breaking" | "china";
+
+type NewsKnowledgeSource = {
+  id: NewsKnowledgeDiscoveryRequest["sourceGroup"];
+  label: string;
+  site: string;
+  region: "domestic" | "global";
+};
+
+const NEWS_KNOWLEDGE_SOURCES: NewsKnowledgeSource[] = [
+  { id: "mbc", label: "MBC", site: "imnews.imbc.com", region: "domestic" },
+  { id: "sbs", label: "SBS", site: "news.sbs.co.kr", region: "domestic" },
+  { id: "kbs", label: "KBS", site: "news.kbs.co.kr", region: "domestic" },
+  { id: "yonhap", label: "Yonhap", site: "yna.co.kr", region: "domestic" },
+  { id: "bbc", label: "BBC", site: "bbc.com", region: "global" },
+  { id: "reuters", label: "Reuters", site: "reuters.com", region: "global" },
+  { id: "ap", label: "AP", site: "apnews.com", region: "global" }
+];
+
+const NEWS_KNOWLEDGE_CATEGORY_TERMS: Record<NewsKnowledgeDiscoveryRequest["category"], string[]> = {
+  all: ["news", "latest", "이슈"],
+  world: ["world", "geopolitics", "international", "세계", "국제", "정세"],
+  breaking: ["breaking", "urgent", "developing", "속보", "긴급"],
+  china: ["china", "chinese", "beijing", "taiwan", "중국", "시진핑", "대만"],
+  economy: ["economy", "market", "trade", "경제", "무역", "환율"],
+  tech: ["technology", "ai", "science", "기술", "인공지능", "과학"]
+};
 
 const REDDIT_SHORTFORM_SUBREDDITS = [
   "TrueOffMyChest",
@@ -247,6 +275,70 @@ export class TrendDiscoveryService {
         count: batch.result.candidates.length,
         status: batch.result.status,
         message: batch.result.message
+      }))
+    };
+  }
+
+  async discoverNewsKnowledgeCandidates(
+    request: NewsKnowledgeDiscoveryRequest
+  ): Promise<NewsKnowledgeDiscoveryResult> {
+    const normalizedRequest = this.normalizeNewsKnowledgeRequest(request);
+    const sources = this.resolveNewsKnowledgeSources(normalizedRequest);
+    const perSourceLimit = Math.max(3, Math.ceil(normalizedRequest.limit / Math.max(sources.length, 1)) + 2);
+
+    const batches = await Promise.all(
+      sources.map(async (source) => {
+        try {
+          const candidates = await this.fetchNewsKnowledgeSourceCandidates(
+            source,
+            normalizedRequest,
+            perSourceLimit
+          );
+          return {
+            source,
+            candidates,
+            status: "ok" as const,
+            message: `query=${this.buildNewsKnowledgeSearchQuery(source, normalizedRequest)}`
+          };
+        } catch (error) {
+          return {
+            source,
+            candidates: [] as TrendCandidate[],
+            status: "error" as const,
+            message: error instanceof Error ? error.message : "Unknown news fetch error"
+          };
+        }
+      })
+    );
+
+    const unique = new Map<string, TrendCandidate>();
+    batches
+      .flatMap((batch) => batch.candidates)
+      .sort((left, right) => right.score - left.score)
+      .forEach((candidate) => {
+        const key = `${candidate.sourceUrl ?? candidate.id}:${candidate.title}`.toLowerCase();
+        if (!unique.has(key)) {
+          unique.set(key, candidate);
+        }
+      });
+
+    const candidates = Array.from(unique.values()).slice(0, normalizedRequest.limit);
+    const fallbackCandidates =
+      candidates.length > 0 ? [] : this.buildNewsKnowledgeFallbackCandidates(normalizedRequest);
+    const finalCandidates = candidates.length > 0 ? candidates : fallbackCandidates;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      request: normalizedRequest,
+      candidates: finalCandidates,
+      globalCandidates: finalCandidates.filter((candidate) => candidate.sourceRegion === "global"),
+      domesticCandidates: finalCandidates.filter((candidate) => candidate.sourceRegion === "domestic"),
+      sourceDebug: batches.map((batch) => ({
+        sourceId: `news-${batch.source.id}`,
+        region: batch.source.region,
+        count: batch.candidates.length,
+        status: batch.status,
+        message: batch.message
       }))
     };
   }
@@ -547,6 +639,169 @@ export class TrendDiscoveryService {
         }
       };
     }
+  }
+
+  private normalizeNewsKnowledgeRequest(
+    request: NewsKnowledgeDiscoveryRequest
+  ): NewsKnowledgeDiscoveryResult["request"] {
+    const region =
+      request.region === "domestic" || request.region === "global" ? request.region : "all";
+    const period =
+      request.period === "7d" ? "7d" : request.period === "3d" ? "3d" : "24h";
+    const category =
+      request.category === "world" ||
+      request.category === "breaking" ||
+      request.category === "china" ||
+      request.category === "economy" ||
+      request.category === "tech"
+        ? request.category
+        : "all";
+    const sourceGroup =
+      request.sourceGroup === "domestic_major" ||
+      request.sourceGroup === "global_major" ||
+      request.sourceGroup === "mbc" ||
+      request.sourceGroup === "sbs" ||
+      request.sourceGroup === "kbs" ||
+      request.sourceGroup === "yonhap" ||
+      request.sourceGroup === "bbc" ||
+      request.sourceGroup === "reuters" ||
+      request.sourceGroup === "ap"
+        ? request.sourceGroup
+        : "all";
+    const limit = Math.min(Math.max(request.limit ?? 15, 3), 30);
+    const query = request.query?.trim() || undefined;
+    return { region, period, category, sourceGroup, limit, query };
+  }
+
+  private resolveNewsKnowledgeSources(
+    request: NewsKnowledgeDiscoveryResult["request"]
+  ): NewsKnowledgeSource[] {
+    let sources = NEWS_KNOWLEDGE_SOURCES;
+    if (request.region !== "all") {
+      sources = sources.filter((source) => source.region === request.region);
+    }
+    if (request.sourceGroup === "domestic_major") {
+      sources = sources.filter((source) => source.region === "domestic");
+    } else if (request.sourceGroup === "global_major") {
+      sources = sources.filter((source) => source.region === "global");
+    } else if (request.sourceGroup !== "all") {
+      sources = sources.filter((source) => source.id === request.sourceGroup);
+    }
+    return sources.length > 0 ? sources : NEWS_KNOWLEDGE_SOURCES;
+  }
+
+  private buildNewsKnowledgeSearchQuery(
+    source: NewsKnowledgeSource,
+    request: NewsKnowledgeDiscoveryResult["request"]
+  ): string {
+    const terms = request.query
+      ? [request.query]
+      : NEWS_KNOWLEDGE_CATEGORY_TERMS[request.category] ?? NEWS_KNOWLEDGE_CATEGORY_TERMS.all;
+    const when = request.period === "7d" ? "7d" : request.period === "3d" ? "3d" : "1d";
+    return `${terms.join(" OR ")} site:${source.site} when:${when}`;
+  }
+
+  private async fetchNewsKnowledgeSourceCandidates(
+    source: NewsKnowledgeSource,
+    request: NewsKnowledgeDiscoveryResult["request"],
+    limit: number
+  ): Promise<TrendCandidate[]> {
+    const query = new URLSearchParams({
+      q: this.buildNewsKnowledgeSearchQuery(source, request),
+      hl: request.region === "global" ? "en" : "ko",
+      gl: request.region === "global" ? "US" : "KR",
+      ceid: request.region === "global" ? "US:en" : "KR:ko"
+    });
+    const response = await fetch(`https://news.google.com/rss/search?${query.toString()}`, {
+      headers: HTML_HEADERS
+    });
+    if (!response.ok) {
+      throw new Error(`Google News RSS HTTP ${response.status}`);
+    }
+    const xml = await response.text();
+    const $ = load(xml, { xmlMode: true });
+    const candidates: TrendCandidate[] = [];
+    $("item").each((index, element) => {
+      if (candidates.length >= limit) {
+        return false;
+      }
+      const node = $(element);
+      const rawTitle = node.find("title").first().text().trim();
+      const link = node.find("link").first().text().trim();
+      const pubDate = node.find("pubDate").first().text().trim();
+      const description = this.stripHtmlText(node.find("description").first().text());
+      const sourceName = node.find("source").first().text().trim() || source.label;
+      const title = this.normalizeGoogleNewsTitle(rawTitle, sourceName);
+      if (!title || !link) {
+        return;
+      }
+      const publishedAt = pubDate ? new Date(pubDate) : undefined;
+      const recencyScore =
+        publishedAt && Number.isFinite(publishedAt.getTime())
+          ? Math.max(0, 30 - Math.floor((Date.now() - publishedAt.getTime()) / 3600000))
+          : 8;
+      const categoryBonus = request.category === "breaking" ? 10 : request.category === "china" ? 8 : 5;
+      const summary = description || `${sourceName} latest coverage selected for knowledge short/card news.`;
+      candidates.push({
+        id: `news-knowledge-${source.id}-${this.slugify(title)}-${index + 1}`,
+        title,
+        summary,
+        operatorSummary: `${sourceName} - ${summary}`,
+        contentAngle: `knowledge explainer / ${request.category} / source-backed rewrite`,
+        media: this.buildMediaMetadata(),
+        sourceKind: "rss",
+        sourceRegion: source.region,
+        sourceLabel: sourceName,
+        sourceUrl: link,
+        score: recencyScore + categoryBonus + Math.max(0, 20 - index),
+        metrics: {},
+        fitReason:
+          "Trusted news-source candidate for a knowledge-channel script, useful for short-form explainers and card news."
+      });
+      return undefined;
+    });
+    return candidates;
+  }
+
+  private normalizeGoogleNewsTitle(title: string, sourceName: string): string {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return "";
+    }
+    const suffix = ` - ${sourceName}`;
+    return trimmed.endsWith(suffix) ? trimmed.slice(0, -suffix.length).trim() : trimmed;
+  }
+
+  private stripHtmlText(value: string): string {
+    if (!value.trim()) {
+      return "";
+    }
+    return load(value).text().replace(/\s+/g, " ").trim();
+  }
+
+  private buildNewsKnowledgeFallbackCandidates(
+    request: NewsKnowledgeDiscoveryResult["request"]
+  ): TrendCandidate[] {
+    return [
+      {
+        id: `news-knowledge-fallback-${request.category}-${request.period}`,
+        title: `News knowledge sample (${request.category}, ${request.period})`,
+        summary:
+          "Live news RSS did not return candidates. Check the network connection or loosen source/category filters.",
+        operatorSummary:
+          "Fallback sample for validating the news knowledge crawler workflow when live RSS is unavailable.",
+        contentAngle: "news knowledge fallback / source filter sanity check",
+        media: this.buildMediaMetadata(),
+        sourceKind: "rss",
+        sourceRegion: request.region === "global" ? "global" : "domestic",
+        sourceLabel: "News Knowledge Fallback",
+        sourceUrl: "https://news.google.com/",
+        score: 10,
+        metrics: {},
+        fitReason:
+          "Fallback candidate for pipeline verification when trusted news-source discovery is unavailable."
+      }
+    ];
   }
 
   private createGlobalRedditAdapter(): TrendAdapter {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { ManualInputCandidateDraft } from "@common/types/slot-workflow";
 import type {
+  NewsKnowledgeDiscoveryResult,
   YouTubeBreakoutDiscoveryResult,
   YouTubeCandidateAnalysisResult,
   YouTubeTranscriptProbeResult
@@ -383,12 +384,16 @@ export function CrawlingPage() {
     saveWorkflowConfig,
     sendMockShortlist,
     discoverYouTubeBreakoutCandidates,
+    discoverNewsKnowledgeCandidates,
     analyzeYouTubeCandidate,
     probeYouTubeTranscript,
+    captureNewsSourceToCardCover,
+    captureNewsSourceToVideoClip,
     refreshTelegramStatus,
     refreshWorkflowJobSnapshot,
     refreshCreateReadiness,
     runCreatePipeline,
+    openPackageFolder,
     saveManualInputCheckpoint,
     saveManualProcessCheckpoint,
     generateProcessDraft
@@ -444,6 +449,15 @@ export function CrawlingPage() {
       breakoutFetchEmpty: isKorean
         ? "조건에 맞는 유튜브 후보가 없어 fallback 샘플을 표시합니다."
         : "No live candidates matched the filter; showing fallback sample.",
+      newsFetchDone: isKorean ? "뉴스 지식형 후보를 불러왔습니다." : "Loaded news knowledge candidates.",
+      newsFetchEmpty: isKorean
+        ? "조건에 맞는 뉴스 후보가 없어 fallback 샘플을 표시합니다."
+        : "No news candidates matched the filter; showing fallback sample.",
+      newsPreviewTitle: isKorean ? "뉴스 지식형 후보 미리보기" : "News knowledge preview",
+      newsPreviewHint: isKorean
+        ? "신뢰 출처의 최신 뉴스를 지식형 쇼츠/카드뉴스 소재로 검토한 뒤 checkpoint-1에 저장합니다."
+        : "Review trusted news-source candidates, then save checkpoint-1.",
+      newsOpenSource: isKorean ? "원본 보기" : "Open source",
       checkpointOneMustSaveFirst: isKorean
         ? "유튜브 조회 후보는 checkpoint-1 저장 후에만 2번 가공 단계에서 사용할 수 있습니다."
         : "YouTube fetched candidates become available in Slot 02 only after saving checkpoint-1.",
@@ -457,6 +471,11 @@ export function CrawlingPage() {
       telegramState: isKorean ? "텔레그램 상태" : "Telegram status",
       runShortlist: isKorean ? "/shortlist 실행" : "Run /shortlist",
       refreshJob: isKorean ? "작업 새로고침" : "Refresh job",
+      openPackageFolder: isKorean ? "작업 폴더 열기" : "Open package folder",
+      packageFolderMissing: isKorean
+        ? "아직 열 수 있는 작업 패키지 경로가 없습니다."
+        : "No package folder is available yet.",
+      packageFolderOpenFailed: isKorean ? "작업 폴더를 열지 못했습니다." : "Failed to open package folder.",
       stageLabel: isKorean ? "현재 단계" : "Current stage",
       jobIdLabel: "Job ID",
       processSection: isKorean ? "후보 선택 · 스크립트 가공" : "Candidate select · Script process",
@@ -487,6 +506,12 @@ export function CrawlingPage() {
       saveCheckpointTwo: isKorean ? "checkpoint-2 저장" : "Save checkpoint-2",
       noShortlistYet: isKorean ? "아직 shortlist 후보가 없습니다." : "No shortlist candidates yet.",
       breakoutOpenVideo: isKorean ? "영상 보기" : "Watch video",
+      breakoutCaptureToCardOne: isKorean ? "캡쳐 -> 카드 1" : "Capture -> Card 1",
+      breakoutCapturing: isKorean ? "캡쳐 중..." : "Capturing...",
+      sourceVideoSave: isKorean ? "동영상 저장" : "Save video",
+      sourceVideoSaving: isKorean ? "동영상 저장 중..." : "Saving video...",
+      sourceVideoSaved: isKorean ? "선택 영역 동영상을 저장했습니다." : "Saved selected area video.",
+      sourceVideoFailed: isKorean ? "동영상 저장에 실패했습니다." : "Video save failed.",
       breakoutPreviewVideo: isKorean ? "선택 영상 미리보기" : "Selected video preview",
       breakoutNoThumbnail: isKorean ? "썸네일 없음" : "No thumbnail",
       breakoutNoVideo: isKorean ? "영상 주소를 찾지 못했습니다." : "Video URL was not found.",
@@ -516,13 +541,24 @@ export function CrawlingPage() {
       processResultNarration: isKorean ? "내레이션" : "Narration",
       processResultCta: "CTA",
       breakoutContextPanel: isKorean ? "참고 정보" : "Reference context",
-      breakoutNoReferences: isKorean ? "참고 자료를 찾지 못했습니다." : "No references found."
+      breakoutNoReferences: isKorean ? "참고 자료를 찾지 못했습니다." : "No references found.",
+      breakoutCaptureDone: isKorean
+        ? "캡쳐를 카드 1 커버로 연결했습니다."
+        : "Capture linked to Card 1 cover."
+      ,
+      breakoutCaptureFailed: isKorean ? "캡쳐에 실패했습니다." : "Capture failed."
       ,
       trendCardsTitle: isKorean ? "트렌드 후보 카드" : "Trend candidate cards",
       trendCardsHint: isKorean
         ? "검색 실행 결과를 카드로 확인하고 바로 후보 선택/가공 단계로 넘길 수 있습니다."
         : "Review fetched trend results as cards and move directly to candidate processing.",
-      trendPickCandidate: isKorean ? "이 후보 사용" : "Use this candidate"
+      trendPickCandidate: isKorean ? "이 후보 사용" : "Use this candidate",
+      trendQuickCreateFromCandidate: isKorean
+        ? "후보로 바로 생성"
+        : "Create now from candidate",
+      trendQuickCreateRunning: isKorean
+        ? "카드뉴스 빠른 생성 경로를 실행 중입니다..."
+        : "Running quick card-news create flow..."
     }),
     [isKorean]
   );
@@ -533,10 +569,13 @@ export function CrawlingPage() {
   const [queuedCandidates, setQueuedCandidates] = useState<ManualInputCandidateDraft[]>([]);
   const [discoveredCandidates, setDiscoveredCandidates] = useState<ManualInputCandidateDraft[]>([]);
   const [discoveryResult, setDiscoveryResult] = useState<YouTubeBreakoutDiscoveryResult | undefined>();
+  const [newsDiscoveryResult, setNewsDiscoveryResult] = useState<NewsKnowledgeDiscoveryResult | undefined>();
   const [visiblePreviewCount, setVisiblePreviewCount] = useState(10);
   const [candidateAnalysisById, setCandidateAnalysisById] = useState<
     Record<string, CandidateAnalysisState>
   >({});
+  const [captureBusyById, setCaptureBusyById] = useState<Record<string, boolean>>({});
+  const [videoCaptureBusyById, setVideoCaptureBusyById] = useState<Record<string, boolean>>({});
   const [transcriptProbeById, setTranscriptProbeById] = useState<
     Record<string, CandidateTranscriptProbeState>
   >({});
@@ -577,9 +616,14 @@ export function CrawlingPage() {
   );
   const hasUnsavedYouTubeCandidates =
     selectedModuleId === "youtube-breakout-crawler-mcp" && discoveredCandidates.length > 0;
+  const hasUnsavedNewsCandidates =
+    selectedModuleId === "news-knowledge-crawler-mcp" && discoveredCandidates.length > 0;
+  const hasUnsavedDiscoveryCandidates = hasUnsavedYouTubeCandidates || hasUnsavedNewsCandidates;
   const isTrendDiscoveryModule = selectedModuleId === "trend-discovery-mcp";
+  const isNewsKnowledgeModule = selectedModuleId === "news-knowledge-crawler-mcp";
+  const isCardNewsCreateMode = workflowConfig?.createModuleId === "card-news-generator-mcp";
   const processCandidates = useMemo(() => {
-    if (!hasUnsavedYouTubeCandidates) {
+    if (!hasUnsavedDiscoveryCandidates) {
       return checkpointCandidates;
     }
     return discoveredCandidates
@@ -591,7 +635,7 @@ export function CrawlingPage() {
         sourceUrl: candidate.sourceUrl
       }))
       .filter((candidate) => candidate.title.trim() && candidate.summary.trim());
-  }, [checkpointCandidates, discoveredCandidates, hasUnsavedYouTubeCandidates]);
+  }, [checkpointCandidates, discoveredCandidates, hasUnsavedDiscoveryCandidates]);
   const youtubePreviewCandidates = useMemo<YouTubePreviewCandidate[]>(
     () =>
       (discoveryResult?.candidates ?? []).map((candidate) => {
@@ -634,7 +678,9 @@ export function CrawlingPage() {
     [processCandidates]
   );
   const previewCandidates =
-    youtubePreviewCandidates.length > 0 ? youtubePreviewCandidates : processPreviewCandidates;
+    hasUnsavedYouTubeCandidates && youtubePreviewCandidates.length > 0
+      ? youtubePreviewCandidates
+      : processPreviewCandidates;
   const trendCardCandidates = useMemo(
     () =>
       processCandidates.map((candidate) => ({
@@ -736,7 +782,16 @@ export function CrawlingPage() {
         ["10", "20", "30", "50"].includes(current.youtubeBreakoutLimit)
           ? current.youtubeBreakoutLimit
           : "10",
-      youtubeCategoryId: current.youtubeCategoryId ?? "all"
+      youtubeCategoryId: current.youtubeCategoryId ?? "all",
+      newsKnowledgeRegion: current.newsKnowledgeRegion ?? "all",
+      newsKnowledgeSourceGroup: current.newsKnowledgeSourceGroup ?? "all",
+      newsKnowledgeCategory: current.newsKnowledgeCategory ?? "all",
+      newsKnowledgePeriod: current.newsKnowledgePeriod ?? "24h",
+      newsKnowledgeLimit:
+        current.newsKnowledgeLimit && ["10", "15", "20", "30"].includes(current.newsKnowledgeLimit)
+          ? current.newsKnowledgeLimit
+          : "15",
+      newsKnowledgeQuery: current.newsKnowledgeQuery ?? ""
     }));
   }, [
     workflowConfig?.telegramAdminChatId,
@@ -846,6 +901,8 @@ export function CrawlingPage() {
     value === copy.candidateQueued ||
     value.startsWith(copy.breakoutFetchDone) ||
     value.startsWith(copy.breakoutFetchEmpty) ||
+    value.startsWith(copy.newsFetchDone) ||
+    value.startsWith(copy.newsFetchEmpty) ||
     value === copy.checkpointOneSaved ||
     value === copy.checkpointTwoSaved ||
     value === copy.processDraftGenerating ||
@@ -947,6 +1004,23 @@ export function CrawlingPage() {
       await refreshWorkflowJobSnapshot(nextJobId);
     }
     setMessage(copy.shortlistRan);
+  };
+
+  const handleOpenPackageFolder = async () => {
+    const packagePath = workflowJobSnapshot?.resolvedPackagePath ?? telegramStatus?.lastPackagePath;
+    if (!packagePath) {
+      setMessage(copy.packageFolderMissing);
+      return;
+    }
+    try {
+      await openPackageFolder(packagePath);
+    } catch (error) {
+      setMessage(
+        error instanceof Error && error.message.trim()
+          ? `${copy.packageFolderOpenFailed} ${error.message}`
+          : copy.packageFolderOpenFailed
+      );
+    }
   };
 
   const handleSaveProcessCheckpoint = async () => {
@@ -1109,6 +1183,154 @@ export function CrawlingPage() {
     }
   };
 
+  const handleCaptureCandidateCover = async (candidate: YouTubePreviewCandidate) => {
+    const sourceUrl = candidate.sourceUrl?.trim();
+    if (!sourceUrl) {
+      setMessage(copy.breakoutNoVideo);
+      return;
+    }
+
+    setCaptureBusyById((current) => ({ ...current, [candidate.id]: true }));
+    setMessage(copy.breakoutCapturing);
+    try {
+      const preferredPackagePath =
+        workflowJobSnapshot?.resolvedPackagePath ?? telegramStatus?.lastPackagePath;
+      const result = await captureNewsSourceToCardCover(sourceUrl, preferredPackagePath);
+      await saveWorkflowConfig({
+        cardNewsCoverImagePath: result.imagePath
+      });
+      setMessage(
+        result.packageUpdated
+          ? `${copy.breakoutCaptureDone} (${result.packagePath ?? result.imagePath})`
+          : `${copy.breakoutCaptureDone} (${result.imagePath})`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error && error.message.trim()
+          ? `${copy.breakoutCaptureFailed} ${error.message}`
+          : copy.breakoutCaptureFailed
+      );
+    } finally {
+      setCaptureBusyById((current) => ({ ...current, [candidate.id]: false }));
+    }
+  };
+
+  const handleCaptureCandidateVideo = async (candidate: YouTubePreviewCandidate) => {
+    const sourceUrl = candidate.sourceUrl?.trim();
+    if (!sourceUrl) {
+      setMessage(copy.breakoutNoVideo);
+      return;
+    }
+
+    setVideoCaptureBusyById((current) => ({ ...current, [candidate.id]: true }));
+    setMessage(copy.sourceVideoSaving);
+    try {
+      const preferredPackagePath =
+        workflowJobSnapshot?.resolvedPackagePath ?? telegramStatus?.lastPackagePath;
+      const result = await captureNewsSourceToVideoClip(sourceUrl, preferredPackagePath);
+      setMessage(
+        result.packageUpdated
+          ? `${copy.sourceVideoSaved} (${result.packagePath ?? result.videoPath})`
+          : `${copy.sourceVideoSaved} (${result.videoPath})`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error && error.message.trim()
+          ? `${copy.sourceVideoFailed} ${error.message}`
+          : copy.sourceVideoFailed
+      );
+    } finally {
+      setVideoCaptureBusyById((current) => ({ ...current, [candidate.id]: false }));
+    }
+  };
+
+  const handleQuickCreateCardNewsFromCandidate = async (candidate: {
+    id: string;
+    title: string;
+    summary: string;
+    sourceLabel?: string;
+    sourceUrl?: string;
+  }) => {
+    setMessage(copy.trendQuickCreateRunning);
+    setCreatePipelineBusy(true);
+    try {
+      await saveManualInputCheckpoint({
+        jobId: activeJobId || undefined,
+        title: candidate.title,
+        request: {
+          regions: ["global", "domestic"],
+          limit: 10,
+          timeWindow: fieldValues.trendWindow === "3d" ? "3d" : "24h",
+          discoveryMode:
+            fieldValues.trendDiscoveryMode === "news_card" ? "news_card" : "shortform_story",
+          focusCategory:
+            fieldValues.trendFocusCategory === "world" ||
+            fieldValues.trendFocusCategory === "breaking" ||
+            fieldValues.trendFocusCategory === "china"
+              ? fieldValues.trendFocusCategory
+              : "all"
+        },
+        candidates: [
+          {
+            id: candidate.id,
+            title: candidate.title,
+            summary: candidate.summary,
+            operatorSummary: candidate.summary,
+            sourceLabel: candidate.sourceLabel,
+            sourceUrl: candidate.sourceUrl,
+            sourceKind: "youtube",
+            sourceRegion: "global"
+          }
+        ],
+        attachmentPaths: []
+      });
+
+      const jobId = useAppStore.getState().workflowJobSnapshot?.job?.jobId;
+      if (!jobId) {
+        throw new Error(isKorean ? "작업 ID를 만들지 못했습니다." : "Failed to create workflow job.");
+      }
+
+      const draftTitleOptions = [
+        candidate.title,
+        `${candidate.title} 핵심 정리`,
+        `${candidate.title} 이슈 한눈에 보기`
+      ].filter((value, index, array) => value.trim() && array.indexOf(value) === index);
+
+      await saveManualProcessCheckpoint({
+        jobId,
+        title: candidate.title,
+        selectedCandidateId: candidate.id,
+        headline: candidate.title,
+        summary: candidate.summary,
+        draft: {
+          titleOptions: draftTitleOptions,
+          hook: candidate.title,
+          narration: candidate.summary,
+          callToAction: isKorean
+            ? "이 이슈, 어떻게 보세요? 댓글로 의견 남겨주세요."
+            : "What do you think about this issue? Leave your take in comments."
+        },
+        reviewNotes: processReviewNotes.trim() || undefined
+      });
+
+      await refreshWorkflowJobSnapshot(jobId);
+      await refreshCreateReadiness(jobId);
+      await runCreatePipeline(jobId);
+      await refreshWorkflowJobSnapshot(jobId);
+      await refreshCreateReadiness(jobId);
+      await refreshTelegramStatus();
+      setMessage(copy.createDone);
+    } catch (error) {
+      if (error instanceof Error && error.message.trim()) {
+        setMessage(`${copy.createFailedPrefix} ${error.message}`);
+      } else {
+        setMessage(copy.createFailedPrefix);
+      }
+    } finally {
+      setCreatePipelineBusy(false);
+    }
+  };
+
   const handleRunCreateFromCrawling = async () => {
     if (!activeJobId) {
       setMessage(copy.noShortlistYet);
@@ -1246,6 +1468,7 @@ export function CrawlingPage() {
 
       setDiscoveredCandidates(mappedCandidates);
       setDiscoveryResult(result);
+      setNewsDiscoveryResult(undefined);
       setActivePreviewCandidateId(result.candidates[0]?.id ?? "");
       setCandidateAnalysisById({});
       setTranscriptProbeById({});
@@ -1266,6 +1489,88 @@ export function CrawlingPage() {
       } else {
         setMessage(debugMessage ? `${copy.breakoutFetchEmpty} ${debugMessage}` : copy.breakoutFetchEmpty);
       }
+      return;
+    }
+
+    if (actionId === "fetch_news_knowledge_candidates") {
+      const newsLimit = Math.min(
+        Math.max(Number.parseInt(fieldValues.newsKnowledgeLimit ?? "15", 10) || 15, 3),
+        30
+      );
+      const result = await discoverNewsKnowledgeCandidates({
+        region:
+          fieldValues.newsKnowledgeRegion === "domestic" || fieldValues.newsKnowledgeRegion === "global"
+            ? fieldValues.newsKnowledgeRegion
+            : "all",
+        period:
+          fieldValues.newsKnowledgePeriod === "7d"
+            ? "7d"
+            : fieldValues.newsKnowledgePeriod === "3d"
+              ? "3d"
+              : "24h",
+        category:
+          fieldValues.newsKnowledgeCategory === "world" ||
+          fieldValues.newsKnowledgeCategory === "breaking" ||
+          fieldValues.newsKnowledgeCategory === "china" ||
+          fieldValues.newsKnowledgeCategory === "economy" ||
+          fieldValues.newsKnowledgeCategory === "tech"
+            ? fieldValues.newsKnowledgeCategory
+            : "all",
+        sourceGroup:
+          fieldValues.newsKnowledgeSourceGroup === "domestic_major" ||
+          fieldValues.newsKnowledgeSourceGroup === "global_major" ||
+          fieldValues.newsKnowledgeSourceGroup === "mbc" ||
+          fieldValues.newsKnowledgeSourceGroup === "sbs" ||
+          fieldValues.newsKnowledgeSourceGroup === "kbs" ||
+          fieldValues.newsKnowledgeSourceGroup === "yonhap" ||
+          fieldValues.newsKnowledgeSourceGroup === "bbc" ||
+          fieldValues.newsKnowledgeSourceGroup === "reuters" ||
+          fieldValues.newsKnowledgeSourceGroup === "ap"
+            ? fieldValues.newsKnowledgeSourceGroup
+            : "all",
+        limit: newsLimit,
+        query: fieldValues.newsKnowledgeQuery?.trim() || undefined
+      });
+
+      const mappedCandidates: ManualInputCandidateDraft[] = result.candidates.map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        summary: candidate.summary,
+        operatorSummary: candidate.operatorSummary,
+        contentAngle: candidate.contentAngle,
+        sourceLabel: candidate.sourceLabel,
+        sourceKind: candidate.sourceKind,
+        sourceRegion: candidate.sourceRegion,
+        sourceUrl: candidate.sourceUrl,
+        fitReason: candidate.fitReason
+      }));
+
+      setDiscoveredCandidates(mappedCandidates);
+      setDiscoveryResult(undefined);
+      setNewsDiscoveryResult(result);
+      setActivePreviewCandidateId(result.candidates[0]?.id ?? "");
+      setCandidateAnalysisById({});
+      setTranscriptProbeById({});
+      if (mappedCandidates.length > 0) {
+        const first = mappedCandidates[0];
+        setProcessCandidateId(first.id ?? "");
+        setProcessHeadline(first.title ?? "");
+        setProcessSummary(first.summary ?? "");
+        setProcessTitleOptions("");
+        setProcessHook("");
+        setProcessNarration("");
+        setProcessCallToAction("");
+        setProcessReviewNotes("");
+      }
+      const okCount = result.sourceDebug.reduce((sum, item) => sum + item.count, 0);
+      setMessage(
+        okCount > 0
+          ? `${copy.newsFetchDone} ${result.sourceDebug
+              .filter((item) => item.count > 0)
+              .map((item) => `${item.sourceId}:${item.count}`)
+              .join(", ")}`
+          : copy.newsFetchEmpty
+      );
       return;
     }
 
@@ -1299,7 +1604,9 @@ export function CrawlingPage() {
       }
 
       const shouldStartNewJob =
-        selectedModuleId === "youtube-breakout-crawler-mcp" && discoveredCandidates.length > 0;
+        (selectedModuleId === "youtube-breakout-crawler-mcp" ||
+          selectedModuleId === "news-knowledge-crawler-mcp") &&
+        discoveredCandidates.length > 0;
 
       await saveManualInputCheckpoint({
         jobId: shouldStartNewJob ? undefined : activeJobId,
@@ -1323,6 +1630,7 @@ export function CrawlingPage() {
       setQueuedCandidates([]);
       setDiscoveredCandidates([]);
       setDiscoveryResult(undefined);
+      setNewsDiscoveryResult(undefined);
       setCandidateAnalysisById({});
       setTranscriptProbeById({});
       const savedJobId = useAppStore.getState().workflowJobSnapshot?.job?.jobId;
@@ -1356,6 +1664,14 @@ export function CrawlingPage() {
             onClick={() => activeJobId && void refreshWorkflowJobSnapshot(activeJobId)}
           >
             {copy.refreshJob}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!(workflowJobSnapshot?.resolvedPackagePath ?? telegramStatus?.lastPackagePath)}
+            onClick={() => void handleOpenPackageFolder()}
+          >
+            {copy.openPackageFolder}
           </button>
         </div>
       </div>
@@ -1413,6 +1729,7 @@ export function CrawlingPage() {
           <div
             className={
               selectedModuleId === "youtube-breakout-crawler-mcp"
+                || selectedModuleId === "news-knowledge-crawler-mcp"
                 ? "form-grid crawling-input-grid"
                 : "form-grid"
             }
@@ -1535,10 +1852,18 @@ export function CrawlingPage() {
             </div>
           </div>
 
-          {isTrendDiscoveryModule && trendCardCandidates.length > 0 ? (
+          {(isTrendDiscoveryModule || isNewsKnowledgeModule) && trendCardCandidates.length > 0 ? (
             <div className="workflow-slot-preview">
-              <strong>{copy.trendCardsTitle}</strong>
-              <span className="subtle">{copy.trendCardsHint}</span>
+              <strong>{isNewsKnowledgeModule ? copy.newsPreviewTitle : copy.trendCardsTitle}</strong>
+              <span className="subtle">
+                {isNewsKnowledgeModule
+                  ? `${copy.newsPreviewHint}${
+                      newsDiscoveryResult
+                        ? ` (${newsDiscoveryResult.request.region} · ${newsDiscoveryResult.request.period} · ${newsDiscoveryResult.request.category} · ${newsDiscoveryResult.request.sourceGroup} · ${newsDiscoveryResult.request.limit})`
+                        : ""
+                    }`
+                  : copy.trendCardsHint}
+              </span>
               <div className="trend-card-gallery">
                 {trendCardCandidates.map((candidate) => (
                   <article
@@ -1552,26 +1877,67 @@ export function CrawlingPage() {
                     <span className="subtle">{candidate.sourceLabel ?? "-"}</span>
                     <div className="trend-candidate-card-actions">
                       {candidate.sourceUrl ? (
-                        <a
-                          className="inline-link"
-                          href={candidate.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {copy.breakoutOpenVideo}
-                        </a>
+                        <>
+                          <a
+                            className="inline-link"
+                            href={candidate.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {isNewsKnowledgeModule ? copy.newsOpenSource : copy.breakoutOpenVideo}
+                          </a>
+                          <button
+                            type="button"
+                            className="secondary-button slim"
+                            disabled={captureBusyById[candidate.id] === true}
+                            onClick={() =>
+                              void handleCaptureCandidateCover({
+                                id: candidate.id,
+                                title: candidate.title,
+                                summary: candidate.summary,
+                                sourceLabel: candidate.sourceLabel,
+                                sourceUrl: candidate.sourceUrl,
+                                thumbnailUrl: candidate.thumbnailUrl
+                              })
+                            }
+                          >
+                            {captureBusyById[candidate.id] ? copy.breakoutCapturing : copy.breakoutCaptureToCardOne}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button slim"
+                            disabled={videoCaptureBusyById[candidate.id] === true}
+                            onClick={() =>
+                              void handleCaptureCandidateVideo({
+                                id: candidate.id,
+                                title: candidate.title,
+                                summary: candidate.summary,
+                                sourceLabel: candidate.sourceLabel,
+                                sourceUrl: candidate.sourceUrl,
+                                thumbnailUrl: candidate.thumbnailUrl
+                              })
+                            }
+                          >
+                            {videoCaptureBusyById[candidate.id] ? copy.sourceVideoSaving : copy.sourceVideoSave}
+                          </button>
+                        </>
                       ) : (
                         <span className="subtle">{copy.breakoutNoVideo}</span>
                       )}
                       <button
                         type="button"
                         className="secondary-button slim"
+                        disabled={createPipelineBusy}
                         onClick={() => {
                           setProcessCandidateId(candidate.id);
                           setActivePreviewCandidateId(candidate.id);
+                          if (isCardNewsCreateMode) {
+                            void handleQuickCreateCardNewsFromCandidate(candidate);
+                            return;
+                          }
                         }}
                       >
-                        {copy.trendPickCandidate}
+                        {isCardNewsCreateMode ? copy.trendQuickCreateFromCandidate : copy.trendPickCandidate}
                       </button>
                     </div>
                   </article>
@@ -1580,7 +1946,7 @@ export function CrawlingPage() {
             </div>
           ) : null}
 
-          {discoveredCandidates.length > 0 && (
+          {hasUnsavedYouTubeCandidates && discoveredCandidates.length > 0 && (
             <div className="workflow-slot-preview">
               <strong>{copy.breakoutPreviewTitle}</strong>
               <span className="subtle">
@@ -1673,15 +2039,45 @@ export function CrawlingPage() {
                     </div>
                     <div className="youtube-breakout-actions">
                       {candidate.sourceUrl ? (
-                        <a
-                          className="inline-link"
-                          href={candidate.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {copy.breakoutOpenVideo}
-                        </a>
+                        <>
+                          <a
+                            className="inline-link"
+                            href={candidate.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {copy.breakoutOpenVideo}
+                          </a>
+                          <button
+                            type="button"
+                            className="secondary-button slim"
+                            disabled={captureBusyById[candidate.id] === true}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setActivePreviewCandidateId(candidate.id);
+                              void handleCaptureCandidateCover(candidate);
+                            }}
+                          >
+                            {captureBusyById[candidate.id]
+                              ? copy.breakoutCapturing
+                              : copy.breakoutCaptureToCardOne}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button slim"
+                            disabled={videoCaptureBusyById[candidate.id] === true}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setActivePreviewCandidateId(candidate.id);
+                              void handleCaptureCandidateVideo(candidate);
+                            }}
+                          >
+                            {videoCaptureBusyById[candidate.id]
+                              ? copy.sourceVideoSaving
+                              : copy.sourceVideoSave}
+                          </button>
+                        </>
                       ) : (
                         <span className="subtle">{copy.breakoutNoVideo}</span>
                       )}
@@ -1741,6 +2137,9 @@ export function CrawlingPage() {
           {hasUnsavedYouTubeCandidates && (
             <p className="warning-text">{copy.checkpointOneMustSaveFirst}</p>
           )}
+          {hasUnsavedNewsCandidates && (
+            <p className="warning-text">{copy.newsPreviewHint}</p>
+          )}
         </div>
       )}
 
@@ -1786,14 +2185,36 @@ export function CrawlingPage() {
                     <p className="subtle">{copy.breakoutNoThumbnail}</p>
                   )}
                   {activePreviewCandidate.sourceUrl ? (
-                    <a
-                      className="primary-button"
-                      href={activePreviewCandidate.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {copy.breakoutOpenVideo}
-                    </a>
+                    <>
+                      <a
+                        className="primary-button"
+                        href={activePreviewCandidate.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {copy.breakoutOpenVideo}
+                      </a>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={captureBusyById[activePreviewCandidate.id] === true}
+                        onClick={() => void handleCaptureCandidateCover(activePreviewCandidate)}
+                      >
+                        {captureBusyById[activePreviewCandidate.id]
+                          ? copy.breakoutCapturing
+                          : copy.breakoutCaptureToCardOne}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={videoCaptureBusyById[activePreviewCandidate.id] === true}
+                        onClick={() => void handleCaptureCandidateVideo(activePreviewCandidate)}
+                      >
+                        {videoCaptureBusyById[activePreviewCandidate.id]
+                          ? copy.sourceVideoSaving
+                          : copy.sourceVideoSave}
+                      </button>
+                    </>
                   ) : (
                     <p className="subtle">{copy.breakoutNoVideo}</p>
                   )}

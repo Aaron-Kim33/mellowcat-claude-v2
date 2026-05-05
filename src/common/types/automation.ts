@@ -126,6 +126,7 @@ export interface ShortformWorkflowConfig {
   createTargetDurationSec?: number;
   createMinimumSceneCount?: number;
   createBackgroundMediaPath?: string;
+  cardNewsCoverImagePath?: string;
   createSubtitleTheme?: "clean_dark" | "clean_light" | "story_bold";
   createVideoSubtitleMode?: "soft" | "hard";
   createVideoRenderQuality?: "standard" | "high";

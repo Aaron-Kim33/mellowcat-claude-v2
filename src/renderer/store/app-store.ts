@@ -7,7 +7,7 @@ import type {
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
-import type { SceneScriptDocument } from "@common/types/media-generation";
+import type { CardNewsTemplateRecord, SceneScriptDocument } from "@common/types/media-generation";
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -16,6 +16,8 @@ import type {
   YouTubeUploadResult
 } from "@common/types/settings";
 import type {
+  NewsKnowledgeDiscoveryRequest,
+  NewsKnowledgeDiscoveryResult,
   YouTubeBreakoutDiscoveryRequest,
   YouTubeBreakoutDiscoveryResult,
   YouTubeCandidateAnalysisRequest,
@@ -44,6 +46,7 @@ interface AppState {
   createReadiness?: CreateReadinessSnapshot;
   sceneScript?: SceneScriptDocument;
   sceneScriptPackagePath?: string;
+  cardNewsTemplates: CardNewsTemplateRecord[];
   appUpdateStatus?: AppUpdateStatus;
   youTubeAuthStatus?: YouTubeAuthStatus;
   youTubeUploadRequest?: YouTubeUploadRequest;
@@ -69,12 +72,35 @@ interface AppState {
   discoverYouTubeBreakoutCandidates: (
     request: YouTubeBreakoutDiscoveryRequest
   ) => Promise<YouTubeBreakoutDiscoveryResult>;
+  discoverNewsKnowledgeCandidates: (
+    request: NewsKnowledgeDiscoveryRequest
+  ) => Promise<NewsKnowledgeDiscoveryResult>;
   analyzeYouTubeCandidate: (
     request: YouTubeCandidateAnalysisRequest
   ) => Promise<YouTubeCandidateAnalysisResult>;
   probeYouTubeTranscript: (
     request: YouTubeTranscriptProbeRequest
   ) => Promise<YouTubeTranscriptProbeResult>;
+  captureNewsSourceToCardCover: (
+    sourceUrl: string,
+    packagePath?: string
+  ) => Promise<{
+    imagePath: string;
+    packageUpdated: boolean;
+    packagePath?: string;
+  }>;
+  captureNewsSourceToVideoClip: (
+    sourceUrl: string,
+    packagePath?: string
+  ) => Promise<{
+    videoPath: string;
+    packageUpdated: boolean;
+    packagePath?: string;
+  }>;
+  openPackageFolder: (packagePath?: string) => Promise<string>;
+  refreshCardNewsTemplates: () => Promise<void>;
+  registerCardNewsTemplate: () => Promise<void>;
+  deleteCardNewsTemplate: (templateId: string) => Promise<void>;
   refreshYouTubeStatus: () => Promise<void>;
   connectYouTube: () => Promise<void>;
   disconnectYouTube: () => Promise<void>;
@@ -160,9 +186,10 @@ export const useAppStore = create<AppState>((set) => ({
   installed: [],
   claudeOutput: "",
   mcpOutputById: {},
+  cardNewsTemplates: [],
   authBusy: false,
   hydrate: async () => {
-    const [catalog, installed, appMeta, settings, workflowConfig, authSession, claudeInstallation, appUpdateStatus, telegramStatus, youTubeAuthStatus] =
+    const [catalog, installed, appMeta, settings, workflowConfig, authSession, claudeInstallation, appUpdateStatus, telegramStatus, youTubeAuthStatus, cardNewsTemplates] =
       await Promise.all([
       window.mellowcat.mcp.listCatalog(),
       window.mellowcat.mcp.listInstalled(),
@@ -173,7 +200,8 @@ export const useAppStore = create<AppState>((set) => ({
       window.mellowcat.claude.getInstallationStatus(),
       window.mellowcat.settings.getUpdateStatus(),
       window.mellowcat.automation.getTelegramStatus(),
-      window.mellowcat.automation.getYouTubeStatus()
+      window.mellowcat.automation.getYouTubeStatus(),
+      window.mellowcat.automation.listCardNewsTemplates()
     ]);
     const youTubeUploadRequest = telegramStatus.lastPackagePath
       ? await window.mellowcat.automation
@@ -220,6 +248,7 @@ export const useAppStore = create<AppState>((set) => ({
       telegramStatus,
       youTubeAuthStatus,
       youTubeUploadRequest,
+      cardNewsTemplates,
       authSession,
       claudeInstallation,
       claudeDetectionMessage: claudeInstallation.installed
@@ -323,9 +352,29 @@ export const useAppStore = create<AppState>((set) => ({
   },
   discoverYouTubeBreakoutCandidates: async (request) =>
     window.mellowcat.automation.discoverYouTubeBreakoutCandidates(request),
+  discoverNewsKnowledgeCandidates: async (request) =>
+    window.mellowcat.automation.discoverNewsKnowledgeCandidates(request),
   analyzeYouTubeCandidate: async (request) =>
     window.mellowcat.automation.analyzeYouTubeCandidate(request),
   probeYouTubeTranscript: async (request) => window.mellowcat.automation.probeYouTubeTranscript(request),
+  captureNewsSourceToCardCover: async (sourceUrl: string, packagePath?: string) =>
+    window.mellowcat.automation.captureNewsSourceToCardCover(sourceUrl, packagePath),
+  captureNewsSourceToVideoClip: async (sourceUrl: string, packagePath?: string) =>
+    window.mellowcat.automation.captureNewsSourceToVideoClip(sourceUrl, packagePath),
+  openPackageFolder: async (packagePath?: string) =>
+    window.mellowcat.automation.openPackageFolder(packagePath),
+  refreshCardNewsTemplates: async () => {
+    const cardNewsTemplates = await window.mellowcat.automation.listCardNewsTemplates();
+    set({ cardNewsTemplates });
+  },
+  registerCardNewsTemplate: async () => {
+    const cardNewsTemplates = await window.mellowcat.automation.registerCardNewsTemplate();
+    set({ cardNewsTemplates });
+  },
+  deleteCardNewsTemplate: async (templateId: string) => {
+    const cardNewsTemplates = await window.mellowcat.automation.deleteCardNewsTemplate(templateId);
+    set({ cardNewsTemplates });
+  },
   refreshYouTubeStatus: async () => {
     const youTubeAuthStatus = await window.mellowcat.automation.getYouTubeStatus();
     set({ youTubeAuthStatus });

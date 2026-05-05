@@ -1,12 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { spawn } from "node:child_process";
+import { BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import type {
   AutomationJobSnapshot,
   ShortformWorkflowConfig
 } from "../../common/types/automation";
-import type { SceneScriptDocument } from "../../common/types/media-generation";
+import type {
+  CardNewsTemplateRecord,
+  SceneScriptDocument
+} from "../../common/types/media-generation";
 import type { YouTubeUploadRequest } from "../../common/types/settings";
 import type {
   AutoProcessDraftPayload,
@@ -16,6 +20,7 @@ import type {
   ManualProcessCheckpointPayload
 } from "../../common/types/slot-workflow";
 import type {
+  NewsKnowledgeDiscoveryRequest,
   YouTubeBreakoutDiscoveryRequest,
   YouTubeCandidateAnalysisRequest,
   YouTubeTranscriptProbeRequest
@@ -40,6 +45,117 @@ export function registerAutomationIpc(
   shortformScriptService: ShortformScriptService,
   pathService: PathService
 ): void {
+  const sanitizeFileToken = (value: string) =>
+    value
+      .replace(/https?:\/\//gi, "")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 48) || "source";
+  const runBundledFfmpeg = (args: string[]) =>
+    new Promise<void>((resolve, reject) => {
+      const candidates = [
+        pathService.getBundledToolPath("ffmpeg.exe"),
+        pathService.getBundledToolPath("ffmpeg")
+      ];
+      const ffmpegPath = candidates.find((candidate) => fs.existsSync(candidate));
+      if (!ffmpegPath) {
+        reject(new Error("Bundled FFmpeg was not found. Put ffmpeg.exe in resources/bundled/dev."));
+        return;
+      }
+
+      const child = spawn(ffmpegPath, args, {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`FFmpeg failed with exit code ${code}. ${stderr.slice(-1200)}`));
+      });
+    });
+  const getCardNewsTemplateStorePath = () => pathService.getUserCardNewsTemplatesPath();
+  const getCardNewsTemplateIndexPath = () =>
+    path.join(getCardNewsTemplateStorePath(), "templates.json");
+  const supportedCardNewsTemplateExtensions = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+  const inferCardNewsTemplateRole = (
+    name: string
+  ): CardNewsTemplateRecord["role"] => {
+    const lowerName = name.toLowerCase();
+    if (/(opener|cover|intro|시작|커버|표지)/i.test(lowerName)) {
+      return "opener";
+    }
+    if (/(qna|q&a|question|질문|문답)/i.test(lowerName)) {
+      return "qna";
+    }
+    if (/(closer|outro|ending|마무리|끝|엔딩)/i.test(lowerName)) {
+      return "closer";
+    }
+    return "body";
+  };
+  const normalizeCardNewsTemplateRecords = (records: unknown): CardNewsTemplateRecord[] => {
+    if (!Array.isArray(records)) {
+      return [];
+    }
+    return records
+      .map((record) => {
+        if (!record || typeof record !== "object") {
+          return undefined;
+        }
+        const candidate = record as Partial<CardNewsTemplateRecord>;
+        if (
+          typeof candidate.id !== "string" ||
+          typeof candidate.name !== "string" ||
+          typeof candidate.imagePath !== "string"
+        ) {
+          return undefined;
+        }
+        const role =
+          candidate.role === "opener" ||
+          candidate.role === "qna" ||
+          candidate.role === "closer" ||
+          candidate.role === "body"
+            ? candidate.role
+            : inferCardNewsTemplateRole(candidate.name);
+        return {
+          id: candidate.id,
+          name: candidate.name,
+          role,
+          imagePath: candidate.imagePath,
+          thumbnailPath: candidate.thumbnailPath || candidate.imagePath
+        };
+      })
+      .filter((record): record is CardNewsTemplateRecord => Boolean(record));
+  };
+  const loadUserCardNewsTemplates = (): CardNewsTemplateRecord[] => {
+    const indexPath = getCardNewsTemplateIndexPath();
+    if (!fs.existsSync(indexPath)) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(fs.readFileSync(indexPath, "utf8")) as unknown;
+      const normalized = normalizeCardNewsTemplateRecords(parsed);
+      return normalized.filter((template) => fs.existsSync(template.imagePath));
+    } catch {
+      return [];
+    }
+  };
+  const saveUserCardNewsTemplates = (templates: CardNewsTemplateRecord[]) => {
+    fs.mkdirSync(getCardNewsTemplateStorePath(), { recursive: true });
+    fs.writeFileSync(
+      getCardNewsTemplateIndexPath(),
+      JSON.stringify(templates, null, 2),
+      "utf8"
+    );
+  };
+
   ipcMain.handle("automation:workflow:getConfig", () => workflowConfigService.get());
   ipcMain.handle(
     "automation:workflow:setConfig",
@@ -59,6 +175,11 @@ export function registerAutomationIpc(
     )
   );
   ipcMain.handle(
+    "automation:crawl:discoverNewsKnowledgeCandidates",
+    (_event, request: NewsKnowledgeDiscoveryRequest) =>
+      trendDiscoveryService.discoverNewsKnowledgeCandidates(request)
+  );
+  ipcMain.handle(
     "automation:crawl:analyzeYouTubeCandidate",
     (_event, request: YouTubeCandidateAnalysisRequest) =>
       shortformScriptService.analyzeYouTubeCandidate(request)
@@ -68,6 +189,905 @@ export function registerAutomationIpc(
     (_event, request: YouTubeTranscriptProbeRequest) =>
       shortformScriptService.probeYouTubeTranscript(request)
   );
+  ipcMain.handle(
+    "automation:crawl:captureNewsSourceToCardCover",
+    async (event, sourceUrl: string, packagePath?: string) => {
+      const normalizedUrl = sourceUrl?.trim();
+      if (!normalizedUrl) {
+        throw new Error("Source URL is required.");
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(normalizedUrl);
+      } catch {
+        throw new Error("Invalid source URL.");
+      }
+
+      if (!/^https?:$/i.test(parsedUrl.protocol)) {
+        throw new Error("Only http/https URLs are supported for capture.");
+      }
+
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      const captureWindow = new BrowserWindow({
+        width: 1280,
+        height: 920,
+        show: true,
+        autoHideMenuBar: true,
+        title: "Capture Source",
+        parent: ownerWindow ?? undefined,
+        modal: Boolean(ownerWindow),
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true
+        }
+      });
+
+      try {
+        await captureWindow.loadURL(normalizedUrl);
+
+        const selection = await captureWindow.webContents.executeJavaScript(
+          `
+          new Promise((resolve) => {
+            const oldRoot = document.getElementById("__mellowcat_capture_root");
+            if (oldRoot) oldRoot.remove();
+
+            const root = document.createElement("div");
+            root.id = "__mellowcat_capture_root";
+            Object.assign(root.style, {
+              position: "fixed",
+              right: "18px",
+              top: "18px",
+              zIndex: "2147483647",
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+              padding: "10px",
+              borderRadius: "16px",
+              background: "rgba(17,17,17,0.92)",
+              color: "#fff",
+              font: "600 13px sans-serif",
+              boxShadow: "0 14px 40px rgba(0,0,0,0.35)"
+            });
+
+            const guide = document.createElement("span");
+            guide.textContent = "Scroll first, then capture 1:1";
+            Object.assign(guide.style, {
+              whiteSpace: "nowrap",
+              opacity: "0.9"
+            });
+
+            const captureButton = document.createElement("button");
+            captureButton.type = "button";
+            captureButton.textContent = "캡쳐 시작";
+            Object.assign(captureButton.style, {
+              border: "0",
+              borderRadius: "999px",
+              padding: "8px 12px",
+              background: "#ff3ea5",
+              color: "#fff",
+              font: "700 13px sans-serif",
+              cursor: "pointer"
+            });
+
+            const cancelButton = document.createElement("button");
+            cancelButton.type = "button";
+            cancelButton.textContent = "취소";
+            Object.assign(cancelButton.style, {
+              border: "1px solid rgba(255,255,255,0.22)",
+              borderRadius: "999px",
+              padding: "8px 12px",
+              background: "rgba(255,255,255,0.08)",
+              color: "#fff",
+              font: "700 13px sans-serif",
+              cursor: "pointer"
+            });
+
+            root.appendChild(guide);
+            root.appendChild(captureButton);
+            root.appendChild(cancelButton);
+            document.documentElement.appendChild(root);
+
+            let overlay = null;
+            let box = null;
+            let startX = 0;
+            let startY = 0;
+            let dragging = false;
+            let lastRect = null;
+
+            const cleanup = () => {
+              window.removeEventListener("keydown", onKeyDown, true);
+              if (overlay) overlay.remove();
+              root.remove();
+            };
+
+            const startCaptureMode = () => {
+              root.style.display = "none";
+
+              overlay = document.createElement("div");
+              overlay.id = "__mellowcat_capture_overlay";
+              Object.assign(overlay.style, {
+                position: "fixed",
+                inset: "0",
+                zIndex: "2147483647",
+                cursor: "crosshair",
+                background: "rgba(0,0,0,0.20)",
+                userSelect: "none"
+              });
+
+              box = document.createElement("div");
+              Object.assign(box.style, {
+                position: "fixed",
+                display: "none",
+                border: "3px solid #ff3ea5",
+                boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)",
+                background: "rgba(255,255,255,0.04)",
+                boxSizing: "border-box"
+              });
+
+              const tip = document.createElement("div");
+              tip.textContent = "Drag to select a 1:1 square. Release to capture. Press Esc to cancel.";
+              Object.assign(tip.style, {
+                position: "fixed",
+                left: "50%",
+                top: "18px",
+                transform: "translateX(-50%)",
+                padding: "10px 14px",
+                borderRadius: "999px",
+                background: "rgba(17,17,17,0.92)",
+                color: "#fff",
+                font: "600 13px sans-serif",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.35)"
+              });
+
+              overlay.appendChild(box);
+              overlay.appendChild(tip);
+              document.documentElement.appendChild(overlay);
+              overlay.addEventListener("mousedown", onMouseDown);
+              overlay.addEventListener("mousemove", onMouseMove);
+              overlay.addEventListener("mouseup", onMouseUp);
+              window.addEventListener("keydown", onKeyDown, true);
+            };
+
+            const makeSquareRect = (clientX, clientY) => {
+              const dx = clientX - startX;
+              const dy = clientY - startY;
+              const size = Math.max(8, Math.min(Math.abs(dx), Math.abs(dy)));
+              const left = dx < 0 ? startX - size : startX;
+              const top = dy < 0 ? startY - size : startY;
+              return {
+                x: Math.max(0, Math.round(left)),
+                y: Math.max(0, Math.round(top)),
+                width: Math.round(size),
+                height: Math.round(size)
+              };
+            };
+
+            const renderRect = (rect) => {
+              if (!box) return;
+              box.style.display = "block";
+              box.style.left = rect.x + "px";
+              box.style.top = rect.y + "px";
+              box.style.width = rect.width + "px";
+              box.style.height = rect.height + "px";
+            };
+
+            const onKeyDown = (event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cleanup();
+                resolve(null);
+              }
+            };
+
+            const onMouseDown = (event) => {
+              event.preventDefault();
+              dragging = true;
+              startX = event.clientX;
+              startY = event.clientY;
+              lastRect = { x: startX, y: startY, width: 8, height: 8 };
+              renderRect(lastRect);
+            };
+            const onMouseMove = (event) => {
+              if (!dragging) return;
+              lastRect = makeSquareRect(event.clientX, event.clientY);
+              renderRect(lastRect);
+            };
+            const onMouseUp = (event) => {
+              if (!dragging) return;
+              event.preventDefault();
+              dragging = false;
+              lastRect = makeSquareRect(event.clientX, event.clientY);
+              if (!lastRect || lastRect.width < 48 || lastRect.height < 48) {
+                if (box) box.style.display = "none";
+                lastRect = null;
+                return;
+              }
+              cleanup();
+              window.setTimeout(() => resolve(lastRect), 80);
+            };
+
+            captureButton.addEventListener("click", (event) => {
+              event.preventDefault();
+              startCaptureMode();
+            });
+            cancelButton.addEventListener("click", (event) => {
+              event.preventDefault();
+              cleanup();
+              resolve(null);
+            });
+            startRecordMode();
+          });
+          `,
+          true
+        );
+
+        if (!selection) {
+          throw new Error("Capture was cancelled.");
+        }
+
+        const captureRect = {
+          x: Math.max(0, Math.round(Number(selection.x) || 0)),
+          y: Math.max(0, Math.round(Number(selection.y) || 0)),
+          width: Math.max(1, Math.round(Number(selection.width) || 1)),
+          height: Math.max(1, Math.round(Number(selection.height) || 1))
+        };
+        captureRect.height = captureRect.width;
+
+        const image = await captureWindow.capturePage(captureRect);
+        if (image.isEmpty()) {
+          throw new Error("Capture result is empty.");
+        }
+        const squareImage = nativeImage.createFromBuffer(image.toPNG()).resize({
+          width: 1080,
+          height: 1080,
+          quality: "best"
+        });
+
+        const capturesRoot = pathService.getAutomationStatePath("captures");
+        fs.mkdirSync(capturesRoot, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const hostToken = sanitizeFileToken(parsedUrl.hostname || "source");
+        const filePath = path.join(capturesRoot, `news-cover-${hostToken}-${timestamp}.png`);
+        fs.writeFileSync(filePath, squareImage.toPNG());
+
+        const statusPackagePath =
+          packagePath?.trim() ||
+          telegramControlService.getStatus().lastPackagePath ||
+          undefined;
+        let packageUpdated = false;
+        let resolvedPackagePath: string | undefined;
+
+        if (statusPackagePath) {
+          try {
+            productionPackageService.applyCardNewsCoverImage(statusPackagePath, filePath);
+            packageUpdated = true;
+            resolvedPackagePath = statusPackagePath;
+          } catch {
+            // Keep going: we still persist this path to workflow config below.
+          }
+        }
+
+        workflowConfigService.set({
+          cardNewsCoverImagePath: filePath
+        });
+
+        return {
+          imagePath: filePath,
+          packageUpdated,
+          packagePath: resolvedPackagePath
+        };
+      } finally {
+        if (!captureWindow.isDestroyed()) {
+          captureWindow.close();
+        }
+      }
+    }
+  );
+  ipcMain.handle(
+    "automation:crawl:captureNewsSourceToVideoClip",
+    async (event, sourceUrl: string, packagePath?: string) => {
+      const normalizedUrl = sourceUrl?.trim();
+      if (!normalizedUrl) {
+        throw new Error("Source URL is required.");
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(normalizedUrl);
+      } catch {
+        throw new Error("Invalid source URL.");
+      }
+
+      if (!/^https?:$/i.test(parsedUrl.protocol)) {
+        throw new Error("Only http/https URLs are supported for recording.");
+      }
+
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      const captureWindow = new BrowserWindow({
+        width: 1280,
+        height: 920,
+        show: true,
+        autoHideMenuBar: true,
+        title: "Record Source Clip",
+        parent: ownerWindow ?? undefined,
+        modal: Boolean(ownerWindow),
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true
+        }
+      });
+
+      const frameRate = 12;
+      const waitForRecordStart = () =>
+        new Promise<boolean>((resolve) => {
+          const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const recordChannel = `mellowcat:source-record:start:${token}`;
+          const cancelChannel = `mellowcat:source-record:cancel:${token}`;
+          const controlWindow = new BrowserWindow({
+            width: 430,
+            height: 74,
+            frame: false,
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            show: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+            parent: captureWindow,
+            webPreferences: {
+              nodeIntegration: true,
+              contextIsolation: false,
+              sandbox: false
+            }
+          });
+          const cleanup = (value: boolean) => {
+            ipcMain.removeListener(recordChannel, onRecord);
+            ipcMain.removeListener(cancelChannel, onCancel);
+            if (!controlWindow.isDestroyed()) {
+              controlWindow.close();
+            }
+            resolve(value);
+          };
+          const onRecord = () => cleanup(true);
+          const onCancel = () => cleanup(false);
+          const positionControl = () => {
+            if (controlWindow.isDestroyed() || captureWindow.isDestroyed()) {
+              return;
+            }
+            const bounds = captureWindow.getBounds();
+            controlWindow.setBounds({
+              x: bounds.x + bounds.width - 450,
+              y: bounds.y + 56,
+              width: 430,
+              height: 74
+            });
+          };
+          ipcMain.once(recordChannel, onRecord);
+          ipcMain.once(cancelChannel, onCancel);
+          captureWindow.on("move", positionControl);
+          captureWindow.on("resize", positionControl);
+          controlWindow.on("closed", () => {
+            captureWindow.off("move", positionControl);
+            captureWindow.off("resize", positionControl);
+            ipcMain.removeListener(recordChannel, onRecord);
+            ipcMain.removeListener(cancelChannel, onCancel);
+          });
+          const html = encodeURIComponent(`
+            <!doctype html>
+            <html>
+              <body style="margin:0;background:rgba(17,17,17,.94);color:#fff;font:600 13px sans-serif;overflow:hidden;">
+                <div style="height:100%;display:flex;align-items:center;gap:8px;padding:10px;box-sizing:border-box;">
+                  <span style="flex:1;white-space:nowrap;opacity:.9;">재생/스크롤 준비 후 9:16 영역 녹화</span>
+                  <button id="record" style="border:0;border-radius:999px;padding:9px 13px;background:#ff3ea5;color:#fff;font:800 13px sans-serif;cursor:pointer;">동영상 저장</button>
+                  <button id="cancel" style="border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:9px 12px;background:rgba(255,255,255,.08);color:#fff;font:800 13px sans-serif;cursor:pointer;">취소</button>
+                </div>
+                <script>
+                  const { ipcRenderer } = require("electron");
+                  document.getElementById("record").addEventListener("click", () => ipcRenderer.send(${JSON.stringify(recordChannel)}));
+                  document.getElementById("cancel").addEventListener("click", () => ipcRenderer.send(${JSON.stringify(cancelChannel)}));
+                </script>
+              </body>
+            </html>
+          `);
+          void controlWindow.loadURL(`data:text/html;charset=utf-8,${html}`).then(() => {
+            positionControl();
+            controlWindow.show();
+            controlWindow.focus();
+          });
+        });
+      const createRecordingStopControl = () => {
+        let stopped = false;
+        let elapsedSeconds = 0;
+        const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const stopChannel = `mellowcat:source-record:stop:${token}`;
+        const controlWindow = new BrowserWindow({
+          width: 430,
+          height: 78,
+          frame: false,
+          resizable: false,
+          minimizable: false,
+          maximizable: false,
+          show: false,
+          alwaysOnTop: true,
+          skipTaskbar: true,
+          parent: captureWindow,
+          webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+            sandbox: false
+          }
+        });
+        const positionControl = () => {
+          if (controlWindow.isDestroyed() || captureWindow.isDestroyed()) {
+            return;
+          }
+          const bounds = captureWindow.getBounds();
+          controlWindow.setBounds({
+            x: bounds.x + bounds.width - 450,
+            y: bounds.y + 56,
+            width: 430,
+            height: 78
+          });
+        };
+        const onStop = () => {
+          stopped = true;
+          if (!controlWindow.isDestroyed()) {
+            controlWindow.webContents.send("mellowcat:source-record:stopping");
+          }
+        };
+        ipcMain.once(stopChannel, onStop);
+        captureWindow.on("move", positionControl);
+        captureWindow.on("resize", positionControl);
+        controlWindow.on("closed", () => {
+          captureWindow.off("move", positionControl);
+          captureWindow.off("resize", positionControl);
+          ipcMain.removeListener(stopChannel, onStop);
+        });
+        const html = encodeURIComponent(`
+          <!doctype html>
+          <html>
+            <body style="margin:0;background:rgba(17,17,17,.94);color:#fff;font:600 13px sans-serif;overflow:hidden;">
+              <div style="height:100%;display:flex;align-items:center;gap:10px;padding:10px;box-sizing:border-box;">
+                <div style="width:10px;height:10px;border-radius:50%;background:#ff3ea5;box-shadow:0 0 0 7px rgba(255,62,165,.18);"></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-weight:800;">녹화 중 <span id="elapsed">0초</span></div>
+                  <div id="hint" style="opacity:.72;font-size:12px;margin-top:3px;">원하는 만큼 녹화한 뒤 종료하세요.</div>
+                </div>
+                <button id="stop" style="border:0;border-radius:999px;padding:10px 14px;background:#ff3ea5;color:#fff;font:900 13px sans-serif;cursor:pointer;">녹화 종료</button>
+              </div>
+              <script>
+                const { ipcRenderer } = require("electron");
+                const elapsed = document.getElementById("elapsed");
+                const stop = document.getElementById("stop");
+                const hint = document.getElementById("hint");
+                let seconds = 0;
+                const timer = setInterval(() => {
+                  seconds += 1;
+                  elapsed.textContent = seconds + "초";
+                }, 1000);
+                stop.addEventListener("click", () => {
+                  stop.disabled = true;
+                  stop.textContent = "저장 중...";
+                  hint.textContent = "프레임을 mp4로 변환하고 있습니다.";
+                  ipcRenderer.send(${JSON.stringify(stopChannel)});
+                });
+                ipcRenderer.on("mellowcat:source-record:stopping", () => {
+                  stop.disabled = true;
+                  stop.textContent = "저장 중...";
+                  hint.textContent = "프레임을 mp4로 변환하고 있습니다.";
+                  clearInterval(timer);
+                });
+              </script>
+            </body>
+          </html>
+        `);
+        void controlWindow.loadURL(`data:text/html;charset=utf-8,${html}`).then(() => {
+          positionControl();
+          controlWindow.show();
+        });
+        return {
+          isStopped: () => stopped,
+          tick: () => {
+            elapsedSeconds += 1 / frameRate;
+            return elapsedSeconds;
+          },
+          close: () => {
+            ipcMain.removeListener(stopChannel, onStop);
+            if (!controlWindow.isDestroyed()) {
+              controlWindow.close();
+            }
+          }
+        };
+      };
+
+      try {
+        await captureWindow.loadURL(normalizedUrl);
+        const shouldRecord = await waitForRecordStart();
+        if (!shouldRecord) {
+          throw new Error("Recording was cancelled.");
+        }
+
+        const selection = await captureWindow.webContents.executeJavaScript(
+          `
+          new Promise((resolve) => {
+            const oldRoot = document.getElementById("__mellowcat_record_root");
+            if (oldRoot) oldRoot.remove();
+
+            const root = document.createElement("div");
+            root.id = "__mellowcat_record_root";
+            Object.assign(root.style, {
+              position: "fixed",
+              right: "18px",
+              top: "18px",
+              zIndex: "2147483647",
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+              padding: "10px",
+              borderRadius: "16px",
+              background: "rgba(17,17,17,0.92)",
+              color: "#fff",
+              font: "600 13px sans-serif",
+              boxShadow: "0 14px 40px rgba(0,0,0,0.35)"
+            });
+
+            const guide = document.createElement("span");
+            guide.textContent = "Play/scroll first, then record a 9:16 area";
+            Object.assign(guide.style, { whiteSpace: "nowrap", opacity: "0.9" });
+
+            const recordButton = document.createElement("button");
+            recordButton.type = "button";
+            recordButton.textContent = "동영상 저장";
+            Object.assign(recordButton.style, {
+              border: "0",
+              borderRadius: "999px",
+              padding: "8px 12px",
+              background: "#ff3ea5",
+              color: "#fff",
+              font: "700 13px sans-serif",
+              cursor: "pointer"
+            });
+
+            const cancelButton = document.createElement("button");
+            cancelButton.type = "button";
+            cancelButton.textContent = "취소";
+            Object.assign(cancelButton.style, {
+              border: "1px solid rgba(255,255,255,0.22)",
+              borderRadius: "999px",
+              padding: "8px 12px",
+              background: "rgba(255,255,255,0.08)",
+              color: "#fff",
+              font: "700 13px sans-serif",
+              cursor: "pointer"
+            });
+
+            root.appendChild(guide);
+            root.appendChild(recordButton);
+            root.appendChild(cancelButton);
+
+            let cleanedUp = false;
+            let keepAliveTimer = null;
+            const mountRoot = () => {
+              if (cleanedUp) return;
+              if (!document.documentElement.contains(root)) {
+                document.documentElement.appendChild(root);
+              }
+            };
+            mountRoot();
+            keepAliveTimer = window.setInterval(mountRoot, 350);
+
+            let overlay = null;
+            let box = null;
+            let startX = 0;
+            let startY = 0;
+            let dragging = false;
+            let lastRect = null;
+
+            const cleanup = () => {
+              cleanedUp = true;
+              if (keepAliveTimer) window.clearInterval(keepAliveTimer);
+              window.removeEventListener("keydown", onKeyDown, true);
+              if (overlay) overlay.remove();
+              if (root.parentNode) root.remove();
+            };
+
+            const startRecordMode = () => {
+              root.style.display = "none";
+              overlay = document.createElement("div");
+              overlay.id = "__mellowcat_record_overlay";
+              Object.assign(overlay.style, {
+                position: "fixed",
+                inset: "0",
+                zIndex: "2147483647",
+                cursor: "crosshair",
+                background: "rgba(0,0,0,0.20)",
+                userSelect: "none"
+              });
+
+              box = document.createElement("div");
+              Object.assign(box.style, {
+                position: "fixed",
+                display: "none",
+                border: "3px solid #ff3ea5",
+                boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)",
+                background: "rgba(255,255,255,0.04)",
+                boxSizing: "border-box"
+              });
+
+              const tip = document.createElement("div");
+              tip.textContent = "Drag freely. The saved clip will be converted to 9:16. Press Esc to cancel.";
+              Object.assign(tip.style, {
+                position: "fixed",
+                left: "50%",
+                top: "18px",
+                transform: "translateX(-50%)",
+                padding: "10px 14px",
+                borderRadius: "999px",
+                background: "rgba(17,17,17,0.92)",
+                color: "#fff",
+                font: "600 13px sans-serif",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.35)"
+              });
+
+              overlay.appendChild(box);
+              overlay.appendChild(tip);
+              document.documentElement.appendChild(overlay);
+              overlay.addEventListener("mousedown", onMouseDown);
+              overlay.addEventListener("mousemove", onMouseMove);
+              overlay.addEventListener("mouseup", onMouseUp);
+              window.addEventListener("keydown", onKeyDown, true);
+            };
+
+            const makeVerticalRect = (clientX, clientY) => {
+              const dx = clientX - startX;
+              const dy = clientY - startY;
+              const left = Math.min(startX, clientX);
+              const top = Math.min(startY, clientY);
+              const right = Math.max(startX, clientX);
+              const bottom = Math.max(startY, clientY);
+              return {
+                x: Math.max(0, Math.round(left)),
+                y: Math.max(0, Math.round(top)),
+                width: Math.max(8, Math.round(Math.min(right, window.innerWidth) - Math.max(0, left))),
+                height: Math.max(8, Math.round(Math.min(bottom, window.innerHeight) - Math.max(0, top)))
+              };
+            };
+
+            const renderRect = (rect) => {
+              if (!box) return;
+              box.style.display = "block";
+              box.style.left = rect.x + "px";
+              box.style.top = rect.y + "px";
+              box.style.width = rect.width + "px";
+              box.style.height = rect.height + "px";
+            };
+
+            const onKeyDown = (event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cleanup();
+                resolve(null);
+              }
+            };
+            const onMouseDown = (event) => {
+              event.preventDefault();
+              dragging = true;
+              startX = event.clientX;
+              startY = event.clientY;
+              lastRect = { x: startX, y: startY, width: 8, height: 8 };
+              renderRect(lastRect);
+            };
+            const onMouseMove = (event) => {
+              if (!dragging) return;
+              lastRect = makeVerticalRect(event.clientX, event.clientY);
+              renderRect(lastRect);
+            };
+            const onMouseUp = (event) => {
+              if (!dragging) return;
+              event.preventDefault();
+              dragging = false;
+              lastRect = makeVerticalRect(event.clientX, event.clientY);
+              if (!lastRect || lastRect.width < 80 || lastRect.height < 80) {
+                if (box) box.style.display = "none";
+                lastRect = null;
+                return;
+              }
+              cleanup();
+              window.setTimeout(() => resolve(lastRect), 120);
+            };
+
+            recordButton.addEventListener("click", (event) => {
+              event.preventDefault();
+              startRecordMode();
+            });
+            cancelButton.addEventListener("click", (event) => {
+              event.preventDefault();
+              cleanup();
+              resolve(null);
+            });
+          });
+          `,
+          true
+        );
+
+        if (!selection) {
+          throw new Error("Recording was cancelled.");
+        }
+
+        const captureRect = {
+          x: Math.max(0, Math.round(Number(selection.x) || 0)),
+          y: Math.max(0, Math.round(Number(selection.y) || 0)),
+          width: Math.max(1, Math.round(Number(selection.width) || 1)),
+          height: Math.max(1, Math.round(Number(selection.height) || 1))
+        };
+
+        const capturesRoot = pathService.getAutomationStatePath("captures");
+        fs.mkdirSync(capturesRoot, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const hostToken = sanitizeFileToken(parsedUrl.hostname || "source");
+        const frameRoot = path.join(capturesRoot, `source-video-frames-${hostToken}-${timestamp}`);
+        fs.mkdirSync(frameRoot, { recursive: true });
+
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const recordingControl = createRecordingStopControl();
+        let capturedFrameCount = 0;
+        try {
+          while (!recordingControl.isStopped()) {
+            const image = await captureWindow.capturePage(captureRect);
+            if (image.isEmpty()) {
+              throw new Error("Recording frame capture result is empty.");
+            }
+            capturedFrameCount += 1;
+            const framePath = path.join(
+              frameRoot,
+              `frame-${String(capturedFrameCount).padStart(4, "0")}.png`
+            );
+            fs.writeFileSync(framePath, image.toPNG());
+            const elapsed = recordingControl.tick();
+            if (elapsed >= 180) {
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, Math.round(1000 / frameRate)));
+          }
+        } finally {
+          recordingControl.close();
+        }
+        if (capturedFrameCount < 2) {
+          throw new Error("Recording is too short. Capture at least a moment before stopping.");
+        }
+
+        const outputPath = path.join(capturesRoot, `source-video-${hostToken}-${timestamp}.mp4`);
+        await runBundledFfmpeg([
+          "-y",
+          "-framerate",
+          String(frameRate),
+          "-i",
+          path.join(frameRoot, "frame-%04d.png"),
+          "-vf",
+          "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-r",
+          "30",
+          outputPath
+        ]);
+        fs.rmSync(frameRoot, { recursive: true, force: true });
+
+        const statusPackagePath =
+          packagePath?.trim() ||
+          telegramControlService.getStatus().lastPackagePath ||
+          undefined;
+        let packageUpdated = false;
+        let resolvedPackagePath: string | undefined;
+
+        if (statusPackagePath) {
+          try {
+            const clipDir = path.join(statusPackagePath, "assets", "source-clips");
+            fs.mkdirSync(clipDir, { recursive: true });
+            const packageVideoPath = path.join(clipDir, path.basename(outputPath));
+            fs.copyFileSync(outputPath, packageVideoPath);
+            packageUpdated = true;
+            resolvedPackagePath = statusPackagePath;
+          } catch {
+            // The saved clip remains available from the captures directory.
+          }
+        }
+
+        return {
+          videoPath: outputPath,
+          packageUpdated,
+          packagePath: resolvedPackagePath
+        };
+      } finally {
+        if (!captureWindow.isDestroyed()) {
+          captureWindow.close();
+        }
+      }
+    }
+  );
+  ipcMain.handle("automation:workflow:openPackageFolder", async (_event, packagePath?: string) => {
+    const resolvedPackagePath =
+      packagePath?.trim() ||
+      telegramControlService.getStatus().lastPackagePath ||
+      undefined;
+    if (!resolvedPackagePath) {
+      throw new Error("No package path is available yet.");
+    }
+    if (!fs.existsSync(resolvedPackagePath)) {
+      throw new Error(`Package path does not exist: ${resolvedPackagePath}`);
+    }
+    const result = await shell.openPath(resolvedPackagePath);
+    if (result) {
+      throw new Error(result);
+    }
+    return resolvedPackagePath;
+  });
+  ipcMain.handle("automation:create:listCardNewsTemplates", () =>
+    loadUserCardNewsTemplates()
+  );
+  ipcMain.handle("automation:create:registerCardNewsTemplate", async (event) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Card news template images",
+          extensions: ["png", "jpg", "jpeg", "webp"]
+        }
+      ]
+    };
+    const result = ownerWindow
+      ? await dialog.showOpenDialog(ownerWindow, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) {
+      return loadUserCardNewsTemplates();
+    }
+
+    const sourcePath = result.filePaths[0];
+    const extension = path.extname(sourcePath).toLowerCase();
+    if (!supportedCardNewsTemplateExtensions.has(extension)) {
+      throw new Error("Unsupported card news template image format.");
+    }
+
+    const storePath = getCardNewsTemplateStorePath();
+    fs.mkdirSync(storePath, { recursive: true });
+    const baseName = path.basename(sourcePath, extension).trim() || "template";
+    const id = `${Date.now()}-${sanitizeFileToken(baseName)}`;
+    const fileName = `${id}${extension}`;
+    const targetPath = path.join(storePath, fileName);
+    fs.copyFileSync(sourcePath, targetPath);
+
+    const templates = [
+      ...loadUserCardNewsTemplates(),
+      {
+        id,
+        name: baseName,
+        role: inferCardNewsTemplateRole(baseName),
+        imagePath: targetPath,
+        thumbnailPath: targetPath
+      }
+    ];
+    saveUserCardNewsTemplates(templates);
+    return templates;
+  });
+  ipcMain.handle("automation:create:deleteCardNewsTemplate", (_event, templateId: string) => {
+    const templates = loadUserCardNewsTemplates();
+    const target = templates.find((template) => template.id === templateId);
+    if (target && fs.existsSync(target.imagePath)) {
+      const storePath = path.resolve(getCardNewsTemplateStorePath());
+      const targetPath = path.resolve(target.imagePath);
+      const relativeTarget = path.relative(storePath, targetPath);
+      if (relativeTarget && !relativeTarget.startsWith("..") && !path.isAbsolute(relativeTarget)) {
+        fs.rmSync(targetPath, { force: true });
+      }
+    }
+    const nextTemplates = templates.filter((template) => template.id !== templateId);
+    saveUserCardNewsTemplates(nextTemplates);
+    return nextTemplates;
+  });
   ipcMain.handle("automation:youtube:getStatus", () => youTubeAuthService.getStatus());
   ipcMain.handle("automation:youtube:connect", () => youTubeAuthService.connect());
   ipcMain.handle("automation:youtube:disconnect", () => youTubeAuthService.disconnect());

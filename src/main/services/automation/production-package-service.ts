@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import type {
   AutomationJobSnapshot,
   AutomationJobStage,
+  ShortformWorkflowConfig,
   ShortformScriptCategory,
   ShortformScriptDraft
 } from "../../../common/types/automation";
@@ -17,7 +18,9 @@ import type {
 import { getMcpRuntimeContract } from "../../../common/contracts/mcp-contract-registry";
 import type {
   CreateReadinessSnapshot,
+  ManualInputCheckpointPayload,
   WorkflowCheckpointEnvelope,
+  WorkflowJobRecord,
   WorkflowJobSnapshot
 } from "../../../common/types/slot-workflow";
 import { SettingsRepository } from "../storage/settings-repository";
@@ -188,10 +191,139 @@ export class ProductionPackageService {
   inspectSceneScript(packagePath: string): SceneScriptDocument {
     const sceneScriptPath = path.join(packagePath, "scene-script.json");
     if (!fs.existsSync(sceneScriptPath)) {
+      const initializedCardNewsDocument = this.tryInitializeCardNewsSceneScript(packagePath);
+      if (initializedCardNewsDocument) {
+        return initializedCardNewsDocument;
+      }
       throw new Error(`scene-script.json was not found in package path: ${packagePath}`);
     }
 
     return this.fileService.readJsonFile<SceneScriptDocument>(sceneScriptPath);
+  }
+
+  private tryInitializeCardNewsSceneScript(packagePath: string): SceneScriptDocument | null {
+    const workflowConfig = this.workflowConfigService.get();
+    const inputCheckpoint = this.readPackageCheckpoint<ManualInputCheckpointPayload>(packagePath, 1);
+    const discoveryMode = inputCheckpoint?.payload?.request?.discoveryMode;
+    const isCardNewsContext =
+      workflowConfig.createModuleId === "card-news-generator-mcp" || discoveryMode === "news_card";
+
+    if (!isCardNewsContext) {
+      return null;
+    }
+
+    const processCheckpoint = this.readPackageCheckpoint<{
+      headline?: string;
+      summary?: string;
+      draft?: ShortformScriptDraft;
+      scriptDraft?: ShortformScriptDraft;
+      review?: {
+        scriptCategory?: ShortformScriptCategory;
+      };
+    }>(packagePath, 2);
+    const selectedCandidateId = (inputCheckpoint?.payload as { selectedCandidateId?: string } | undefined)
+      ?.selectedCandidateId;
+    const candidate =
+      inputCheckpoint?.payload?.candidates.find((item) => item.id && item.id === selectedCandidateId) ??
+      inputCheckpoint?.payload?.candidates[0];
+    const draft = processCheckpoint?.payload?.draft ?? processCheckpoint?.payload?.scriptDraft;
+    const title =
+      draft?.titleOptions?.[0]?.trim() ||
+      processCheckpoint?.payload?.headline?.trim() ||
+      candidate?.title?.trim() ||
+      inputCheckpoint?.payload?.title?.trim() ||
+      "Card news draft";
+    const summary =
+      draft?.narration?.trim() ||
+      processCheckpoint?.payload?.summary?.trim() ||
+      candidate?.operatorSummary?.trim() ||
+      candidate?.summary?.trim() ||
+      title;
+    const hook = draft?.hook?.trim() || title;
+    const callToAction = draft?.callToAction?.trim();
+    const rawCards = this.buildCardNewsStarterTexts({
+      title,
+      hook,
+      summary,
+      callToAction
+    });
+    const scenePlan = {
+      totalDurationSec: rawCards.length,
+      scenes: rawCards.map((text, index) => ({
+        index: index + 1,
+        text,
+        durationSec: 1,
+        keywords: this.extractCardNewsKeywords(text, candidate?.sourceLabel, candidate?.sourceKind)
+      }))
+    };
+    const document = this.buildSceneScriptDocument(
+      this.resolvePackageJobId(packagePath),
+      scenePlan,
+      processCheckpoint?.payload?.review?.scriptCategory ?? "community",
+      "card-news-generator-mcp",
+      workflowConfig,
+      this.resolveSceneStylePreset("card-news-generator-mcp", workflowConfig.createSceneStylePresetId)
+    );
+
+    return this.updateSceneScript(packagePath, this.applyCardNewsCoverPrompt(document));
+  }
+
+  private readPackageCheckpoint<TPayload>(
+    packagePath: string,
+    slot: 1 | 2 | 3 | 4
+  ): WorkflowCheckpointEnvelope<TPayload> | undefined {
+    const checkpointPath = path.join(packagePath, `checkpoint-${slot}`, "checkpoint.json");
+    if (!fs.existsSync(checkpointPath)) {
+      return undefined;
+    }
+    return this.fileService.readJsonFile<WorkflowCheckpointEnvelope<TPayload>>(checkpointPath);
+  }
+
+  private resolvePackageJobId(packagePath: string): string {
+    const jobPath = path.join(packagePath, "job.json");
+    if (fs.existsSync(jobPath)) {
+      const job = this.fileService.readJsonFile<WorkflowJobRecord>(jobPath);
+      if (job.jobId?.trim()) {
+        return job.jobId.trim();
+      }
+    }
+    return path.basename(packagePath);
+  }
+
+  private buildCardNewsStarterTexts(source: {
+    title: string;
+    hook: string;
+    summary: string;
+    callToAction?: string;
+  }): string[] {
+    const summaryChunks = source.summary
+      .replace(/\r?\n+/g, " ")
+      .split(/(?<=[.!?。！？]|다\.|요\.)\s+/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const bodyCards = summaryChunks.length > 0 ? summaryChunks.slice(0, 3) : [source.summary];
+    const cards = [source.hook || source.title, ...bodyCards];
+    if (source.callToAction) {
+      cards.push(source.callToAction);
+    }
+    return cards
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+  }
+
+  private extractCardNewsKeywords(
+    text: string,
+    sourceLabel?: string,
+    sourceKind?: string
+  ): string[] {
+    const words = text
+      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+      .split(/\s+/g)
+      .map((item) => item.trim())
+      .filter((item) => item.length >= 2)
+      .slice(0, 4);
+    return [...new Set([sourceKind, sourceLabel, ...words].filter(Boolean) as string[])].slice(0, 4);
   }
 
   updateSceneScript(packagePath: string, document: SceneScriptDocument): SceneScriptDocument {
@@ -245,6 +377,27 @@ export class ProductionPackageService {
     });
 
     return normalizedDocument;
+  }
+
+  applyCardNewsCoverImage(packagePath: string, coverImagePath: string): SceneScriptDocument {
+    const normalizedPath = coverImagePath.trim();
+    if (!normalizedPath) {
+      throw new Error("Cover image path is empty.");
+    }
+
+    const document = this.inspectSceneScript(packagePath);
+    if (!document.cardNews) {
+      throw new Error("This package does not contain card-news options.");
+    }
+
+    return this.updateSceneScript(packagePath, {
+      ...document,
+      cardNews: {
+        ...document.cardNews,
+        coverSource: "manual_upload",
+        coverImagePath: normalizedPath
+      }
+    });
   }
 
   async runCreatePipeline(jobId: string): Promise<WorkflowJobSnapshot> {
@@ -765,6 +918,7 @@ export class ProductionPackageService {
       scenePlan,
       scriptCategory as ShortformScriptCategory,
       createModuleId,
+      workflowConfig,
       this.resolveSceneStylePreset(createModuleId, workflowConfig.createSceneStylePresetId)
     );
     const effectiveSceneScriptDocument = isCardNewsModule
@@ -972,7 +1126,7 @@ export class ProductionPackageService {
       this.fileService.writeJsonFile(path.join(packagePath, "card-news-manifest.json"), {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
-        outputFormat: effectiveSceneScriptDocument.cardNews?.outputFormat ?? "shorts_9_16",
+        outputFormat: effectiveSceneScriptDocument.cardNews?.outputFormat ?? "square_1_1",
         layoutPreset: effectiveSceneScriptDocument.cardNews?.layoutPreset ?? "headline_focus",
         transitionStyle: effectiveSceneScriptDocument.cardNews?.transitionStyle ?? "cut",
         cards: cardNewsPrepared.cards.map((card) => ({
@@ -1237,6 +1391,7 @@ export class ProductionPackageService {
     },
     scriptCategory: ShortformScriptCategory,
     createModuleId: string,
+    workflowConfig?: ShortformWorkflowConfig,
     preset?: {
       subtitleStyle: SceneScriptDocument["subtitleStyle"];
       voiceProfile: SceneScriptDocument["voiceProfile"];
@@ -1312,7 +1467,15 @@ export class ProductionPackageService {
         },
       cardNews:
         createModuleId === "card-news-generator-mcp"
-          ? this.normalizeCardNewsOptions(undefined)
+          ? this.normalizeCardNewsOptions({
+              layoutPreset: "headline_focus",
+              transitionStyle: "cut",
+              outputFormat: "square_1_1",
+              coverSource: workflowConfig?.cardNewsCoverImagePath?.trim()
+                ? "manual_upload"
+                : "ai_generate",
+              coverImagePath: workflowConfig?.cardNewsCoverImagePath?.trim() || undefined
+            })
           : undefined
     };
   }
@@ -1471,7 +1634,7 @@ export class ProductionPackageService {
       outputFormat:
         cardNews?.outputFormat === "feed_4_5" || cardNews?.outputFormat === "square_1_1"
           ? cardNews.outputFormat
-          : "shorts_9_16",
+          : "square_1_1",
       coverSource: cardNews?.coverSource === "manual_upload" ? "manual_upload" : "ai_generate",
       coverPrompt: cardNews?.coverPrompt?.trim() || undefined,
       coverImagePath: cardNews?.coverImagePath?.trim() || undefined,
@@ -1583,12 +1746,22 @@ export class ProductionPackageService {
       heightPct: sceneNo === 1 ? 20 : 30,
       align: "center",
       verticalAlign: "middle",
+      fontFamily: "GongGothic B",
       fontSize: sceneNo === 1 ? 72 : 52,
       fontWeight: 700,
       textColor: "#FFFFFF",
       backgroundColor: "rgba(0,0,0,0.52)",
       lineHeight: 1.28,
-      padding: 28
+      padding: 28,
+      outlineEnabled: true,
+      outlineThickness: 8,
+      outlineColor: "#000000",
+      shadowEnabled: false,
+      shadowColor: "#000000",
+      shadowDirectionDeg: 135,
+      shadowOpacity: 45,
+      shadowDistance: 10,
+      shadowBlur: 0
     };
   }
 
@@ -1614,15 +1787,26 @@ export class ProductionPackageService {
     return {
       ...manifest,
       scenes: manifest.scenes.map((scene) => {
+        const sceneScriptItem = document.scenes.find((item) => item.sceneNo === scene.sceneIndex);
+        const sceneTemplatePath = this.resolveExistingPath(sceneScriptItem?.cardTemplateImagePath);
+        const copiedSceneTemplatePath = sceneTemplatePath
+          ? this.copyAssetToPackage(
+              packagePath,
+              sceneTemplatePath,
+              `card-news-template-${String(scene.sceneIndex).padStart(2, "0")}`
+            )
+          : undefined;
+
         if (scene.sceneIndex === 1) {
-          if (copiedCoverPath) {
+          const coverPath = copiedSceneTemplatePath ?? copiedCoverPath;
+          if (coverPath) {
             return {
               ...scene,
               motion: "none",
               selectedAsset: {
                 provider: "local",
                 assetType: "image",
-                localPath: copiedCoverPath
+                localPath: coverPath
               },
               fallbackUsed: false
             };
@@ -1633,7 +1817,8 @@ export class ProductionPackageService {
           };
         }
 
-        if (!copiedTemplatePath) {
+        const templatePath = copiedSceneTemplatePath ?? copiedTemplatePath;
+        if (!templatePath) {
           return scene;
         }
         return {
@@ -1642,7 +1827,7 @@ export class ProductionPackageService {
           selectedAsset: {
             provider: "local",
             assetType: "image",
-            localPath: copiedTemplatePath
+            localPath: templatePath
           },
           fallbackUsed: false
         };
@@ -1735,7 +1920,7 @@ export class ProductionPackageService {
           materialized = true;
         }
 
-        if (materialized && scene.sceneIndex > 1) {
+        if (materialized) {
           await this.renderCardTextOverlays(
             absoluteTargetPath,
             absoluteTargetPath,
@@ -1778,10 +1963,11 @@ export class ProductionPackageService {
     sceneIndex: number
   ): Array<NonNullable<SceneScriptItem["cardDesign"]>> {
     const fallback = this.buildDefaultCardDesign(sceneIndex);
-    const rawBoxes =
-      sceneScriptItem?.cardDesignBoxes && sceneScriptItem.cardDesignBoxes.length > 0
-        ? sceneScriptItem.cardDesignBoxes
-        : [sceneScriptItem?.cardDesign ?? fallback];
+    const rawBoxes = sceneScriptItem?.cardDesignBoxes
+      ? sceneScriptItem.cardDesignBoxes
+      : sceneScriptItem?.cardDesign
+        ? [sceneScriptItem.cardDesign]
+        : [fallback];
     return rawBoxes
       .map((box, index) => ({
         ...fallback,
@@ -1830,9 +2016,17 @@ export class ProductionPackageService {
               ? `h*${((design.yPct + design.heightPct) / 100).toFixed(4)}-text_h-${design.padding}`
               : `h*${(design.yPct / 100).toFixed(4)}+(h*${(design.heightPct / 100).toFixed(4)}-text_h)/2`;
         const bgAlpha = this.extractRgbaAlpha(design.backgroundColor);
+        const outlineThickness = design.outlineEnabled
+          ? Math.max(0, Math.min(100, Math.round(design.outlineThickness ?? 0)))
+          : 0;
+        const shadowDistance = Math.max(0, Math.min(100, Number(design.shadowDistance ?? 0)));
+        const shadowDirection = ((Number(design.shadowDirectionDeg ?? 135) * Math.PI) / 180);
+        const shadowOpacity = Math.max(0, Math.min(100, Number(design.shadowOpacity ?? 45))) / 100;
+        const shadowX = design.shadowEnabled ? Math.round(Math.cos(shadowDirection) * shadowDistance) : 0;
+        const shadowY = design.shadowEnabled ? Math.round(Math.sin(shadowDirection) * shadowDistance) : 0;
         return [
           `drawbox=x=w*${(design.xPct / 100).toFixed(4)}:y=h*${(design.yPct / 100).toFixed(4)}:w=w*${(design.widthPct / 100).toFixed(4)}:h=h*${(design.heightPct / 100).toFixed(4)}:color=black@${bgAlpha}:t=fill`,
-          `drawtext=${fontFile ? `fontfile='${escapedFont}':` : ""}text='${escapedText}':fontcolor=${this.toFfmpegColor(design.textColor)}:fontsize=${Math.max(20, Math.round(design.fontSize))}:line_spacing=${Math.max(0, Math.round((design.lineHeight - 1) * design.fontSize))}:x=${xExpr}:y=${yExpr}`
+          `drawtext=${fontFile ? `fontfile='${escapedFont}':` : ""}text='${escapedText}':fontcolor=${this.toFfmpegColor(design.textColor)}:fontsize=${Math.max(20, Math.round(design.fontSize))}:line_spacing=${Math.max(0, Math.round((design.lineHeight - 1) * design.fontSize))}:borderw=${outlineThickness}:bordercolor=${this.toFfmpegColor(design.outlineColor ?? "#000000")}:shadowcolor=${this.toFfmpegColor(design.shadowColor ?? "#000000")}@${shadowOpacity.toFixed(2)}:shadowx=${shadowX}:shadowy=${shadowY}:x=${xExpr}:y=${yExpr}`
         ].join(",");
       })
       .filter(Boolean);

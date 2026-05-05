@@ -1,6 +1,6 @@
 import type { AppMeta } from "./app";
 import type { ShortformWorkflowConfig, TelegramControlStatus } from "./automation";
-import type { SceneScriptDocument } from "./media-generation";
+import type { CardNewsTemplateRecord, SceneScriptDocument } from "./media-generation";
 import type {
   AuthSession,
   ChangeEmailResponse,
@@ -22,6 +22,8 @@ import type {
 } from "./settings";
 import type { InstalledMCPRecord, MCPCatalogItem, MCPOutputEvent } from "./mcp";
 import type {
+  NewsKnowledgeDiscoveryRequest,
+  NewsKnowledgeDiscoveryResult,
   YouTubeBreakoutDiscoveryRequest,
   YouTubeBreakoutDiscoveryResult,
   YouTubeCandidateAnalysisRequest,
@@ -97,12 +99,35 @@ export interface MellowCatAPI {
     discoverYouTubeBreakoutCandidates: (
       request: YouTubeBreakoutDiscoveryRequest
     ) => Promise<YouTubeBreakoutDiscoveryResult>;
+    discoverNewsKnowledgeCandidates: (
+      request: NewsKnowledgeDiscoveryRequest
+    ) => Promise<NewsKnowledgeDiscoveryResult>;
     analyzeYouTubeCandidate: (
       request: YouTubeCandidateAnalysisRequest
     ) => Promise<YouTubeCandidateAnalysisResult>;
     probeYouTubeTranscript: (
       request: YouTubeTranscriptProbeRequest
     ) => Promise<YouTubeTranscriptProbeResult>;
+    captureNewsSourceToCardCover: (
+      sourceUrl: string,
+      packagePath?: string
+    ) => Promise<{
+      imagePath: string;
+      packageUpdated: boolean;
+      packagePath?: string;
+    }>;
+    captureNewsSourceToVideoClip: (
+      sourceUrl: string,
+      packagePath?: string
+    ) => Promise<{
+      videoPath: string;
+      packageUpdated: boolean;
+      packagePath?: string;
+    }>;
+    openPackageFolder: (packagePath?: string) => Promise<string>;
+    listCardNewsTemplates: () => Promise<CardNewsTemplateRecord[]>;
+    registerCardNewsTemplate: () => Promise<CardNewsTemplateRecord[]>;
+    deleteCardNewsTemplate: (templateId: string) => Promise<CardNewsTemplateRecord[]>;
     getYouTubeStatus: () => Promise<YouTubeAuthStatus>;
     connectYouTube: () => Promise<YouTubeAuthStatus>;
     disconnectYouTube: () => Promise<YouTubeAuthStatus>;

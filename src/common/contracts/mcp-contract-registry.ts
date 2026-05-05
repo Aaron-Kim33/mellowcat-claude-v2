@@ -240,6 +240,108 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
       }
     }
   },
+  "news-knowledge-crawler-mcp": {
+    id: "news-knowledge-crawler-mcp",
+    name: "News Knowledge Crawler",
+    aiCapable: false,
+    builtinAvailable: true,
+    slot: "input",
+    category: "discovery",
+    compatibility: {
+      inputs: [],
+      outputs: [{ contract: "trend_candidates_v1", required: true }],
+      executionModes: ["scheduled", "on_demand"]
+    },
+    dependencies: [],
+    configScopes: ["pack", "mcp"],
+    slotUi: {
+      input: {
+        slot: "input",
+        title: "뉴스 지식형 크롤링",
+        description:
+          "MBC, SBS, KBS, BBC, Reuters 등 신뢰 출처에서 지식형 쇼츠/카드뉴스 후보를 수집합니다.",
+        fields: [
+          {
+            id: "newsKnowledgeRegion",
+            label: "국내/해외",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "국내", value: "domestic" },
+              { label: "해외", value: "global" }
+            ]
+          },
+          {
+            id: "newsKnowledgeSourceGroup",
+            label: "출처",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "국내 주요(MBC/SBS/KBS/연합)", value: "domestic_major" },
+              { label: "해외 주요(BBC/Reuters/AP)", value: "global_major" },
+              { label: "MBC", value: "mbc" },
+              { label: "SBS", value: "sbs" },
+              { label: "KBS", value: "kbs" },
+              { label: "연합뉴스", value: "yonhap" },
+              { label: "BBC", value: "bbc" },
+              { label: "Reuters", value: "reuters" },
+              { label: "AP", value: "ap" }
+            ]
+          },
+          {
+            id: "newsKnowledgeCategory",
+            label: "카테고리",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "전체", value: "all" },
+              { label: "세계 정세", value: "world" },
+              { label: "속보", value: "breaking" },
+              { label: "중국", value: "china" },
+              { label: "경제/무역", value: "economy" },
+              { label: "과학/기술", value: "tech" }
+            ]
+          },
+          {
+            id: "newsKnowledgePeriod",
+            label: "기간",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "최근 24시간", value: "24h" },
+              { label: "최근 3일", value: "3d" },
+              { label: "최근 7일", value: "7d" }
+            ]
+          },
+          {
+            id: "newsKnowledgeLimit",
+            label: "결과 개수",
+            type: "select",
+            width: "half",
+            options: [
+              { label: "10", value: "10" },
+              { label: "15", value: "15" },
+              { label: "20", value: "20" },
+              { label: "30", value: "30" }
+            ]
+          },
+          {
+            id: "newsKnowledgeQuery",
+            label: "추가 검색어",
+            type: "text",
+            width: "half",
+            placeholder: "예: 중국 수출통제, BBC Korea"
+          }
+        ],
+        actions: [
+          { id: "fetch_news_knowledge_candidates", label: "뉴스 후보 조회", kind: "primary" },
+          { id: "save_checkpoint_1", label: "checkpoint-1 저장", kind: "secondary" }
+        ]
+      }
+    }
+  },
   "shortform-script-mcp": {
     id: "shortform-script-mcp",
     name: "Shortform Script",

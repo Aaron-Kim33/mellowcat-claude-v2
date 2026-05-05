@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CSSProperties,
+  DragEvent as ReactDragEvent,
+  ErrorInfo,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+  WheelEvent as ReactWheelEvent
+} from "react";
+import { Component } from "react";
+import type {
+  CardNewsTemplateRecord,
   CardNewsLayoutPreset,
   CardNewsTransitionStyle,
   SceneScriptDocument,
@@ -30,7 +39,7 @@ const VOICE_PROVIDER_OPTIONS: Array<SceneScriptVoiceProfile["provider"]> = [
 ];
 const CARD_NEWS_TEXT_PRESETS = [
   { id: "headline", labelKo: "헤드라인", labelEn: "Headline", fontSize: 64, fontWeight: 800 as const, lineHeight: 1.2 },
-  { id: "story", labelKo: "스토리", labelEn: "Story", fontSize: 48, fontWeight: 700 as const, lineHeight: 1.28 },
+  { id: "story", labelKo: "본문", labelEn: "Story", fontSize: 48, fontWeight: 700 as const, lineHeight: 1.28 },
   { id: "caption", labelKo: "캡션", labelEn: "Caption", fontSize: 40, fontWeight: 600 as const, lineHeight: 1.34 }
 ];
 
@@ -39,6 +48,44 @@ const CARD_NEWS_COLOR_PRESETS = [
   { id: "warm", labelKo: "웜", labelEn: "Warm", textColor: "#FFF5D6", backgroundColor: "rgba(28,18,8,0.6)" },
   { id: "cool", labelKo: "쿨", labelEn: "Cool", textColor: "#EAF4FF", backgroundColor: "rgba(8,20,36,0.58)" },
   { id: "accent", labelKo: "포인트", labelEn: "Accent", textColor: "#FFFFFF", backgroundColor: "rgba(120,28,55,0.62)" }
+];
+
+const CARD_NEWS_FONT_OPTIONS = [
+  "Jalnan OTF",
+  "S-Core Dream 5 M",
+  "GongGothic B",
+  "Gmarket Sans",
+  "Arial"
+];
+
+const CARD_NEWS_PALETTE = [
+  "#000000",
+  "#FFFFFF",
+  "#FFD800",
+  "#42D7DE",
+  "#F5335B",
+  "#2455FF",
+  "#12B886",
+  "#FF7A1A"
+];
+
+const CARD_NEWS_SYMBOLS = [
+  { symbol: "★", label: "star" },
+  { symbol: "✓", label: "check" },
+  { symbol: "!", label: "alert" },
+  { symbol: "?", label: "question" },
+  { symbol: "→", label: "arrow" },
+  { symbol: "※", label: "note" },
+  { symbol: "♡", label: "heart" },
+  { symbol: "☞", label: "point" },
+  { symbol: "○", label: "circle" },
+  { symbol: "■", label: "square" },
+  { symbol: "▲", label: "triangle" },
+  { symbol: "◆", label: "diamond" },
+  { symbol: "돈", label: "money" },
+  { symbol: "핵심", label: "core" },
+  { symbol: "주의", label: "warning" },
+  { symbol: "결론", label: "conclusion" }
 ];
 
 type CardDesignDragState = {
@@ -55,6 +102,68 @@ type CardDesignDragState = {
 };
 
 type CardDesignBox = NonNullable<SceneScriptItem["cardDesign"]>;
+type CardRichTextRun = NonNullable<CardDesignBox["richTextRuns"]>[number];
+type CardRichTextStylePatch = Partial<
+  Pick<
+    CardDesignBox,
+    | "fontFamily"
+    | "fontSize"
+    | "fontWeight"
+    | "textColor"
+    | "outlineEnabled"
+    | "outlineThickness"
+    | "outlineColor"
+    | "shadowEnabled"
+    | "shadowColor"
+    | "shadowDirectionDeg"
+    | "shadowOpacity"
+    | "shadowDistance"
+    | "shadowBlur"
+  >
+>;
+
+type CardStagePanState = {
+  startX: number;
+  startY: number;
+  startPanX: number;
+  startPanY: number;
+};
+
+class GenerationErrorBoundary extends Component<
+  { children: ReactNode },
+  { errorMessage: string | null }
+> {
+  state = { errorMessage: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      errorMessage: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("Generation page render failed", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.errorMessage) {
+      return (
+        <div className="card">
+          <strong>카드뉴스 편집 화면 렌더링 오류</strong>
+          <p className="warning-text">{this.state.errorMessage}</p>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => this.setState({ errorMessage: null })}
+          >
+            다시 시도
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function toFileUrl(absolutePath: string): string {
   const normalized = absolutePath.replace(/\\/g, "/");
@@ -73,6 +182,263 @@ function buildScenePreviewCandidates(packagePath: string, sceneNo: number): Arra
     { kind: "image", src: toFileUrl(`${base}.webp`) },
     { kind: "video", src: toFileUrl(`${base}.mp4`) }
   ];
+}
+
+function buildCardNewsPlaceholderPreview(sceneNo: number): string {
+  const label = sceneNo === 1 ? "COVER" : `CARD ${sceneNo}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#171717"/><stop offset="1" stop-color="#31302b"/></linearGradient></defs><rect width="1080" height="1080" fill="url(#g)"/><rect x="54" y="54" width="972" height="972" rx="44" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="4" stroke-dasharray="18 18"/><text x="540" y="180" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="rgba(255,255,255,0.52)">${label}</text><text x="540" y="930" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="rgba(255,255,255,0.38)">Choose an image or edit text layers</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function buildCardTextShadow(design: NonNullable<SceneScriptItem["cardDesign"]>): string {
+  if (!design.shadowEnabled) {
+    return "none";
+  }
+  const direction = ((design.shadowDirectionDeg ?? 135) * Math.PI) / 180;
+  const distance = design.shadowDistance ?? 10;
+  const opacity = Math.max(0, Math.min(100, design.shadowOpacity ?? 45)) / 100;
+  const blur = Math.max(0, design.shadowBlur ?? 0);
+  const x = Math.cos(direction) * distance;
+  const y = Math.sin(direction) * distance;
+  return `${x.toFixed(1)}px ${y.toFixed(1)}px ${blur}px ${toRgba(design.shadowColor ?? "#000000", opacity)}`;
+}
+
+function buildCardRunStyle(
+  box: NonNullable<SceneScriptItem["cardDesign"]>,
+  run: CardRichTextRun
+): CSSProperties {
+  return {
+    color: run.textColor ?? box.textColor,
+    fontFamily: run.fontFamily ?? box.fontFamily ?? "GongGothic B",
+    fontSize: run.fontSize ?? box.fontSize,
+    fontWeight: run.fontWeight ?? box.fontWeight,
+    WebkitTextStroke: (run.outlineEnabled ?? box.outlineEnabled)
+      ? `${run.outlineThickness ?? box.outlineThickness ?? 0}px ${run.outlineColor ?? box.outlineColor ?? "#000000"}`
+      : "0 transparent",
+    paintOrder: "stroke fill",
+    textShadow: buildCardTextShadow({
+      ...box,
+      shadowEnabled: run.shadowEnabled ?? box.shadowEnabled,
+      shadowColor: run.shadowColor ?? box.shadowColor,
+      shadowDirectionDeg: run.shadowDirectionDeg ?? box.shadowDirectionDeg,
+      shadowOpacity: run.shadowOpacity ?? box.shadowOpacity,
+      shadowDistance: run.shadowDistance ?? box.shadowDistance,
+      shadowBlur: run.shadowBlur ?? box.shadowBlur
+    })
+  };
+}
+
+function getCardPlainTextFromRuns(runs?: CardRichTextRun[]): string {
+  return runs?.map((run) => run.text).join("") ?? "";
+}
+
+function getCardRunsForBox(box: CardDesignBox): CardRichTextRun[] {
+  if (box.richTextRuns && box.richTextRuns.length > 0) {
+    return box.richTextRuns.filter((run) => typeof run.text === "string" && run.text.length > 0);
+  }
+  return typeof box.text === "string" && box.text.length > 0 ? [{ text: box.text }] : [];
+}
+
+function extractCardRunsFromEditableElement(root: HTMLElement, sourceRuns?: CardRichTextRun[]): CardRichTextRun[] {
+  const runs: CardRichTextRun[] = [];
+  const appendText = (text: string, inheritedRun?: CardRichTextRun) => {
+    if (!text) {
+      return;
+    }
+    runs.push({ ...(inheritedRun ?? {}), text });
+  };
+  const appendLineBreak = (inheritedRun?: CardRichTextRun, options?: { force?: boolean }) => {
+    const last = runs[runs.length - 1];
+    if (!options?.force && last?.text.endsWith("\n")) {
+      return;
+    }
+    appendText("\n", inheritedRun);
+  };
+  const walk = (node: Node, inheritedRun?: CardRichTextRun) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      appendText(node.textContent ?? "", inheritedRun);
+      return;
+    }
+    if (node.nodeName === "BR") {
+      appendLineBreak(inheritedRun, { force: true });
+      return;
+    }
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    const runIndexRaw = node.dataset.cardRunIndex;
+    const runIndex = runIndexRaw === undefined ? Number.NaN : Number(runIndexRaw);
+    const currentRun =
+      Number.isFinite(runIndex) && sourceRuns?.[runIndex]
+        ? { ...sourceRuns[runIndex], text: "" }
+        : inheritedRun;
+    const tagName = node.tagName.toLowerCase();
+    const isBlockNode = ["div", "p", "li", "section", "article"].includes(tagName) && node !== root;
+    if (isBlockNode && runs.length > 0) {
+      appendLineBreak(currentRun);
+    }
+    const beforeLength = runs.reduce((total, run) => total + run.text.length, 0);
+    Array.from(node.childNodes).forEach((child) => walk(child, currentRun));
+    const afterLength = runs.reduce((total, run) => total + run.text.length, 0);
+    if (isBlockNode && afterLength > beforeLength) {
+      appendLineBreak(currentRun);
+    }
+  };
+  Array.from(root.childNodes).forEach((child) => walk(child));
+  const merged = mergeAdjacentCardRuns(runs);
+  if (merged.length > 0) {
+    merged[merged.length - 1] = {
+      ...merged[merged.length - 1],
+      text: merged[merged.length - 1].text.replace(/\n+$/, "")
+    };
+  }
+  return mergeAdjacentCardRuns(merged);
+}
+
+function normalizeCardRichTextRuns(runs?: CardRichTextRun[]): CardRichTextRun[] | undefined {
+  if (!runs || runs.length === 0) {
+    return undefined;
+  }
+  const normalized = mergeAdjacentCardRuns(
+    runs
+      .filter((run) => typeof run.text === "string" && run.text.length > 0)
+      .map((run) => ({
+        ...run,
+        text: run.text
+      }))
+  );
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function getPlainTextFromEditableElement(root: HTMLElement): string {
+  const runs = extractCardRunsFromEditableElement(root);
+  if (runs.length > 0) {
+    return getCardPlainTextFromRuns(runs);
+  }
+  return root.innerText;
+}
+
+function getCardRunStyleKey(run: CardRichTextRun): string {
+  return JSON.stringify({
+    fontFamily: run.fontFamily,
+    fontSize: run.fontSize,
+    fontWeight: run.fontWeight,
+    textColor: run.textColor,
+    outlineEnabled: run.outlineEnabled,
+    outlineThickness: run.outlineThickness,
+    outlineColor: run.outlineColor,
+    shadowEnabled: run.shadowEnabled,
+    shadowColor: run.shadowColor,
+    shadowDirectionDeg: run.shadowDirectionDeg,
+    shadowOpacity: run.shadowOpacity,
+    shadowDistance: run.shadowDistance,
+    shadowBlur: run.shadowBlur
+  });
+}
+
+function mergeAdjacentCardRuns(runs: CardRichTextRun[]): CardRichTextRun[] {
+  return runs.reduce<CardRichTextRun[]>((merged, run) => {
+    if (!run.text) {
+      return merged;
+    }
+    const last = merged[merged.length - 1];
+    if (last && getCardRunStyleKey(last) === getCardRunStyleKey(run)) {
+      merged[merged.length - 1] = { ...last, text: `${last.text}${run.text}` };
+      return merged;
+    }
+    merged.push(run);
+    return merged;
+  }, []);
+}
+
+function applyCardStylePatchToRuns(
+  runs: CardRichTextRun[],
+  start: number,
+  end: number,
+  patch: CardRichTextStylePatch
+): CardRichTextRun[] {
+  let cursor = 0;
+  const nextRuns: CardRichTextRun[] = [];
+  runs.forEach((run) => {
+    const runStart = cursor;
+    const runEnd = cursor + run.text.length;
+    cursor = runEnd;
+    if (runEnd <= start || runStart >= end) {
+      nextRuns.push(run);
+      return;
+    }
+    const localStart = Math.max(0, start - runStart);
+    const localEnd = Math.min(run.text.length, end - runStart);
+    const before = run.text.slice(0, localStart);
+    const middle = run.text.slice(localStart, localEnd);
+    const after = run.text.slice(localEnd);
+    if (before) {
+      nextRuns.push({ ...run, text: before });
+    }
+    if (middle) {
+      nextRuns.push({ ...run, ...patch, text: middle });
+    }
+    if (after) {
+      nextRuns.push({ ...run, text: after });
+    }
+  });
+  return mergeAdjacentCardRuns(nextRuns);
+}
+
+function toRgba(color: string, opacity: number): string {
+  if (/^rgba?\(/i.test(color)) {
+    return color;
+  }
+  const hex = color.replace("#", "").trim();
+  if (hex.length !== 6) {
+    return color;
+  }
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+function parseCssColorToHexAndOpacity(color: string): { hex: string; opacity: number } {
+  const trimmed = color.trim();
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) {
+    return { hex: trimmed, opacity: 100 };
+  }
+  const rgbaMatch = trimmed.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbaMatch) {
+    const parts = rgbaMatch[1].split(",").map((part) => part.trim());
+    const r = Math.max(0, Math.min(255, Number(parts[0]) || 0));
+    const g = Math.max(0, Math.min(255, Number(parts[1]) || 0));
+    const b = Math.max(0, Math.min(255, Number(parts[2]) || 0));
+    const alpha = parts[3] === undefined ? 1 : Math.max(0, Math.min(1, Number(parts[3]) || 0));
+    const hex = `#${[r, g, b]
+      .map((value) => Math.round(value).toString(16).padStart(2, "0"))
+      .join("")}`;
+    return { hex, opacity: Math.round(alpha * 100) };
+  }
+  return { hex: "#000000", opacity: 0 };
+}
+
+function buildCssRgbaFromHexAndOpacity(hex: string, opacity: number): string {
+  if (opacity >= 100) {
+    return hex;
+  }
+  return toRgba(hex, Math.max(0, Math.min(100, opacity)) / 100);
+}
+
+async function pickColorWithEyeDropper(): Promise<string | null> {
+  const EyeDropperCtor = (window as unknown as {
+    EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> };
+  }).EyeDropper;
+  if (!EyeDropperCtor) {
+    return null;
+  }
+  try {
+    const result = await new EyeDropperCtor().open();
+    return result.sRGBHex;
+  } catch {
+    return null;
+  }
 }
 
 function probePreviewAsset(kind: "image" | "video", src: string): Promise<boolean> {
@@ -113,7 +479,7 @@ function stripNarrationPrefixFromFluxPrompt(text: string, fluxPrompt: string): s
     return fluxPrompt;
   }
   const escapedText = normalizedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const prefixRegex = new RegExp(`^${escapedText}[\\s]*[.。!?…,:-]*[\\s]*`, "i");
+  const prefixRegex = new RegExp(`^${escapedText}[\\s]*[.ã€‚!?â€¦,:-]*[\\s]*`, "i");
   if (!prefixRegex.test(normalizedPrompt)) {
     return fluxPrompt;
   }
@@ -157,12 +523,22 @@ function buildDefaultCardDesign(sceneNo: number): NonNullable<SceneScriptItem["c
     heightPct: sceneNo === 1 ? 20 : 30,
     align: "center",
     verticalAlign: "middle",
+    fontFamily: "GongGothic B",
     fontSize: sceneNo === 1 ? 72 : 52,
     fontWeight: 700,
     textColor: "#FFFFFF",
     backgroundColor: "rgba(0,0,0,0.52)",
     lineHeight: 1.28,
-    padding: 28
+    padding: 28,
+    outlineEnabled: true,
+    outlineThickness: 8,
+    outlineColor: "#000000",
+    shadowEnabled: false,
+    shadowColor: "#000000",
+    shadowDirectionDeg: 135,
+    shadowOpacity: 45,
+    shadowDistance: 10,
+    shadowBlur: 0
   };
 }
 
@@ -171,7 +547,7 @@ function toFriendlySceneScriptErrorMessage(error: unknown, isKorean: boolean): s
     error instanceof Error ? error.message : typeof error === "string" ? error : "Failed to load scene script.";
   if (raw.includes("scene-script.json was not found")) {
     return isKorean
-      ? "선택한 패키지에 scene-script가 아직 없습니다. 3번 슬롯에서 소재 생성을 먼저 실행해 주세요."
+      ? "ì„ íƒí•œ íŒ¨í‚¤ì§€ì— scene-scriptê°€ ì•„ì§ ì—†ìŠµë‹ˆë‹¤. 3ë²ˆ ìŠ¬ë¡¯ì—ì„œ ì†Œìž¬ ìƒì„±ì„ ë¨¼ì € ì‹¤í–‰í•´ ì£¼ì„¸ìš”."
       : "No completed scene script exists in this package yet. Run Slot 03 create first.";
   }
   return raw;
@@ -187,15 +563,18 @@ export function GenerationPage() {
     workflowConfig,
     sceneScript,
     sceneScriptPackagePath,
+    cardNewsTemplates,
     telegramStatus,
     workflowJobSnapshot,
     inspectSceneScript,
     saveSceneScript,
-    saveSceneCard,
     captureCardPreviewImageAs,
     saveWorkflowConfig,
     pickCreateBackgroundFile,
-    pickYouTubePackageFolder
+    pickYouTubePackageFolder,
+    refreshCardNewsTemplates,
+    registerCardNewsTemplate,
+    deleteCardNewsTemplate
   } = useAppStore();
   const copy = getLauncherCopy(settings?.launcherLanguage).pages.generation;
   const packagePath =
@@ -214,16 +593,34 @@ export function GenerationPage() {
   const [message, setMessage] = useState("");
   const [cardDesignDrag, setCardDesignDrag] = useState<CardDesignDragState | null>(null);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState(0);
+  const [editingPreviewBox, setEditingPreviewBox] = useState<{
+    sceneNo: number;
+    boxIndex: number;
+  } | null>(null);
   const [snapGuides, setSnapGuides] = useState<{ verticalPct?: number; horizontalPct?: number }>({});
   const [draggingLayerIndex, setDraggingLayerIndex] = useState<number | null>(null);
   const [dragOverLayerIndex, setDragOverLayerIndex] = useState<number | null>(null);
+  const [draggingSceneIndex, setDraggingSceneIndex] = useState<number | null>(null);
+  const [dragOverSceneIndex, setDragOverSceneIndex] = useState<number | null>(null);
   const [undoStack, setUndoStack] = useState<SceneScriptDocument[]>([]);
   const [redoStack, setRedoStack] = useState<SceneScriptDocument[]>([]);
-  const [showCardBoxOutline, setShowCardBoxOutline] = useState(true);
+  const [showCardBoxOutline, setShowCardBoxOutline] = useState(false);
+  const [symbolSearch, setSymbolSearch] = useState("");
   const editableDocumentRef = useRef<SceneScriptDocument | null>(null);
+  const editingPreviewDirtyRef = useRef(false);
+  const activeRichTextSelectionRef = useRef<{
+    sceneNo: number;
+    boxIndex: number;
+    start: number;
+    end: number;
+  } | null>(null);
   const previewStageRef = useRef<HTMLDivElement | null>(null);
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
-  const [cardStageScale, setCardStageScale] = useState(1);
+  const [cardStageFitScale, setCardStageFitScale] = useState(1);
+  const [cardStageZoom, setCardStageZoom] = useState(1);
+  const [cardStagePan, setCardStagePan] = useState({ x: 0, y: 0 });
+  const [cardStagePanDrag, setCardStagePanDrag] = useState<CardStagePanState | null>(null);
+  const cardStageScale = cardStageFitScale * cardStageZoom;
   const isKorean = settings?.launcherLanguage === "ko";
   const createModuleId = workflowConfig?.createModuleId ?? "youtube-material-generator-mcp";
   const sceneStylePresets = useMemo(
@@ -240,7 +637,7 @@ export function GenerationPage() {
         : copy.title,
       pageSubtitle: isCardNewsModule
         ? isKorean
-          ? "생성 전/후에 카드 텍스트, 비주얼 프롬프트, 전환 모션, 길이를 편집합니다."
+          ? "카드 문구, 배경 템플릿, 텍스트 스타일을 편집합니다."
           : "Edit card text, visual prompts, transitions, and timing before/after generation."
         : copy.subtitle,
       sceneLabel: isCardNewsModule ? (isKorean ? "카드" : "Card") : copy.sceneLabel,
@@ -265,15 +662,21 @@ export function GenerationPage() {
     : copy.text;
   const previewHintText = isCardNewsModule
     ? isKorean
-      ? "선택한 카드의 문구/자산/전환을 여기서 빠르게 확인하세요."
+      ? "선택한 카드의 배경과 텍스트를 여기서 확인합니다. Ctrl+휠로 확대하고 우클릭 드래그로 이동할 수 있습니다."
       : "Quickly review selected card copy, asset, and transition."
     : isKorean
-      ? "선택한 씬의 내레이션/키워드/모션을 오른쪽에서 빠르게 검토하세요."
+      ? "ì„ íƒí•œ ì”¬ì˜ ë‚´ë ˆì´ì…˜/í‚¤ì›Œë“œ/ëª¨ì…˜ì„ ì˜¤ë¥¸ìª½ì—ì„œ ë¹ ë¥´ê²Œ ê²€í† í•˜ì„¸ìš”."
       : "Quickly review selected scene narration, keyword, and motion here.";
 
   useEffect(() => {
     editableDocumentRef.current = editableDocument;
   }, [editableDocument]);
+
+  useEffect(() => {
+    if (isCardNewsModule && cardNewsTemplates.length === 0) {
+      void refreshCardNewsTemplates();
+    }
+  }, [cardNewsTemplates.length, isCardNewsModule, refreshCardNewsTemplates]);
 
   const applyDocumentUpdate = (
     updater: (current: SceneScriptDocument) => SceneScriptDocument,
@@ -358,14 +761,14 @@ export function GenerationPage() {
         ...scene,
         fluxPrompt: stripNarrationPrefixFromFluxPrompt(scene.text, scene.fluxPrompt),
         cardDesign:
-          isCardNewsModule && scene.sceneNo > 1
+          isCardNewsModule
             ? {
                 ...buildDefaultCardDesign(scene.sceneNo),
                 ...(scene.cardDesign ?? {})
               }
             : scene.cardDesign,
         cardDesignBoxes:
-          isCardNewsModule && scene.sceneNo > 1
+          isCardNewsModule
             ? (scene.cardDesignBoxes && scene.cardDesignBoxes.length > 0
                 ? scene.cardDesignBoxes.map((box, index) => ({
                     ...buildDefaultCardDesign(scene.sceneNo),
@@ -391,7 +794,7 @@ export function GenerationPage() {
         ? {
             layoutPreset: sceneScript.cardNews?.layoutPreset ?? "headline_focus",
             transitionStyle: sceneScript.cardNews?.transitionStyle ?? "cut",
-            outputFormat: sceneScript.cardNews?.outputFormat ?? "shorts_9_16",
+            outputFormat: sceneScript.cardNews?.outputFormat ?? "square_1_1",
             coverSource: sceneScript.cardNews?.coverSource ?? "ai_generate",
             coverPrompt: sceneScript.cardNews?.coverPrompt ?? "",
             coverImagePath: sceneScript.cardNews?.coverImagePath ?? "",
@@ -414,7 +817,7 @@ export function GenerationPage() {
     if (!selectedScene) {
       return [] as Array<NonNullable<SceneScriptItem["cardDesign"]>>;
     }
-    if (selectedScene.cardDesignBoxes && selectedScene.cardDesignBoxes.length > 0) {
+    if (selectedScene.cardDesignBoxes) {
       return selectedScene.cardDesignBoxes.map((box, index) => ({
         ...buildDefaultCardDesign(selectedScene.sceneNo),
         ...(box ?? {}),
@@ -423,6 +826,9 @@ export function GenerationPage() {
         hidden: Boolean(box?.hidden),
         locked: Boolean(box?.locked)
       }));
+    }
+    if (!selectedScene.cardDesign) {
+      return [];
     }
     return [
       {
@@ -438,8 +844,12 @@ export function GenerationPage() {
         : null,
     [selectedBoxIndex, selectedCardDesignBoxes]
   );
+  const selectedCardBackground = useMemo(
+    () => parseCssColorToHexAndOpacity(selectedCardDesign?.backgroundColor ?? "rgba(0,0,0,0)"),
+    [selectedCardDesign?.backgroundColor]
+  );
   const isCardBoxTextMode = Boolean(
-    isCardNewsModule && selectedScene && selectedScene.sceneNo > 1 && selectedCardDesign
+    isCardNewsModule && selectedScene && selectedCardDesign
   );
   const activeTextValue = isCardBoxTextMode
     ? selectedCardDesign?.text ?? ""
@@ -455,6 +865,17 @@ export function GenerationPage() {
         .sort((left, right) => (left.layerOrder ?? left._sourceIndex) - (right.layerOrder ?? right._sourceIndex)),
     [selectedCardDesignBoxes]
   );
+  const filteredCardNewsSymbols = useMemo(() => {
+    const keyword = symbolSearch.trim().toLowerCase();
+    if (!keyword) {
+      return CARD_NEWS_SYMBOLS;
+    }
+    return CARD_NEWS_SYMBOLS.filter(
+      (item) =>
+        item.symbol.toLowerCase().includes(keyword) ||
+        item.label.toLowerCase().includes(keyword)
+    );
+  }, [symbolSearch]);
   const totalDurationSec = useMemo(
     () =>
       Math.max(
@@ -481,11 +902,15 @@ export function GenerationPage() {
   useEffect(() => {
     setDraggingLayerIndex(null);
     setDragOverLayerIndex(null);
+    setDraggingSceneIndex(null);
+    setDragOverSceneIndex(null);
   }, [selectedSceneNo]);
 
   useEffect(() => {
     if (!isCardNewsModule) {
-      setCardStageScale(1);
+      setCardStageFitScale(1);
+      setCardStageZoom(1);
+      setCardStagePan({ x: 0, y: 0 });
       return;
     }
     const viewport = previewViewportRef.current;
@@ -496,8 +921,8 @@ export function GenerationPage() {
       const rect = viewport.getBoundingClientRect();
       const maxWidth = Math.max(120, rect.width - 24);
       const maxHeight = Math.max(120, rect.height - 24);
-      const scale = Math.min(maxWidth / 1080, maxHeight / 1920, 1);
-      setCardStageScale(Number.isFinite(scale) && scale > 0 ? Math.max(0.2, scale) : 1);
+      const scale = Math.min(maxWidth / 1080, maxHeight / 1080, 1);
+      setCardStageFitScale(Number.isFinite(scale) && scale > 0 ? Math.max(0.2, scale) : 1);
     };
     updateScale();
     const observer = new ResizeObserver(() => updateScale());
@@ -508,13 +933,46 @@ export function GenerationPage() {
       window.removeEventListener("resize", updateScale);
     };
   }, [isCardNewsModule, selectedSceneNo, hasGeneratedAssets]);
+
+  useEffect(() => {
+    setCardStagePan({ x: 0, y: 0 });
+  }, [selectedSceneNo]);
   const sceneAssetCandidates = useMemo(() => {
     if (!resolvedPackagePath || !selectedScene) {
       return [];
     }
-    return buildScenePreviewCandidates(resolvedPackagePath, selectedScene.sceneNo);
-  }, [resolvedPackagePath, selectedScene]);
+    const generatedCandidates = buildScenePreviewCandidates(resolvedPackagePath, selectedScene.sceneNo);
+    if (!isCardNewsModule) {
+      return generatedCandidates;
+    }
+
+    const configuredImagePath =
+      selectedScene.cardTemplateImagePath?.trim() ||
+      (selectedScene.sceneNo === 1
+        ? editableDocument?.cardNews?.coverImagePath?.trim()
+        : editableDocument?.cardNews?.templateBackgroundPath?.trim());
+    return [
+      ...(configuredImagePath ? [{ kind: "image" as const, src: toFileUrl(configuredImagePath) }] : []),
+      ...generatedCandidates,
+      { kind: "image" as const, src: buildCardNewsPlaceholderPreview(selectedScene.sceneNo) }
+    ];
+  }, [editableDocument?.cardNews?.coverImagePath, editableDocument?.cardNews?.templateBackgroundPath, isCardNewsModule, resolvedPackagePath, selectedScene]);
   const activePreviewAsset = sceneAssetCandidates[previewAssetIndex];
+  const getCardNewsRailPreviewSrc = (scene: SceneScriptItem): string => {
+    const configuredImagePath =
+      scene.cardTemplateImagePath?.trim() ||
+      (scene.sceneNo === 1
+        ? editableDocument?.cardNews?.coverImagePath?.trim()
+        : editableDocument?.cardNews?.templateBackgroundPath?.trim());
+    if (configuredImagePath) {
+      return toFileUrl(configuredImagePath);
+    }
+    return (
+      buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[0]?.src ??
+      buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[1]?.src ??
+      buildCardNewsPlaceholderPreview(scene.sceneNo)
+    );
+  };
 
   useEffect(() => {
     setPreviewAssetIndex(0);
@@ -633,7 +1091,7 @@ export function GenerationPage() {
   };
 
   const getCardDesignBoxesForScene = (scene: SceneScriptItem): Array<CardDesignBox> => {
-    if (scene.cardDesignBoxes && scene.cardDesignBoxes.length > 0) {
+    if (scene.cardDesignBoxes) {
       return scene.cardDesignBoxes.map((box, index) => ({
         ...buildDefaultCardDesign(scene.sceneNo),
         ...(box ?? {}),
@@ -642,6 +1100,9 @@ export function GenerationPage() {
         hidden: Boolean(box?.hidden),
         locked: Boolean(box?.locked)
       }));
+    }
+    if (!scene.cardDesign) {
+      return [];
     }
     return [
       {
@@ -674,13 +1135,11 @@ export function GenerationPage() {
           hidden: Boolean(box?.hidden),
           locked: Boolean(box?.locked)
         }));
-        const safePrimary = updatedBoxes[0] ?? buildDefaultCardDesign(scene.sceneNo);
+        const safePrimary = updatedBoxes[0];
         return {
           ...scene,
           cardDesignBoxes: updatedBoxes,
-          cardDesign: {
-            ...safePrimary
-          }
+          cardDesign: safePrimary ? { ...safePrimary } : undefined
         };
       });
       const targetDurationSec = Math.max(
@@ -715,6 +1174,52 @@ export function GenerationPage() {
     );
   };
 
+  const addCardFromTemplate = (template: CardNewsTemplateRecord) => {
+    const nextSceneNo = (editableDocumentRef.current?.scenes.length ?? 0) + 1;
+    applyDocumentUpdate((current) => {
+      const sceneNo = current.scenes.length + 1;
+      const baseDesign = {
+        ...buildDefaultCardDesign(sceneNo),
+        id: `box-${sceneNo}-1`,
+        layerOrder: 0,
+        text:
+          template.role === "qna"
+            ? "Q. 질문을 입력하세요\n\nA. 답변을 입력하세요"
+            : template.role === "closer"
+              ? "흥미로웠다면 저장하고 다시 꺼내보세요"
+              : template.role === "opener"
+                ? "세상의 모든 지식을 알려줌"
+                : "본문 내용을 입력하세요",
+        fontSize:
+          template.role === "closer" ? 58 : template.role === "qna" ? 42 : sceneNo === 1 ? 64 : 46,
+        xPct: template.role === "qna" ? 18 : 10,
+        yPct: template.role === "qna" ? 34 : template.role === "closer" ? 8 : 14,
+        widthPct: template.role === "qna" ? 68 : 80,
+        heightPct: template.role === "qna" ? 36 : template.role === "closer" ? 36 : 46,
+        backgroundColor: template.role === "body" ? "rgba(0,0,0,0)" : "rgba(0,0,0,0.04)"
+      };
+      const nextScene: SceneScriptItem = {
+        sceneNo,
+        text: baseDesign.text,
+        fluxPrompt: template.name,
+        assetSearchQuery: template.name,
+        cardTemplateImagePath: template.imagePath,
+        motion: "none",
+        durationSec: 1,
+        cardDesign: baseDesign,
+        cardDesignBoxes: [baseDesign]
+      };
+      const scenes = [...current.scenes, nextScene];
+      return {
+        ...current,
+        targetDurationSec: scenes.length,
+        scenes
+      };
+    });
+    setSelectedSceneNo(nextSceneNo);
+    setSelectedBoxIndex(0);
+  };
+
   const duplicateCardDesignBox = () => {
     if (!selectedScene || !selectedCardDesign) {
       return;
@@ -741,7 +1246,7 @@ export function GenerationPage() {
   };
 
   const removeCardDesignBox = () => {
-    if (!selectedScene || selectedCardDesignBoxes.length <= 1) {
+    if (!selectedScene || selectedCardDesignBoxes.length === 0) {
       return;
     }
     const safeIndex = Math.max(0, Math.min(selectedBoxIndex, selectedCardDesignBoxes.length - 1));
@@ -750,6 +1255,100 @@ export function GenerationPage() {
       (boxes) => boxes.filter((_, index) => index !== safeIndex),
       Math.max(0, safeIndex - 1)
     );
+  };
+
+  const removeSelectedCard = (sceneNoToRemove = selectedScene?.sceneNo) => {
+    if (!editableDocumentRef.current || !sceneNoToRemove || editableDocumentRef.current.scenes.length <= 1) {
+      return;
+    }
+    const removedSceneNo = sceneNoToRemove;
+    applyDocumentUpdate((current) => {
+      const scenes = current.scenes
+        .filter((scene) => scene.sceneNo !== removedSceneNo)
+        .map((scene, index) => ({
+          ...scene,
+          sceneNo: index + 1
+        }));
+      return {
+        ...current,
+        scenes,
+        targetDurationSec: Math.max(
+          1,
+          Math.round(scenes.reduce((total, scene) => total + Number(scene.durationSec || 0), 0))
+        )
+      };
+    });
+    const nextSceneNo = Math.min(removedSceneNo, editableDocumentRef.current.scenes.length || 1);
+    setSelectedSceneNo(nextSceneNo);
+    setSelectedBoxIndex(0);
+  };
+
+  const reorderCardScene = (fromIndex: number, toIndex: number) => {
+    const currentDocument = editableDocumentRef.current;
+    if (!currentDocument || currentDocument.scenes.length <= 1) {
+      return;
+    }
+    const safeFrom = Math.max(0, Math.min(fromIndex, currentDocument.scenes.length - 1));
+    const safeTo = Math.max(0, Math.min(toIndex, currentDocument.scenes.length - 1));
+    if (safeFrom === safeTo) {
+      return;
+    }
+    applyDocumentUpdate((current) => {
+      const nextScenes = [...current.scenes];
+      const [moving] = nextScenes.splice(safeFrom, 1);
+      if (!moving) {
+        return current;
+      }
+      nextScenes.splice(safeTo, 0, moving);
+      const scenes = nextScenes.map((scene, index) => ({
+        ...scene,
+        sceneNo: index + 1
+      }));
+      return {
+        ...current,
+        scenes,
+        targetDurationSec: Math.max(
+          1,
+          Math.round(scenes.reduce((total, scene) => total + Number(scene.durationSec || 0), 0))
+        )
+      };
+    });
+    setSelectedSceneNo(safeTo + 1);
+    setSelectedBoxIndex(0);
+  };
+
+  const handleSceneDragStart = (event: ReactDragEvent<HTMLDivElement>, index: number) => {
+    setDraggingSceneIndex(index);
+    setDragOverSceneIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-mellowcat-card-index", String(index));
+    event.dataTransfer.setData("text/plain", String(index));
+  };
+
+  const handleSceneDragOver = (event: ReactDragEvent<HTMLDivElement>, index: number) => {
+    event.preventDefault();
+    if (dragOverSceneIndex !== index) {
+      setDragOverSceneIndex(index);
+    }
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleSceneDrop = (event: ReactDragEvent<HTMLDivElement>, targetIndex: number) => {
+    event.preventDefault();
+    const raw =
+      event.dataTransfer.getData("application/x-mellowcat-card-index") ||
+      event.dataTransfer.getData("text/plain");
+    const fromIndex = Number(raw);
+    if (Number.isFinite(fromIndex)) {
+      reorderCardScene(fromIndex, targetIndex);
+    }
+    setDraggingSceneIndex(null);
+    setDragOverSceneIndex(null);
+  };
+
+  const handleSceneDragEnd = () => {
+    setDraggingSceneIndex(null);
+    setDragOverSceneIndex(null);
   };
 
   const toggleCardDesignLockAt = (index: number) => {
@@ -864,6 +1463,17 @@ export function GenerationPage() {
     setDragOverLayerIndex(null);
   };
 
+  const flushActivePreviewTextEdit = async () => {
+    const activeElement = document.activeElement as HTMLElement | null;
+    if (!activeElement?.isContentEditable) {
+      return;
+    }
+    activeElement.blur();
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+  };
+
   const applyCardTextPreset = (presetId: string) => {
     if (!selectedScene) {
       return;
@@ -872,9 +1482,11 @@ export function GenerationPage() {
     if (!preset) {
       return;
     }
-    updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+    applyCardTextStylePatch({
       fontSize: preset.fontSize,
-      fontWeight: preset.fontWeight,
+      fontWeight: preset.fontWeight
+    });
+    updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
       lineHeight: preset.lineHeight
     });
   };
@@ -887,10 +1499,98 @@ export function GenerationPage() {
     if (!preset) {
       return;
     }
+    applyCardTextStylePatch({
+      textColor: preset.textColor
+    });
     updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-      textColor: preset.textColor,
       backgroundColor: preset.backgroundColor
     });
+  };
+
+  const appendSymbolToSelectedBox = (symbol: string) => {
+    if (!selectedScene || !selectedCardDesign) {
+      return;
+    }
+    const currentText = selectedCardDesign.text ?? "";
+    updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+      text: `${currentText}${currentText.endsWith(" ") || currentText.length === 0 ? "" : " "}${symbol}`
+    });
+  };
+
+  const captureRichTextSelection = (sceneNo: number, boxIndex: number, root: HTMLElement) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      activeRichTextSelectionRef.current = null;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) {
+      activeRichTextSelectionRef.current = null;
+      return;
+    }
+    const beforeRange = range.cloneRange();
+    beforeRange.selectNodeContents(root);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const start = beforeRange.toString().length;
+    const end = start + range.toString().length;
+    if (end <= start) {
+      activeRichTextSelectionRef.current = null;
+      return;
+    }
+    activeRichTextSelectionRef.current = { sceneNo, boxIndex, start, end };
+  };
+
+  const applyCardTextStylePatch = (patch: CardRichTextStylePatch) => {
+    if (!selectedScene) {
+      return;
+    }
+    const selection = activeRichTextSelectionRef.current;
+    if (
+      selection &&
+      selection.sceneNo === selectedScene.sceneNo &&
+      selection.boxIndex === selectedBoxIndex &&
+      selection.end > selection.start
+    ) {
+      updateCardDesignBoxes(selectedScene.sceneNo, (boxes) =>
+        boxes.map((box, index) => {
+          if (index !== selectedBoxIndex) {
+            return box;
+          }
+          const currentText = box.text ?? getCardPlainTextFromRuns(box.richTextRuns);
+          const baseRuns = getCardRunsForBox({ ...box, text: currentText });
+          const safeStart = Math.max(0, Math.min(selection.start, currentText.length));
+          const safeEnd = Math.max(safeStart, Math.min(selection.end, currentText.length));
+          return {
+            ...box,
+            text: currentText,
+            richTextRuns:
+              safeEnd > safeStart
+                ? applyCardStylePatchToRuns(baseRuns, safeStart, safeEnd, patch)
+                : box.richTextRuns
+          };
+        })
+      );
+      activeRichTextSelectionRef.current = null;
+      return;
+    }
+    updateCardDesignBoxes(selectedScene.sceneNo, (boxes) =>
+      boxes.map((box, index) => {
+        if (index !== selectedBoxIndex) {
+          return box;
+        }
+        const currentText = box.text ?? getCardPlainTextFromRuns(box.richTextRuns);
+        const baseRuns = getCardRunsForBox({ ...box, text: currentText });
+        return {
+          ...box,
+          ...patch,
+          text: currentText,
+          richTextRuns:
+            currentText.length > 0
+              ? applyCardStylePatchToRuns(baseRuns, 0, currentText.length, patch)
+              : box.richTextRuns
+        };
+      })
+    );
   };
 
   const beginCardDesignDrag = (
@@ -903,7 +1603,9 @@ export function GenerationPage() {
     if (design.locked || design.hidden) {
       return;
     }
-    const previewHost = event.currentTarget.parentElement;
+    const previewHost =
+      (event.currentTarget.closest(".generation-card-stage") as HTMLElement | null) ??
+      event.currentTarget.parentElement;
     if (!previewHost) {
       return;
     }
@@ -1028,7 +1730,11 @@ export function GenerationPage() {
         return;
       }
 
-      if ((event.key === "Delete" || event.key === "Backspace") && selectedScene?.sceneNo && selectedScene.sceneNo > 1) {
+      if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        selectedScene?.sceneNo &&
+        selectedCardDesignBoxes.length > 0
+      ) {
         event.preventDefault();
         removeCardDesignBox();
       }
@@ -1036,7 +1742,52 @@ export function GenerationPage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isCardNewsModule, redoDocumentChange, removeCardDesignBox, selectedScene?.sceneNo, undoDocumentChange]);
+  }, [isCardNewsModule, redoDocumentChange, removeCardDesignBox, selectedCardDesignBoxes.length, selectedScene?.sceneNo, undoDocumentChange]);
+
+  useEffect(() => {
+    if (!cardStagePanDrag) {
+      return;
+    }
+
+    const onMouseMove = (event: MouseEvent) => {
+      setCardStagePan({
+        x: cardStagePanDrag.startPanX + event.clientX - cardStagePanDrag.startX,
+        y: cardStagePanDrag.startPanY + event.clientY - cardStagePanDrag.startY
+      });
+    };
+    const onMouseUp = () => setCardStagePanDrag(null);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [cardStagePanDrag]);
+
+  const handleCardPreviewWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!isCardNewsModule || !event.ctrlKey) {
+      return;
+    }
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    setCardStageZoom((current) => {
+      const next = current * (direction > 0 ? 1.1 : 0.9);
+      return Math.max(0.35, Math.min(4, Number(next.toFixed(3))));
+    });
+  };
+
+  const handleCardPreviewMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!isCardNewsModule || event.button !== 2) {
+      return;
+    }
+    event.preventDefault();
+    setCardStagePanDrag({
+      startX: event.clientX,
+      startY: event.clientY,
+      startPanX: cardStagePan.x,
+      startPanY: cardStagePan.y
+    });
+  };
 
   const updateSubtitleStyle = (patch: Partial<SceneScriptSubtitleStyle>) => {
     applyDocumentUpdate((current) => ({
@@ -1065,7 +1816,7 @@ export function GenerationPage() {
       const nextCardNews = {
         layoutPreset: current.cardNews?.layoutPreset ?? "headline_focus",
         transitionStyle: current.cardNews?.transitionStyle ?? "cut",
-        outputFormat: current.cardNews?.outputFormat ?? "shorts_9_16",
+        outputFormat: current.cardNews?.outputFormat ?? "square_1_1",
         ...patch
       };
       const transitionMotion = mapCardTransitionToMotion(nextCardNews.transitionStyle);
@@ -1107,28 +1858,10 @@ export function GenerationPage() {
     setBusy(true);
     setMessage("");
     try {
-      await saveSceneScript(editableDocument);
+      await flushActivePreviewTextEdit();
+      const latestDocument = editableDocumentRef.current ?? editableDocument;
+      await saveSceneScript(latestDocument);
       setMessage(copy.saved);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : copy.saveError);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleSaveCurrentCard = async () => {
-    if (!editableDocument || !selectedScene) {
-      return;
-    }
-    setBusy(true);
-    setMessage("");
-    try {
-      await saveSceneCard(editableDocument, selectedScene.sceneNo);
-      setMessage(
-        isKorean
-          ? `${selectedScene.sceneNo}장 카드 저장 완료 (card-drafts 생성).`
-          : `Card ${selectedScene.sceneNo} saved (card-drafts updated).`
-      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : copy.saveError);
     } finally {
@@ -1152,6 +1885,97 @@ export function GenerationPage() {
     updateCardNewsOptions({ templateBackgroundPath: selectedPath });
   };
 
+  const handleRegisterCardNewsTemplate = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await registerCardNewsTemplate();
+      setMessage(
+        isKorean
+          ? "템플릿 저장소에 이미지가 등록되었습니다."
+          : "Template image was registered in your library."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "템플릿 등록에 실패했습니다."
+            : "Failed to register template."
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteCardNewsTemplate = async (templateId: string) => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await deleteCardNewsTemplate(templateId);
+      setMessage(
+        isKorean
+          ? "템플릿 저장소에서 삭제했습니다."
+          : "Template was removed from your library."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "템플릿 삭제에 실패했습니다."
+            : "Failed to delete template."
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const waitForPreviewStagePaint = async () => {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+    const stage = previewStageRef.current;
+    const images = Array.from(stage?.querySelectorAll("img") ?? []);
+    await Promise.all(
+      images.map(
+        (image) =>
+          new Promise<void>((resolve) => {
+            if (image.complete) {
+              resolve();
+              return;
+            }
+            const finish = () => resolve();
+            image.addEventListener("load", finish, { once: true });
+            image.addEventListener("error", finish, { once: true });
+            window.setTimeout(finish, 700);
+          })
+      )
+    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  };
+
+  const captureCardPreviewImage = async (sceneNo: number): Promise<string | undefined> => {
+    if (!editableDocument || !resolvedPackagePath) {
+      return undefined;
+    }
+    setSelectedSceneNo(sceneNo);
+    await waitForPreviewStagePaint();
+    const stage = previewStageRef.current;
+    if (!stage) {
+      throw new Error(isKorean ? "프리뷰 스테이지를 찾지 못했습니다." : "Preview stage was not found.");
+    }
+    const rect = stage.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) {
+      throw new Error(isKorean ? "프리뷰 크기가 올바르지 않습니다." : "Preview bounds are invalid.");
+    }
+    return captureCardPreviewImageAs(
+      sceneNo,
+      { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      resolvedPackagePath
+    );
+  };
+
   const handleSaveCardPreviewImageAs = async (sceneNo: number) => {
     if (!editableDocument || !resolvedPackagePath) {
       return;
@@ -1159,29 +1983,12 @@ export function GenerationPage() {
     setBusy(true);
     setMessage("");
     try {
-      if (selectedSceneNo !== sceneNo) {
-        setSelectedSceneNo(sceneNo);
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-        );
-      }
-      const stage = previewStageRef.current;
-      if (!stage) {
-        throw new Error(isKorean ? "프리뷰 스테이지를 찾지 못했습니다." : "Preview stage was not found.");
-      }
-      const rect = stage.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) {
-        throw new Error(isKorean ? "프리뷰 크기가 올바르지 않습니다." : "Preview bounds are invalid.");
-      }
-      const savedPath = await captureCardPreviewImageAs(
-        sceneNo,
-        { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-        resolvedPackagePath
-      );
+      await flushActivePreviewTextEdit();
+      const savedPath = await captureCardPreviewImage(sceneNo);
       if (savedPath) {
         setMessage(
           isKorean
-            ? `${sceneNo}장 프리뷰를 저장했습니다: ${savedPath}`
+            ? `${sceneNo}장 카드를 저장했습니다: ${savedPath}`
             : `Saved scene ${sceneNo} preview: ${savedPath}`
         );
       }
@@ -1192,7 +1999,39 @@ export function GenerationPage() {
     }
   };
 
+  const handleSaveAllCardPreviewImages = async () => {
+    const latestDocument = editableDocumentRef.current ?? editableDocument;
+    if (!latestDocument || !resolvedPackagePath || latestDocument.scenes.length === 0) {
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    const originalSceneNo = selectedSceneNo;
+    try {
+      await flushActivePreviewTextEdit();
+      const savedPaths: string[] = [];
+      for (const scene of latestDocument.scenes) {
+        const savedPath = await captureCardPreviewImage(scene.sceneNo);
+        if (savedPath) {
+          savedPaths.push(savedPath);
+        }
+      }
+      setSelectedSceneNo(originalSceneNo);
+      await waitForPreviewStagePaint();
+      setMessage(
+        isKorean
+          ? `전체 카드 ${savedPaths.length}개를 저장했습니다.`
+          : `Saved ${savedPaths.length} card images.`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : copy.saveError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
+    <GenerationErrorBoundary>
     <section className="page">
       <div className="hero">
         <div>
@@ -1220,16 +2059,6 @@ export function GenerationPage() {
           >
             {busy ? copy.saving : copy.save}
           </button>
-          {isCardNewsModule ? (
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={!editableDocument || !selectedScene || busy}
-              onClick={() => void handleSaveCurrentCard()}
-            >
-              {isKorean ? "현재 카드 저장" : "Save Current Card"}
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -1246,17 +2075,17 @@ export function GenerationPage() {
           <p className="subtle">{copy.emptyState}</p>
         </div>
       ) : (
-        !hasGeneratedAssets ? (
+        !hasGeneratedAssets && !isCardNewsModule ? (
           <div className="card generation-prebuild">
             <div className="card-row">
-              <strong>{isKorean ? "생성 전 편집" : "Pre-generation Edit"}</strong>
+              <strong>{isKorean ? "ìƒì„± ì „ íŽ¸ì§‘" : "Pre-generation Edit"}</strong>
               <span className="pill">
                 {moduleCopy.sceneLabel} {selectedScene?.sceneNo ?? "-"}
               </span>
             </div>
             <p className="subtle">
               {isKorean
-                ? "자산 생성 전에는 스크립트, 프롬프트, 길이만 빠르게 수정할 수 있습니다. 이미지/영상이 생성되면 고급 편집 화면으로 자동 전환됩니다."
+                ? "ìžì‚° ìƒì„± ì „ì—ëŠ” ìŠ¤í¬ë¦½íŠ¸, í”„ë¡¬í”„íŠ¸, ê¸¸ì´ë§Œ ë¹ ë¥´ê²Œ ìˆ˜ì •í•  ìˆ˜ ìžˆìŠµë‹ˆë‹¤. ì´ë¯¸ì§€/ì˜ìƒì´ ìƒì„±ë˜ë©´ ê³ ê¸‰ íŽ¸ì§‘ í™”ë©´ìœ¼ë¡œ ìžë™ ì „í™˜ë©ë‹ˆë‹¤."
                 : "Before assets are generated, you can quickly edit script, prompt, and duration. The advanced editor opens automatically after generation."}
             </p>
 
@@ -1288,31 +2117,27 @@ export function GenerationPage() {
                     <span className="subtle">
                       {selectedScene.sceneNo === 1
                         ? isKorean
-                          ? "1장은 어그로 커버 카드입니다. 이미지/프롬프트 중심으로 편집하세요."
+                          ? "1ìž¥ì€ ì–´ê·¸ë¡œ ì»¤ë²„ ì¹´ë“œìž…ë‹ˆë‹¤. ì´ë¯¸ì§€/í”„ë¡¬í”„íŠ¸ ì¤‘ì‹¬ìœ¼ë¡œ íŽ¸ì§‘í•˜ì„¸ìš”."
                           : "Card 1 is the hook cover card. Focus on image/prompt."
                         : isKorean
-                          ? "2장 이후는 템플릿 카드입니다. 본문 텍스트 중심으로 편집하세요."
+                          ? "2ìž¥ ì´í›„ëŠ” í…œí”Œë¦¿ ì¹´ë“œìž…ë‹ˆë‹¤. ë³¸ë¬¸ í…ìŠ¤íŠ¸ ì¤‘ì‹¬ìœ¼ë¡œ íŽ¸ì§‘í•˜ì„¸ìš”."
                           : "Card 2+ are template cards. Focus on copy text."}
                     </span>
                   </div>
                 ) : null}
-                <div className="field field-span-2">
-                  <span>{textFieldLabel}</span>
-                  <textarea
-                    className="text-input textarea-input"
-                    value={activeTextValue}
-                    onChange={(event) => {
-                      if (isCardBoxTextMode) {
-                        updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                          text: event.target.value
-                        });
-                        return;
-                      }
-                      updateScene(selectedScene.sceneNo, { text: event.target.value });
-                    }}
-                  />
-                </div>
-                {!isCardNewsModule || selectedScene.sceneNo === 1 ? (
+                {!isCardNewsModule ? (
+                  <div className="field field-span-2">
+                    <span>{textFieldLabel}</span>
+                    <textarea
+                      className="text-input textarea-input"
+                      value={activeTextValue}
+                      onChange={(event) => {
+                        updateScene(selectedScene.sceneNo, { text: event.target.value });
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {!isCardNewsModule ? (
                   <>
                     <div className="field field-span-2">
                       <span>{moduleCopy.fluxPrompt}</span>
@@ -1368,8 +2193,8 @@ export function GenerationPage() {
                 <h4>{moduleCopy.pageTitle}</h4>
                 <p className="subtle">
                   {isCardNewsModule ? `${editableDocument.scenes.length} cards` : isKorean
-                    ? `씬 ${editableDocument.scenes.length}개 · 총 ${totalDurationSec}초`
-                    : `${editableDocument.scenes.length} scenes · ${totalDurationSec}s total`}
+                    ? `ì”¬ ${editableDocument.scenes.length}ê°œ Â· ì´ ${totalDurationSec}ì´ˆ`
+                    : `${editableDocument.scenes.length} scenes Â· ${totalDurationSec}s total`}
                 </p>
               </div>
             </div>
@@ -1403,76 +2228,126 @@ export function GenerationPage() {
             {editorTab === "scene" && (
               <>
                 {isCardNewsModule ? (
-                  <div className="card-path-compact-grid">
-                    <div className="card-path-compact-item">
-                      <span>{isKorean ? "1장 커버 이미지 경로" : "Cover Image Path (Card 1)"}</span>
-                      <div className="card-path-compact-row">
-                        <input
-                          className="text-input"
-                          type="text"
-                          value={editableDocument.cardNews?.coverImagePath ?? ""}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              coverImagePath: event.target.value
-                            })
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="card-tool-btn"
-                          onClick={() => void handleChooseCardNewsCoverImage()}
-                        >
-                          {isKorean ? "찾아보기" : "Browse"}
-                        </button>
+                  <>
+                    <div className="card-template-library">
+                      <div className="card-row">
+                        <strong>{isKorean ? "템플릿 저장소" : "Template Library"}</strong>
+                        <span className="pill">{cardNewsTemplates.length}</span>
+                      </div>
+                      <p className="subtle">
+                        {isKorean
+                          ? "유저가 직접 등록한 템플릿만 표시됩니다. 템플릿을 누르면 새 카드가 추가됩니다."
+                          : "Only user-registered templates are shown. Click one to append a new card."}
+                      </p>
+                      <button
+                        type="button"
+                        className="card-tool-btn card-template-register-btn"
+                        onClick={() => void handleRegisterCardNewsTemplate()}
+                        disabled={busy}
+                      >
+                        {isKorean ? "템플릿 등록" : "Register Template"}
+                      </button>
+                      <div className="card-template-grid">
+                        {cardNewsTemplates.length === 0 ? (
+                          <p className="subtle card-template-empty">
+                            {isKorean
+                              ? "아직 등록된 템플릿이 없습니다. PNG/JPG/WebP 이미지를 등록해 주세요."
+                              : "No templates yet. Register a PNG/JPG/WebP image to start."}
+                          </p>
+                        ) : (
+                          cardNewsTemplates.map((template) => (
+                            <div key={template.id} className="card-template-tile">
+                              <button
+                                type="button"
+                                className="card-template-preview-btn"
+                                onClick={() => addCardFromTemplate(template)}
+                              >
+                                <img src={toFileUrl(template.thumbnailPath)} alt={template.name} />
+                                <span>{template.name}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="card-template-delete-btn"
+                                onClick={() => void handleDeleteCardNewsTemplate(template.id)}
+                                disabled={busy}
+                              >
+                                {isKorean ? "삭제" : "Delete"}
+                              </button>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
-                    <div className="card-path-compact-item">
-                      <span>{isKorean ? "2장 이후 템플릿 배경 경로" : "Template Background Path (Card 2+)"}</span>
-                      <div className="card-path-compact-row">
-                        <input
-                          className="text-input"
-                          type="text"
-                          value={editableDocument.cardNews?.templateBackgroundPath ?? ""}
-                          onChange={(event) =>
-                            updateCardNewsOptions({
-                              templateBackgroundPath: event.target.value
-                            })
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="card-tool-btn"
-                          onClick={() => void handleChooseCardNewsTemplateImage()}
-                        >
-                          {isKorean ? "찾아보기" : "Browse"}
-                        </button>
+
+                    <div className="card-path-compact-grid">
+                      <div className="card-path-compact-item">
+                        <span>{isKorean ? "1장 커버 이미지 경로" : "Cover Image Path (Card 1)"}</span>
+                        <div className="card-path-compact-row">
+                          <input
+                            className="text-input"
+                            type="text"
+                            value={editableDocument.cardNews?.coverImagePath ?? ""}
+                            onChange={(event) =>
+                              updateCardNewsOptions({
+                                coverImagePath: event.target.value
+                              })
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="card-tool-btn"
+                            onClick={() => void handleChooseCardNewsCoverImage()}
+                          >
+                            {isKorean ? "찾아보기" : "Browse"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="card-path-compact-item">
+                        <span>{isKorean ? "기본 템플릿 배경 경로" : "Default Template Background Path"}</span>
+                        <div className="card-path-compact-row">
+                          <input
+                            className="text-input"
+                            type="text"
+                            value={editableDocument.cardNews?.templateBackgroundPath ?? ""}
+                            onChange={(event) =>
+                              updateCardNewsOptions({
+                                templateBackgroundPath: event.target.value
+                              })
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="card-tool-btn"
+                            onClick={() => void handleChooseCardNewsTemplateImage()}
+                          >
+                            {isKorean ? "찾아보기" : "Browse"}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </>
                 ) : null}
 
-                <div className="card-row">
-                  <strong>{moduleCopy.sceneList}</strong>
-                  <span className="pill">{editableDocument.scenes.length}</span>
-                </div>
-                <div
-                  className={
-                    isCardNewsModule
-                      ? "workflow-slot-candidate-list compact"
-                      : "workflow-slot-candidate-list"
-                  }
-                >
-                  {editableDocument.scenes.map((scene) => (
-                    <button
-                      key={scene.sceneNo}
-                      type="button"
-                      className={selectedSceneNo === scene.sceneNo ? "pill-button active" : "pill-button"}
-                      onClick={() => setSelectedSceneNo(scene.sceneNo)}
-                    >
-                      {moduleCopy.sceneLabel} {scene.sceneNo}
-                    </button>
-                  ))}
-                </div>
+                {!isCardNewsModule ? (
+                  <>
+                    <div className="card-row">
+                      <strong>{moduleCopy.sceneList}</strong>
+                      <span className="pill">{editableDocument.scenes.length}</span>
+                    </div>
+                    <div className="workflow-slot-candidate-list">
+                      {editableDocument.scenes.map((scene) => (
+                        <button
+                          key={scene.sceneNo}
+                          type="button"
+                          className={selectedSceneNo === scene.sceneNo ? "pill-button active" : "pill-button"}
+                          onClick={() => setSelectedSceneNo(scene.sceneNo)}
+                        >
+                          {moduleCopy.sceneLabel} {scene.sceneNo}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
 
                 {!selectedScene ? (
                   <p className="subtle">{copy.selectScene}</p>
@@ -1483,41 +2358,54 @@ export function GenerationPage() {
                         <span className="subtle">
                           {selectedScene.sceneNo === 1
                             ? isKorean
-                              ? "1장은 어그로 커버 카드입니다. 이미지/프롬프트 중심으로 편집하세요."
+                              ? "1장은 커버 카드입니다. 배경 이미지와 제목 문구를 중심으로 편집하세요."
                               : "Card 1 is the hook cover card. Focus on image/prompt."
                             : isKorean
-                              ? "2장 이후는 템플릿 카드입니다. 본문 텍스트 중심으로 편집하세요."
+                              ? "2장 이후는 템플릿 카드입니다. 본문 텍스트와 스타일을 편집하세요."
                               : "Card 2+ are template cards. Focus on copy text."}
                         </span>
                       </div>
                     ) : null}
-                    <div className="field field-span-2">
-                      <span>{textFieldLabel}</span>
-                      <textarea
-                        className="text-input textarea-input"
-                        value={activeTextValue}
-                        onChange={(event) => {
-                          if (isCardBoxTextMode) {
-                            updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                              text: event.target.value
-                            });
-                            return;
-                          }
-                          updateScene(selectedScene.sceneNo, { text: event.target.value });
-                        }}
-                      />
-                    </div>
-                    {isCardNewsModule && selectedScene.sceneNo > 1 && selectedCardDesign ? (
+                    {!isCardNewsModule ? (
+                      <div className="field field-span-2">
+                        <span>{textFieldLabel}</span>
+                        <textarea
+                          className="text-input textarea-input"
+                          value={activeTextValue}
+                          onChange={(event) => {
+                            updateScene(selectedScene.sceneNo, { text: event.target.value });
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="field field-span-2">
+                        <p className="subtle">
+                          {isKorean
+                            ? "문구는 오른쪽 프리뷰에서 텍스트 박스를 더블클릭해 직접 수정합니다."
+                            : "Double-click a text box in the preview to edit copy directly."}
+                        </p>
+                      </div>
+                    )}
+                    {isCardNewsModule && !selectedCardDesign ? (
+                      <div className="field field-span-2 card-layer-field">
+                        <span>Text Boxes</span>
+                        <p className="subtle">This card has no text boxes and will render as image-only.</p>
+                        <button type="button" className="card-tool-btn" onClick={addCardDesignBox}>
+                          Add Text Box
+                        </button>
+                      </div>
+                    ) : null}
+                    {isCardNewsModule && selectedCardDesign ? (
                       <>
                         <div className="field field-span-2 card-layer-field">
-                          <span>{isKorean ? "텍스트 박스" : "Text Boxes"}</span>
+                          <span>Text Boxes</span>
                           <label className="checkbox-inline">
                             <input
                               type="checkbox"
                               checked={showCardBoxOutline}
                               onChange={(event) => setShowCardBoxOutline(event.target.checked)}
                             />
-                            <span>{isKorean ? "박스 테두리 표시" : "Show Box Border"}</span>
+                            <span>{isKorean ? "박스 가이드 표시" : "Show Box Guide"}</span>
                           </label>
                           <div className="card-layer-list">
                             {selectedCardDesignBoxes.map((box, index) => (
@@ -1553,7 +2441,7 @@ export function GenerationPage() {
                                       toggleCardDesignHiddenAt(index);
                                     }}
                                   >
-                                    {box.hidden ? "🙈" : "👁"}
+                                    {box.hidden ? "Show" : "Hide"}
                                   </button>
                                   <button
                                     type="button"
@@ -1565,7 +2453,7 @@ export function GenerationPage() {
                                       toggleCardDesignLockAt(index);
                                     }}
                                   >
-                                    {box.locked ? "🔓" : "🔒"}
+                                    {box.locked ? "Unlock" : "Lock"}
                                   </button>
                                   <span className="layer-drag-handle" title="Drag to reorder">
                                     ::
@@ -1576,10 +2464,10 @@ export function GenerationPage() {
                           </div>
                           <div className="card-layer-actions">
                             <button type="button" className="card-tool-btn" onClick={addCardDesignBox}>
-                              {isKorean ? "추가" : "Add"}
+                              Add
                             </button>
                             <button type="button" className="card-tool-btn" onClick={duplicateCardDesignBox}>
-                              {isKorean ? "복제" : "Duplicate"}
+                              Duplicate
                             </button>
                             <button
                               type="button"
@@ -1601,14 +2489,20 @@ export function GenerationPage() {
                               type="button"
                               className="card-tool-btn danger"
                               onClick={removeCardDesignBox}
-                              disabled={selectedCardDesignBoxes.length <= 1}
                             >
-                              {isKorean ? "삭제" : "Delete"}
+                              Delete
                             </button>
                           </div>
                         </div>
+                        <div className="card-editor-tools-row">
+                          <details className="card-style-section" open>
+                            <summary>Text Style Options</summary>
+                            <div className="card-style-stack">
+                            <details className="card-style-subsection" open>
+                              <summary>Presets</summary>
+                              <div className="card-style-grid">
                         <div className="field field-span-2">
-                          <span>{isKorean ? "텍스트 프리셋" : "Text Presets"}</span>
+                          <span>Text Presets</span>
                           <div className="card-layer-actions card-preset-row">
                             {CARD_NEWS_TEXT_PRESETS.map((preset) => (
                               <button
@@ -1623,7 +2517,7 @@ export function GenerationPage() {
                           </div>
                         </div>
                         <div className="field field-span-2">
-                          <span>{isKorean ? "색상 프리셋" : "Color Presets"}</span>
+                          <span>Color Presets</span>
                           <div className="card-layer-actions card-preset-row">
                             {CARD_NEWS_COLOR_PRESETS.map((preset) => (
                               <button
@@ -1637,8 +2531,31 @@ export function GenerationPage() {
                             ))}
                           </div>
                         </div>
+                              </div>
+                            </details>
+                            <details className="card-style-subsection">
+                              <summary>Typography</summary>
+                              <div className="card-style-grid">
                         <div className="field">
-                          <span>{isKorean ? "폰트 크기" : "Font Size"}</span>
+                          <span>Font</span>
+                          <select
+                            className="text-input"
+                            value={selectedCardDesign.fontFamily ?? "GongGothic B"}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                fontFamily: event.target.value
+                              })
+                            }
+                          >
+                            {CARD_NEWS_FONT_OPTIONS.map((font) => (
+                              <option key={font} value={font}>
+                                {font}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field">
+                          <span>Font Size</span>
                           <input
                             className="text-input"
                             type="number"
@@ -1646,19 +2563,19 @@ export function GenerationPage() {
                             max={120}
                             value={selectedCardDesign.fontSize}
                             onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                              applyCardTextStylePatch({
                                 fontSize: Number(event.target.value) || 18
                               })
                             }
                           />
                         </div>
                         <div className="field">
-                          <span>{isKorean ? "두께" : "Weight"}</span>
+                          <span>Weight</span>
                           <select
                             className="text-input"
                             value={selectedCardDesign.fontWeight}
                             onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                              applyCardTextStylePatch({
                                 fontWeight: Number(event.target.value) as NonNullable<
                                   SceneScriptItem["cardDesign"]
                                 >["fontWeight"]
@@ -1673,7 +2590,7 @@ export function GenerationPage() {
                           </select>
                         </div>
                         <div className="field">
-                          <span>{isKorean ? "정렬" : "Align"}</span>
+                          <span>Align</span>
                           <select
                             className="text-input"
                             value={selectedCardDesign.align}
@@ -1683,13 +2600,13 @@ export function GenerationPage() {
                               })
                             }
                           >
-                            <option value="left">{isKorean ? "왼쪽" : "Left"}</option>
-                            <option value="center">{isKorean ? "가운데" : "Center"}</option>
-                            <option value="right">{isKorean ? "오른쪽" : "Right"}</option>
+                            <option value="left">Left</option>
+                            <option value="center">Center</option>
+                            <option value="right">Right</option>
                           </select>
                         </div>
                         <div className="field">
-                          <span>{isKorean ? "세로 정렬" : "Vertical Align"}</span>
+                          <span>Vertical Align</span>
                           <select
                             className="text-input"
                             value={selectedCardDesign.verticalAlign}
@@ -1700,26 +2617,204 @@ export function GenerationPage() {
                               })
                             }
                           >
-                            <option value="top">{isKorean ? "위" : "Top"}</option>
-                            <option value="middle">{isKorean ? "가운데" : "Middle"}</option>
-                            <option value="bottom">{isKorean ? "아래" : "Bottom"}</option>
+                            <option value="top">Top</option>
+                            <option value="middle">Middle</option>
+                            <option value="bottom">Bottom</option>
                           </select>
                         </div>
+                              </div>
+                            </details>
+                            <details className="card-style-subsection">
+                              <summary>Color</summary>
+                              <div className="card-style-grid">
                         <div className="field">
-                          <span>{isKorean ? "텍스트색" : "Text Color"}</span>
+                          <span>Text Color</span>
                           <input
                             className="text-input"
-                            type="text"
+                            type="color"
                             value={selectedCardDesign.textColor}
                             onChange={(event) =>
-                              updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                              applyCardTextStylePatch({
                                 textColor: event.target.value
+                              })
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="card-tool-btn"
+                            onClick={async () => {
+                              const color = await pickColorWithEyeDropper();
+                              if (color) {
+                                applyCardTextStylePatch({
+                                  textColor: color
+                                });
+                              }
+                            }}
+                          >
+                            Pick
+                          </button>
+                        </div>
+                        <div className="field field-span-2">
+                          <span>Palette</span>
+                          <div className="card-color-palette">
+                            {CARD_NEWS_PALETTE.map((color) => (
+                              <button
+                                key={color}
+                                type="button"
+                                className="card-color-swatch"
+                                style={{ background: color }}
+                                title={color}
+                                onClick={() =>
+                                  applyCardTextStylePatch({
+                                    textColor: color
+                                  })
+                                }
+                              />
+                            ))}
+                          </div>
+                        </div>
+                              </div>
+                            </details>
+                            <details className="card-style-subsection">
+                              <summary>Outline</summary>
+                              <div className="card-style-grid">
+                        <label className="field">
+                          <span>Outline</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedCardDesign.outlineEnabled)}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                outlineEnabled: event.target.checked
+                              })
+                            }
+                          />
+                        </label>
+                        <div className="field">
+                          <span>Outline Thickness</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={selectedCardDesign.outlineThickness ?? 0}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                outlineThickness: Number(event.target.value) || 0
                               })
                             }
                           />
                         </div>
                         <div className="field">
-                          <span>{isKorean ? "줄간격" : "Line Height"}</span>
+                          <span>Outline Color</span>
+                          <input
+                            className="text-input"
+                            type="color"
+                            value={selectedCardDesign.outlineColor ?? "#000000"}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                outlineColor: event.target.value
+                              })
+                            }
+                          />
+                        </div>
+                              </div>
+                            </details>
+                            <details className="card-style-subsection">
+                              <summary>Shadow</summary>
+                              <div className="card-style-grid">
+                        <label className="field">
+                          <span>Shadow</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedCardDesign.shadowEnabled)}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                shadowEnabled: event.target.checked
+                              })
+                            }
+                          />
+                        </label>
+                        <div className="field">
+                          <span>Shadow Color</span>
+                          <input
+                            className="text-input"
+                            type="color"
+                            value={selectedCardDesign.shadowColor ?? "#000000"}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                shadowColor: event.target.value
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field">
+                          <span>Direction</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={360}
+                            value={selectedCardDesign.shadowDirectionDeg ?? 135}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                shadowDirectionDeg: Number(event.target.value) || 0
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field">
+                          <span>Opacity</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={selectedCardDesign.shadowOpacity ?? 45}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                shadowOpacity: Number(event.target.value) || 0
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field">
+                          <span>Distance</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={selectedCardDesign.shadowDistance ?? 10}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                shadowDistance: Number(event.target.value) || 0
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field">
+                          <span>Blur</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={selectedCardDesign.shadowBlur ?? 0}
+                            onChange={(event) =>
+                              applyCardTextStylePatch({
+                                shadowBlur: Number(event.target.value) || 0
+                              })
+                            }
+                          />
+                        </div>
+                              </div>
+                            </details>
+                            <details className="card-style-subsection">
+                              <summary>Spacing & Background</summary>
+                              <div className="card-style-grid">
+                        <div className="field">
+                          <span>Line Height</span>
                           <input
                             className="text-input"
                             type="number"
@@ -1735,7 +2830,7 @@ export function GenerationPage() {
                           />
                         </div>
                         <div className="field">
-                          <span>{isKorean ? "패딩(px)" : "Padding (px)"}</span>
+                          <span>Padding (px)</span>
                           <input
                             className="text-input"
                             type="number"
@@ -1750,22 +2845,90 @@ export function GenerationPage() {
                           />
                         </div>
                         <div className="field">
-                          <span>{isKorean ? "배경색 (rgba)" : "Background (rgba)"}</span>
+                          <span>{isKorean ? "배경 색상" : "Background Color"}</span>
+                          <div className="card-color-control">
+                            <input
+                              className="text-input"
+                              type="color"
+                              value={parseCssColorToHexAndOpacity(selectedCardDesign.backgroundColor).hex}
+                              onChange={(event) =>
+                                updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                                  backgroundColor: buildCssRgbaFromHexAndOpacity(
+                                    event.target.value,
+                                    parseCssColorToHexAndOpacity(selectedCardDesign.backgroundColor).opacity
+                                  )
+                                })
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="card-tool-btn"
+                              onClick={() =>
+                                updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
+                                  backgroundColor: "rgba(0,0,0,0)"
+                                })
+                              }
+                            >
+                              {isKorean ? "투명" : "Clear"}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="field">
+                          <span>{isKorean ? "배경 투명도" : "Background Opacity"}</span>
                           <input
                             className="text-input"
-                            type="text"
-                            value={selectedCardDesign.backgroundColor}
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={parseCssColorToHexAndOpacity(selectedCardDesign.backgroundColor).opacity}
                             onChange={(event) =>
                               updateCardDesign(selectedScene.sceneNo, selectedBoxIndex, {
-                                backgroundColor: event.target.value
+                                backgroundColor: buildCssRgbaFromHexAndOpacity(
+                                  parseCssColorToHexAndOpacity(selectedCardDesign.backgroundColor).hex,
+                                  Number(event.target.value) || 0
+                                )
                               })
                             }
                           />
+                          <span className="subtle">
+                            {parseCssColorToHexAndOpacity(selectedCardDesign.backgroundColor).opacity}%
+                          </span>
+                        </div>
+                          </div>
+                        </details>
+                            </div>
+                          </details>
+                          <details className="card-symbol-section">
+                            <summary>Symbols</summary>
+                            <div className="card-symbol-panel">
+                              <input
+                                className="text-input"
+                                type="text"
+                                placeholder="Search"
+                                value={symbolSearch}
+                                onChange={(event) => setSymbolSearch(event.target.value)}
+                              />
+                              <div className="card-symbol-grid">
+                                {filteredCardNewsSymbols.map((item) => (
+                                  <button
+                                    key={`${item.symbol}-${item.label}`}
+                                    type="button"
+                                    className="card-symbol-btn"
+                                    title={item.label}
+                                    onClick={() => appendSymbolToSelectedBox(item.symbol)}
+                                  >
+                                    {item.symbol}
+                                  </button>
+                                ))}
+                              </div>
+                              <p className="subtle">Click to insert into the selected text box.</p>
+                            </div>
+                          </details>
                         </div>
                       </>
                     ) : null}
 
-                    {!isCardNewsModule || selectedScene.sceneNo === 1 ? (
+                    {!isCardNewsModule ? (
                       <>
                         <div className="field field-span-2">
                           <span>{moduleCopy.fluxPrompt}</span>
@@ -2076,14 +3239,24 @@ export function GenerationPage() {
                   {moduleCopy.sceneLabel} {selectedScene?.sceneNo ?? "-"}
                 </span>
                 {isCardNewsModule && selectedScene ? (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={busy}
-                    onClick={() => void handleSaveCardPreviewImageAs(selectedScene.sceneNo)}
-                  >
-                    {isKorean ? "미리보기 저장" : "Save Preview As"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => void handleSaveCardPreviewImageAs(selectedScene.sceneNo)}
+                    >
+                      {isKorean ? "현재 카드 저장" : "Save Current Card"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => void handleSaveAllCardPreviewImages()}
+                    >
+                      {isKorean ? "전체 카드 저장" : "Save All Cards"}
+                    </button>
+                  </>
                 ) : null}
               </div>
             </div>
@@ -2094,18 +3267,103 @@ export function GenerationPage() {
               <>
                 <div className="generation-preview-banner">
                   <p className="subtle">
-                    {isKorean
-                      ? "선택한 씬의 내레이션/키워드/모션을 오른쪽에서 빠르게 검토하세요."
-                      : "Quickly review selected scene narration, keyword, and motion here."}
+                    {isCardNewsModule
+                      ? isKorean
+                        ? "카드를 직접 보면서 편집하세요. Ctrl+휠로 확대/축소, 우클릭 드래그로 이동할 수 있습니다."
+                        : "Edit while previewing the card. Ctrl+wheel zooms, right-drag pans."
+                      : isKorean
+                        ? "선택한 씬의 내레이션, 키워드, 모션을 확인하세요."
+                        : "Quickly review selected scene narration, keyword, and motion here."}
                   </p>
                 </div>
 
-                <div
-                  ref={isCardNewsModule ? previewViewportRef : null}
-                  className={
-                    isCardNewsModule ? "generation-preview-media generation-preview-media--canvas" : "generation-preview-media"
-                  }
-                >
+                <div className={isCardNewsModule ? "card-preview-workspace" : "card-preview-workspace single"}>
+                  {isCardNewsModule ? (
+                    <aside className="card-preview-rail" aria-label={isKorean ? "카드 목록" : "Card list"}>
+                      <div className="card-preview-rail-header">
+                        <strong>{isKorean ? "카드 목록" : "Cards"}</strong>
+                        <span className="pill">{editableDocument.scenes.length}</span>
+                      </div>
+                      <div className="card-preview-rail-list">
+                        {editableDocument.scenes.map((scene, sceneIndex) => {
+                          const thumbSrc = getCardNewsRailPreviewSrc(scene);
+                          const isSelected = scene.sceneNo === selectedSceneNo;
+                          return (
+                            <div
+                              key={`card-preview-rail-${scene.sceneNo}-${thumbSrc}`}
+                              className={[
+                                "card-preview-rail-item",
+                                isSelected ? "active" : "",
+                                draggingSceneIndex === sceneIndex ? "dragging" : "",
+                                dragOverSceneIndex === sceneIndex ? "drag-over" : ""
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              draggable={!busy}
+                              onDragStart={(event) => handleSceneDragStart(event, sceneIndex)}
+                              onDragOver={(event) => handleSceneDragOver(event, sceneIndex)}
+                              onDrop={(event) => handleSceneDrop(event, sceneIndex)}
+                              onDragEnd={handleSceneDragEnd}
+                            >
+                              <button
+                                type="button"
+                                className="card-preview-rail-thumb"
+                                onClick={() => setSelectedSceneNo(scene.sceneNo)}
+                              >
+                                {thumbSrc ? (
+                                  <img
+                                    src={thumbSrc}
+                                    alt={`${moduleCopy.sceneLabel} ${scene.sceneNo}`}
+                                    onError={(event) => {
+                                      const target = event.currentTarget;
+                                      if (target.dataset.fallbackApplied === "true") {
+                                        target.src = buildCardNewsPlaceholderPreview(scene.sceneNo);
+                                        return;
+                                      }
+                                      target.dataset.fallbackApplied = "true";
+                                      target.src =
+                                        buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo)[1]?.src ??
+                                        buildCardNewsPlaceholderPreview(scene.sceneNo);
+                                    }}
+                                  />
+                                ) : (
+                                  <img src={buildCardNewsPlaceholderPreview(scene.sceneNo)} alt="" />
+                                )}
+                                <strong className="card-preview-rail-number">{scene.sceneNo}</strong>
+                                <span>
+                                  {moduleCopy.sceneLabel} {scene.sceneNo}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="card-preview-rail-delete"
+                                title={isKorean ? "카드 삭제" : "Delete card"}
+                                disabled={editableDocument.scenes.length <= 1 || busy}
+                                onClick={() => removeSelectedCard(scene.sceneNo)}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </aside>
+                  ) : null}
+                  <div
+                    ref={isCardNewsModule ? previewViewportRef : null}
+                    className={
+                      isCardNewsModule
+                        ? "generation-preview-media generation-preview-media--canvas"
+                        : "generation-preview-media"
+                    }
+                    onWheel={handleCardPreviewWheel}
+                    onMouseDown={handleCardPreviewMouseDown}
+                    onContextMenu={(event) => {
+                      if (isCardNewsModule) {
+                        event.preventDefault();
+                      }
+                    }}
+                  >
                   {activePreviewAsset ? (
                     activePreviewAsset.kind === "image" ? (
                       <div
@@ -2115,7 +3373,9 @@ export function GenerationPage() {
                           isCardNewsModule
                             ? {
                                 width: `${Math.round(1080 * cardStageScale)}px`,
-                                height: `${Math.round(1920 * cardStageScale)}px`
+                                height: `${Math.round(1080 * cardStageScale)}px`,
+                                transform: `translate(${cardStagePan.x}px, ${cardStagePan.y}px)`,
+                                cursor: cardStagePanDrag ? "grabbing" : "grab"
                               }
                             : undefined
                         }
@@ -2137,26 +3397,79 @@ export function GenerationPage() {
                               )
                             }
                           />
-                          {isCardNewsModule && selectedScene.sceneNo > 1
+                          {isCardNewsModule
                             ? previewCardDesignBoxes.map((box) => {
                               const sourceIndex = box._sourceIndex;
                               const isActive = selectedBoxIndex === sourceIndex;
+                              const isEditing =
+                                editingPreviewBox?.sceneNo === selectedScene.sceneNo &&
+                                editingPreviewBox.boxIndex === sourceIndex;
                               const textValue =
-                                box.text && box.text.trim().length > 0
+                                box.text !== undefined
                                   ? box.text
                                   : sourceIndex === 0
                                     ? selectedScene.text
                                     : "";
                               return (
                                 <div
+                                  className={[
+                                    "card-preview-text-box",
+                                    isActive ? "is-active" : "",
+                                    isEditing ? "is-editing" : "",
+                                    showCardBoxOutline ? "show-guide" : "",
+                                    box.locked ? "is-locked" : ""
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
                                   key={box.id ?? `preview-box-${selectedScene.sceneNo}-${sourceIndex}`}
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    if (
+                                      activeRichTextSelectionRef.current &&
+                                      (activeRichTextSelectionRef.current.sceneNo !== selectedScene.sceneNo ||
+                                        activeRichTextSelectionRef.current.boxIndex !== sourceIndex)
+                                    ) {
+                                      activeRichTextSelectionRef.current = null;
+                                    }
                                     setSelectedBoxIndex(sourceIndex);
                                   }}
-                                  onMouseDown={(event) =>
-                                    beginCardDesignDrag(event, "move", selectedScene.sceneNo, sourceIndex, box)
-                                  }
+                                  onDoubleClick={(event) => {
+                                    event.stopPropagation();
+                                    if (box.locked) {
+                                      return;
+                                    }
+                                    setSelectedBoxIndex(sourceIndex);
+                                    setEditingPreviewBox({
+                                      sceneNo: selectedScene.sceneNo,
+                                      boxIndex: sourceIndex
+                                    });
+                                    editingPreviewDirtyRef.current = false;
+                                    window.setTimeout(() => {
+                                      const target = event.currentTarget.querySelector<HTMLElement>(
+                                        ".card-preview-text-content"
+                                      );
+                                      if (!target) {
+                                        return;
+                                      }
+                                      target.focus();
+                                      const selection = window.getSelection();
+                                      const range = document.createRange();
+                                      range.selectNodeContents(target);
+                                      range.collapse(false);
+                                      selection?.removeAllRanges();
+                                      selection?.addRange(range);
+                                    }, 0);
+                                  }}
+                                  onMouseDown={(event) => {
+                                    if (isEditing) {
+                                      event.stopPropagation();
+                                      return;
+                                    }
+                                    if (event.button === 0) {
+                                      beginCardDesignDrag(event, "move", selectedScene.sceneNo, sourceIndex, box);
+                                    }
+                                  }}
+                                  tabIndex={0}
                                   style={{
                                     position: "absolute",
                                     left: `${box.xPct}%`,
@@ -2166,9 +3479,15 @@ export function GenerationPage() {
                                     padding: box.padding,
                                     background: box.backgroundColor,
                                     color: box.textColor,
+                                    fontFamily: box.fontFamily ?? "GongGothic B",
                                     fontSize: box.fontSize,
                                     fontWeight: box.fontWeight,
                                     lineHeight: box.lineHeight,
+                                    WebkitTextStroke: box.outlineEnabled
+                                      ? `${box.outlineThickness ?? 0}px ${box.outlineColor ?? "#000000"}`
+                                      : "0 transparent",
+                                    paintOrder: "stroke fill",
+                                    textShadow: buildCardTextShadow(box),
                                     display: "flex",
                                     alignItems:
                                       box.verticalAlign === "top"
@@ -2186,41 +3505,146 @@ export function GenerationPage() {
                                     borderRadius: 12,
                                     boxSizing: "border-box",
                                     whiteSpace: "pre-wrap",
-                                    cursor: box.locked ? "not-allowed" : cardDesignDrag?.sceneNo === selectedScene.sceneNo ? "grabbing" : "grab",
-                                    userSelect: "none",
-                                    border: showCardBoxOutline
-                                      ? isActive
-                                        ? "2px solid rgba(255,255,255,0.9)"
-                                        : "1px dashed rgba(255,255,255,0.45)"
-                                      : "none",
+                                    cursor: box.locked
+                                      ? "not-allowed"
+                                      : isEditing
+                                        ? "text"
+                                        : cardDesignDrag?.sceneNo === selectedScene.sceneNo
+                                          ? "grabbing"
+                                          : "grab",
+                                    userSelect: isEditing ? "text" : "none",
                                     opacity: box.locked ? 0.75 : 1
                                   }}
                                 >
-                                  {textValue || (isKorean ? "문구 입력" : "Write text")}
-                                  {!box.locked && showCardBoxOutline ? (
-                                    <div
-                                      onMouseDown={(event) => {
+                                  <div
+                                    className="card-preview-text-content"
+                                    key={`${box.id ?? sourceIndex}-${isEditing ? "editing" : "display"}`}
+                                    contentEditable={isEditing}
+                                    suppressContentEditableWarning={isEditing}
+                                    spellCheck={false}
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    data-gramm="false"
+                                    data-gramm_editor="false"
+                                    tabIndex={isEditing ? 0 : -1}
+                                    onInput={(event) => {
+                                      if (isEditing) {
+                                        editingPreviewDirtyRef.current = true;
+                                      }
+                                    }}
+                                    onBlur={(event) => {
+                                      if (!isEditing) {
+                                        return;
+                                      }
+                                      if (editingPreviewDirtyRef.current) {
+                                        const nextText = getPlainTextFromEditableElement(event.currentTarget);
+                                        try {
+                                          const nextRuns = normalizeCardRichTextRuns(
+                                            extractCardRunsFromEditableElement(
+                                              event.currentTarget,
+                                              normalizeCardRichTextRuns(box.richTextRuns)
+                                            )
+                                          );
+                                          updateCardDesign(selectedScene.sceneNo, sourceIndex, {
+                                            text: nextText,
+                                            richTextRuns: nextRuns
+                                          });
+                                        } catch (error) {
+                                          console.error("Card text extraction failed", error);
+                                          updateCardDesign(selectedScene.sceneNo, sourceIndex, {
+                                            text: nextText,
+                                            richTextRuns: undefined
+                                          });
+                                          setMessage(
+                                            error instanceof Error
+                                              ? `카드 텍스트 스타일 복원 실패: ${error.message}`
+                                              : "카드 텍스트 스타일 복원 실패"
+                                          );
+                                        }
+                                      }
+                                      editingPreviewDirtyRef.current = false;
+                                      setEditingPreviewBox(null);
+                                    }}
+                                    onPaste={(event) => {
+                                      if (!isEditing) {
+                                        return;
+                                      }
+                                      event.preventDefault();
+                                      const plainText = event.clipboardData.getData("text/plain");
+                                      document.execCommand("insertText", false, plainText);
+                                    }}
+                                    onMouseDown={(event) => {
+                                      if (isEditing) {
                                         event.stopPropagation();
-                                        beginCardDesignDrag(
-                                          event,
-                                          "resize",
+                                      }
+                                    }}
+                                    onMouseUp={(event) => {
+                                      if (isEditing) {
+                                        captureRichTextSelection(
                                           selectedScene.sceneNo,
                                           sourceIndex,
-                                          box
+                                          event.currentTarget
                                         );
+                                      }
+                                    }}
+                                    onKeyUp={(event) => {
+                                      if (isEditing) {
+                                        captureRichTextSelection(
+                                          selectedScene.sceneNo,
+                                          sourceIndex,
+                                          event.currentTarget
+                                        );
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (!isEditing) {
+                                        return;
+                                      }
+                                      event.stopPropagation();
+                                      if (event.key === "Escape") {
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      maxWidth: "100%",
+                                      minWidth: 0,
+                                      whiteSpace: "pre-wrap",
+                                      overflowWrap: "anywhere",
+                                      wordBreak: "keep-all",
+                                      textAlign: box.align,
+                                      outline: "none"
+                                    }}
+                                  >
+                                    {(() => {
+                                      const safeRuns = normalizeCardRichTextRuns(box.richTextRuns);
+                                      if (!safeRuns) {
+                                        return textValue;
+                                      }
+                                      try {
+                                        return safeRuns.map((run, runIndex) => (
+                                          <span
+                                            key={`${box.id ?? sourceIndex}-run-${runIndex}`}
+                                            data-card-run-index={runIndex}
+                                            style={buildCardRunStyle(box, run)}
+                                          >
+                                            {run.text}
+                                          </span>
+                                        ));
+                                      } catch (error) {
+                                        console.error("Card rich text render failed", error);
+                                        return getCardPlainTextFromRuns(safeRuns) || textValue;
+                                      }
+                                    })()}
+                                  </div>
+                                  {!box.locked ? (
+                                    <div
+                                      className="card-preview-resize-handle"
+                                      aria-label={isKorean ? "텍스트 박스 크기 조절" : "Resize text box"}
+                                      onMouseDown={(event) => {
+                                        event.stopPropagation();
+                                        beginCardDesignDrag(event, "resize", selectedScene.sceneNo, sourceIndex, box);
                                       }}
-                                      style={{
-                                        position: "absolute",
-                                        right: 8,
-                                        bottom: 8,
-                                        width: 14,
-                                        height: 14,
-                                        borderRadius: 3,
-                                        background: "rgba(255,255,255,0.85)",
-                                        border: "1px solid rgba(0,0,0,0.45)",
-                                        cursor: "nwse-resize"
-                                      }}
-                                      title={isKorean ? "드래그해서 박스 크기 조절" : "Drag to resize text box"}
                                     />
                                   ) : null}
                                 </div>
@@ -2270,11 +3694,10 @@ export function GenerationPage() {
                     )
                   ) : (
                     <p className="subtle">
-                      {isKorean
-                        ? "아직 생성된 씬 미리보기가 없습니다."
-                        : "No generated scene preview is available yet."}
+                      {isKorean ? "아직 미리보기 이미지가 없습니다." : "No generated scene preview is available yet."}
                     </p>
                   )}
+                  </div>
                 </div>
 
                 <div className="meta-list">
@@ -2286,7 +3709,7 @@ export function GenerationPage() {
                   ) : (
                     <div>
                       <strong>{isKorean ? "카드 배경" : "Card Background"}</strong>
-                      <span>{isKorean ? "공통 템플릿 사용" : "Shared template background"}</span>
+                      <span>{isKorean ? "선택한 템플릿 또는 공통 배경 사용" : "Selected template or shared background"}</span>
                     </div>
                   )}
                   {!isCardNewsModule ? (
@@ -2307,7 +3730,7 @@ export function GenerationPage() {
                       </div>
                       <div>
                         <strong>{isKorean ? "출력" : "Output"}</strong>
-                        <span>{editableDocument.cardNews?.outputFormat ?? "shorts_9_16"}</span>
+                        <span>{editableDocument.cardNews?.outputFormat ?? "square_1_1"}</span>
                       </div>
                     </>
                   ) : null}
@@ -2318,21 +3741,12 @@ export function GenerationPage() {
                   <p>{selectedScene.text}</p>
                 </div>
 
-                {!isCardNewsModule || selectedScene.sceneNo === 1 ? (
+                {!isCardNewsModule ? (
                   <div className="generation-preview-prompt">
                     <p className="eyebrow">{moduleCopy.fluxPrompt}</p>
                     <p>{selectedScene.fluxPrompt}</p>
                   </div>
-                ) : (
-                  <div className="generation-preview-prompt">
-                    <p className="eyebrow">{isKorean ? "템플릿 카드 안내" : "Template Card Note"}</p>
-                    <p>
-                      {isKorean
-                        ? "2장 이후 카드는 공통 템플릿에 텍스트만 바꿔서 렌더링됩니다."
-                        : "Cards after the cover reuse one template and swap text only."}
-                    </p>
-                  </div>
-                )}
+                ) : null}
 
                 <div className="generation-timeline">
                   <p className="eyebrow">{isKorean ? "Timeline" : "Timeline"}</p>
@@ -2443,7 +3857,7 @@ export function GenerationPage() {
           {isCardNewsModule ? (
             <div className="generation-inspector card">
               <div className="card-row">
-                <strong>{isKorean ? "Inspector" : "Inspector"}</strong>
+                <strong>{isKorean ? "검사기" : "Inspector"}</strong>
                 <span className="pill">{isKorean ? "실시간" : "Live"}</span>
               </div>
               {!selectedScene ? (
@@ -2459,7 +3873,7 @@ export function GenerationPage() {
                     ) : (
                       <div>
                         <strong>{isKorean ? "카드 배경" : "Card Background"}</strong>
-                        <span>{isKorean ? "공통 템플릿 사용" : "Shared template background"}</span>
+                        <span>{isKorean ? "선택한 템플릿 또는 공통 배경 사용" : "Selected template or shared background"}</span>
                       </div>
                     )}
                     <div>
@@ -2472,7 +3886,7 @@ export function GenerationPage() {
                     </div>
                     <div>
                       <strong>{isKorean ? "출력" : "Output"}</strong>
-                      <span>{editableDocument.cardNews?.outputFormat ?? "shorts_9_16"}</span>
+                      <span>{editableDocument.cardNews?.outputFormat ?? "square_1_1"}</span>
                     </div>
                   </div>
 
@@ -2480,20 +3894,22 @@ export function GenerationPage() {
                     <p className="eyebrow">{isKorean ? "템플릿 카드 안내" : "Template Card Note"}</p>
                     <p>
                       {isKorean
-                        ? "2장 이후 카드는 공통 템플릿에 텍스트만 바꿔 렌더링됩니다."
+                        ? "템플릿 배경 위에 텍스트 박스를 올려 카드뉴스 이미지를 만듭니다."
                         : "Cards after the cover reuse one template and swap text only."}
                     </p>
                   </div>
 
                   <div className="generation-preview-prompt">
-                    <p className="eyebrow">{isKorean ? "Layer Status" : "Layer Status"}</p>
+                    <p className="eyebrow">{isKorean ? "레이어 상태" : "Layer Status"}</p>
                     <p>
                       {(selectedScene.cardDesignBoxes?.length ?? 0) > 0
-                        ? `${
-                            selectedScene.cardDesignBoxes?.length ?? 0
-                          } layers · selected #${selectedBoxIndex + 1} · ${
-                            selectedCardDesign?.hidden ? "hidden" : "visible"
-                          } · ${selectedCardDesign?.locked ? "locked" : "editable"}`
+                        ? isKorean
+                          ? `${selectedScene.cardDesignBoxes?.length ?? 0}개 레이어 · 선택 #${selectedBoxIndex + 1} · ${
+                              selectedCardDesign?.hidden ? "숨김" : "표시"
+                            } · ${selectedCardDesign?.locked ? "잠김" : "편집 가능"}`
+                          : `${selectedScene.cardDesignBoxes?.length ?? 0} layers · selected #${selectedBoxIndex + 1} · ${
+                              selectedCardDesign?.hidden ? "hidden" : "visible"
+                            } · ${selectedCardDesign?.locked ? "locked" : "editable"}`
                         : "No configured text layers for this card."}
                     </p>
                   </div>
@@ -2505,5 +3921,6 @@ export function GenerationPage() {
         )
       )}
     </section>
+    </GenerationErrorBoundary>
   );
 }

@@ -107,6 +107,36 @@ export interface YouTubeBreakoutDiscoveryResult {
   };
 }
 
+export interface NewsKnowledgeDiscoveryRequest {
+  region: "all" | "domestic" | "global";
+  period: "24h" | "3d" | "7d";
+  category: "all" | "world" | "breaking" | "china" | "economy" | "tech";
+  sourceGroup:
+    | "all"
+    | "domestic_major"
+    | "global_major"
+    | "mbc"
+    | "sbs"
+    | "kbs"
+    | "yonhap"
+    | "bbc"
+    | "reuters"
+    | "ap";
+  limit?: number;
+  query?: string;
+}
+
+export interface NewsKnowledgeDiscoveryResult extends TrendDiscoveryResult {
+  request: {
+    region: NewsKnowledgeDiscoveryRequest["region"];
+    period: NewsKnowledgeDiscoveryRequest["period"];
+    category: NewsKnowledgeDiscoveryRequest["category"];
+    sourceGroup: NewsKnowledgeDiscoveryRequest["sourceGroup"];
+    limit: number;
+    query?: string;
+  };
+}
+
 export interface YouTubeCandidateAnalysisRequest {
   title: string;
   summary?: string;

@@ -88,6 +88,14 @@ export class PathService {
     return path.join(this.getBundledResourcesPath(), "backgrounds", `${backgroundId}.png`);
   }
 
+  getBundledCardNewsTemplatesPath(): string {
+    return path.join(this.getBundledResourcesPath(), "card-news-templates");
+  }
+
+  getUserCardNewsTemplatesPath(): string {
+    return this.getAutomationStatePath("card-news-templates");
+  }
+
   getInstalledRootPath(mcpId: string): string {
     return path.join(this.getDefaultVaultPath(), "installed", mcpId);
   }

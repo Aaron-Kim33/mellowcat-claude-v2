@@ -25,11 +25,29 @@ export interface ScenePlanRequest {
 
 export type SceneScriptCategory = "horror" | "romance" | "community";
 
+export interface CardNewsRichTextRun {
+  text: string;
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: 400 | 500 | 600 | 700 | 800;
+  textColor?: string;
+  outlineEnabled?: boolean;
+  outlineThickness?: number;
+  outlineColor?: string;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  shadowDirectionDeg?: number;
+  shadowOpacity?: number;
+  shadowDistance?: number;
+  shadowBlur?: number;
+}
+
 export interface SceneScriptItem {
   sceneNo: number;
   text: string;
   fluxPrompt: string;
   assetSearchQuery?: string;
+  cardTemplateImagePath?: string;
   motion: "none" | "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "wipe-transition" | "shake";
   durationSec: number;
   cardDesign?: {
@@ -44,12 +62,23 @@ export interface SceneScriptItem {
     heightPct: number;
     align: "left" | "center" | "right";
     verticalAlign: "top" | "middle" | "bottom";
+    fontFamily?: string;
     fontSize: number;
     fontWeight: 400 | 500 | 600 | 700 | 800;
     textColor: string;
     backgroundColor: string;
     lineHeight: number;
     padding: number;
+    outlineEnabled?: boolean;
+    outlineThickness?: number;
+    outlineColor?: string;
+    shadowEnabled?: boolean;
+    shadowColor?: string;
+    shadowDirectionDeg?: number;
+    shadowOpacity?: number;
+    shadowDistance?: number;
+    shadowBlur?: number;
+    richTextRuns?: CardNewsRichTextRun[];
   };
   cardDesignBoxes?: Array<{
     id?: string;
@@ -63,13 +92,32 @@ export interface SceneScriptItem {
     heightPct: number;
     align: "left" | "center" | "right";
     verticalAlign: "top" | "middle" | "bottom";
+    fontFamily?: string;
     fontSize: number;
     fontWeight: 400 | 500 | 600 | 700 | 800;
     textColor: string;
     backgroundColor: string;
     lineHeight: number;
     padding: number;
+    outlineEnabled?: boolean;
+    outlineThickness?: number;
+    outlineColor?: string;
+    shadowEnabled?: boolean;
+    shadowColor?: string;
+    shadowDirectionDeg?: number;
+    shadowOpacity?: number;
+    shadowDistance?: number;
+    shadowBlur?: number;
+    richTextRuns?: CardNewsRichTextRun[];
   }>;
+}
+
+export interface CardNewsTemplateRecord {
+  id: string;
+  name: string;
+  role: "opener" | "body" | "qna" | "closer";
+  imagePath: string;
+  thumbnailPath: string;
 }
 
 export interface SceneScriptSubtitleStyle {

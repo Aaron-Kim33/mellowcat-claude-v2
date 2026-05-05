@@ -276,6 +276,12 @@ export class ShortformWorkflowConfigService {
     if ((normalized.fluxApiBaseUrl ?? "").trim()) {
       normalized.fluxApiBaseUrl = this.normalizeFluxBaseUrl(normalized.fluxApiBaseUrl);
     }
+    const cardNewsCoverPath = (normalized.cardNewsCoverImagePath ?? "").trim();
+    if (cardNewsCoverPath) {
+      normalized.cardNewsCoverImagePath = cardNewsCoverPath;
+    } else {
+      delete normalized.cardNewsCoverImagePath;
+    }
 
     const normalizedModel = this.normalizeFluxModel(normalized.fluxModel);
     if (normalizedModel) {

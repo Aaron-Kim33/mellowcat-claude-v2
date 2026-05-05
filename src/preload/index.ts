@@ -92,10 +92,24 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:telegram:sendMockShortlist"),
   discoverYouTubeBreakoutCandidates: (request) =>
     ipcRenderer.invoke("automation:crawl:discoverYouTubeBreakouts", request),
+  discoverNewsKnowledgeCandidates: (request) =>
+    ipcRenderer.invoke("automation:crawl:discoverNewsKnowledgeCandidates", request),
   analyzeYouTubeCandidate: (request) =>
     ipcRenderer.invoke("automation:crawl:analyzeYouTubeCandidate", request),
   probeYouTubeTranscript: (request) =>
     ipcRenderer.invoke("automation:crawl:probeYouTubeTranscript", request),
+  captureNewsSourceToCardCover: (sourceUrl: string, packagePath?: string) =>
+    ipcRenderer.invoke("automation:crawl:captureNewsSourceToCardCover", sourceUrl, packagePath),
+  captureNewsSourceToVideoClip: (sourceUrl: string, packagePath?: string) =>
+    ipcRenderer.invoke("automation:crawl:captureNewsSourceToVideoClip", sourceUrl, packagePath),
+  openPackageFolder: (packagePath?: string) =>
+    ipcRenderer.invoke("automation:workflow:openPackageFolder", packagePath),
+  listCardNewsTemplates: () =>
+    ipcRenderer.invoke("automation:create:listCardNewsTemplates"),
+  registerCardNewsTemplate: () =>
+    ipcRenderer.invoke("automation:create:registerCardNewsTemplate"),
+  deleteCardNewsTemplate: (templateId: string) =>
+    ipcRenderer.invoke("automation:create:deleteCardNewsTemplate", templateId),
   getYouTubeStatus: (): Promise<YouTubeAuthStatus> =>
     ipcRenderer.invoke("automation:youtube:getStatus"),
   connectYouTube: (): Promise<YouTubeAuthStatus> =>
