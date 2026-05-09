@@ -7,7 +7,18 @@ import type {
 import type { AuthSession } from "@common/types/auth";
 import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/claude";
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
-import type { CardNewsTemplateRecord, SceneScriptDocument } from "@common/types/media-generation";
+import type {
+  CardNewsTemplateRecord,
+  LocalAssetImportRequest,
+  LocalAssetImportResult,
+  PixabayAssetImportRequest,
+  PixabayAssetImportResult,
+  PixabayAssetResult,
+  PixabayAssetSearchRequest,
+  SceneScriptDocument,
+  VoiceLayerGenerationRequest,
+  VoiceLayerGenerationResult
+} from "@common/types/media-generation";
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -115,6 +126,10 @@ interface AppState {
   pickYouTubeThumbnailFile: () => Promise<string | undefined>;
   uploadLastPackageToYouTube: (packagePath?: string) => Promise<void>;
   inspectSceneScript: (packagePath?: string) => Promise<void>;
+  searchPixabayAssets: (request: PixabayAssetSearchRequest) => Promise<PixabayAssetResult[]>;
+  importPixabayAsset: (request: PixabayAssetImportRequest) => Promise<PixabayAssetImportResult>;
+  importLocalAsset: (request: LocalAssetImportRequest) => Promise<LocalAssetImportResult | undefined>;
+  generateVoiceLayer: (request: VoiceLayerGenerationRequest) => Promise<VoiceLayerGenerationResult>;
   saveSceneScript: (document: SceneScriptDocument) => Promise<void>;
   saveSceneCard: (document: SceneScriptDocument, sceneNo: number) => Promise<void>;
   saveCardPreviewImageAs: (
@@ -450,6 +465,14 @@ export const useAppStore = create<AppState>((set) => ({
     const sceneScript = await window.mellowcat.automation.inspectSceneScript(resolvedPackagePath);
     set({ sceneScript, sceneScriptPackagePath: resolvedPackagePath });
   },
+  searchPixabayAssets: async (request) =>
+    window.mellowcat.automation.searchPixabayAssets(request),
+  importPixabayAsset: async (request) =>
+    window.mellowcat.automation.importPixabayAsset(request),
+  importLocalAsset: async (request) =>
+    window.mellowcat.automation.importLocalAsset(request),
+  generateVoiceLayer: async (request) =>
+    window.mellowcat.automation.generateVoiceLayer(request),
   saveSceneScript: async (document: SceneScriptDocument) => {
     const resolvedPackagePath = resolvePackagePath(useAppStore.getState());
     if (!resolvedPackagePath) {

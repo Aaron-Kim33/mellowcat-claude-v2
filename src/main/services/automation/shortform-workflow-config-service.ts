@@ -240,7 +240,6 @@ export class ShortformWorkflowConfigService {
       fluxModel: "black-forest-labs/flux.2-pro",
       createBackgroundSourceType: "preset",
       createSubtitleTheme: "story_bold",
-      createVideoSubtitleMode: "hard",
       createVideoRenderQuality: "high",
       createRerenderSceneIndexes: "",
       scriptProvider: "openrouter_api",

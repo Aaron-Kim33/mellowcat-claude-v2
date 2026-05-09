@@ -9,7 +9,13 @@ import type {
 } from "../../common/types/automation";
 import type {
   CardNewsTemplateRecord,
-  SceneScriptDocument
+  LocalAssetImportRequest,
+  PixabayAssetImportRequest,
+  PixabayAssetResult,
+  PixabayAssetSearchRequest,
+  SceneScriptDocument,
+  VoiceLayerGenerationRequest,
+  VoiceLayerGenerationResult
 } from "../../common/types/media-generation";
 import type { YouTubeUploadRequest } from "../../common/types/settings";
 import type {
@@ -29,6 +35,7 @@ import type { TrendCandidate } from "../../common/types/trend";
 import { CheckpointWorkflowService } from "../services/automation/checkpoint-workflow-service";
 import { ProductionPackageService } from "../services/automation/production-package-service";
 import { ShortformScriptService } from "../services/automation/shortform-script-service";
+import { VoiceoverService } from "../services/automation/voiceover-service";
 import { TelegramControlService } from "../services/automation/telegram-control-service";
 import { TrendDiscoveryService } from "../services/automation/trend-discovery-service";
 import { ShortformWorkflowConfigService } from "../services/automation/shortform-workflow-config-service";
@@ -43,6 +50,7 @@ export function registerAutomationIpc(
   checkpointWorkflowService: CheckpointWorkflowService,
   productionPackageService: ProductionPackageService,
   shortformScriptService: ShortformScriptService,
+  voiceoverService: VoiceoverService,
   pathService: PathService
 ): void {
   const sanitizeFileToken = (value: string) =>
@@ -154,6 +162,91 @@ export function registerAutomationIpc(
       JSON.stringify(templates, null, 2),
       "utf8"
     );
+  };
+
+  const pickPixabayVideoUrl = (videos: unknown): { url: string; width?: number; height?: number } | undefined => {
+    if (!videos || typeof videos !== "object") {
+      return undefined;
+    }
+    const videoMap = videos as Record<string, { url?: string; width?: number; height?: number }>;
+    return videoMap.large?.url
+      ? { url: videoMap.large.url, width: videoMap.large.width, height: videoMap.large.height }
+      : videoMap.medium?.url
+        ? { url: videoMap.medium.url, width: videoMap.medium.width, height: videoMap.medium.height }
+        : videoMap.small?.url
+          ? { url: videoMap.small.url, width: videoMap.small.width, height: videoMap.small.height }
+          : videoMap.tiny?.url
+            ? { url: videoMap.tiny.url, width: videoMap.tiny.width, height: videoMap.tiny.height }
+            : undefined;
+  };
+
+  const pickPixabayVideoPreviewUrl = (hit: Record<string, unknown>) => {
+    const directPreviewUrl =
+      typeof hit.previewURL === "string"
+        ? hit.previewURL
+        : typeof hit.webformatURL === "string"
+          ? hit.webformatURL
+          : typeof hit.largeImageURL === "string"
+            ? hit.largeImageURL
+            : "";
+    if (directPreviewUrl) {
+      return directPreviewUrl;
+    }
+
+    if (hit.videos && typeof hit.videos === "object") {
+      const videoMap = hit.videos as Record<string, { thumbnail?: string; poster?: string; preview?: string }>;
+      const videoPreview =
+        videoMap.large?.thumbnail ??
+        videoMap.large?.poster ??
+        videoMap.large?.preview ??
+        videoMap.medium?.thumbnail ??
+        videoMap.medium?.poster ??
+        videoMap.medium?.preview ??
+        videoMap.small?.thumbnail ??
+        videoMap.small?.poster ??
+        videoMap.small?.preview ??
+        videoMap.tiny?.thumbnail ??
+        videoMap.tiny?.poster ??
+        videoMap.tiny?.preview ??
+        "";
+      if (videoPreview) {
+        return videoPreview;
+      }
+    }
+
+    return typeof hit.picture_id === "string" && hit.picture_id.trim()
+      ? `https://i.vimeocdn.com/video/${hit.picture_id.trim()}_295x166.jpg`
+      : "";
+  };
+
+  const getDownloadedAssetExtension = (
+    mediaType: "video" | "image",
+    contentType: string | null,
+    sourceUrl: string
+  ) => {
+    const urlExtension = path.extname(new URL(sourceUrl).pathname).toLowerCase();
+    if (urlExtension && urlExtension.length <= 6) {
+      return urlExtension;
+    }
+    if (contentType?.includes("png")) {
+      return ".png";
+    }
+    if (contentType?.includes("webp")) {
+      return ".webp";
+    }
+    if (contentType?.includes("jpeg") || contentType?.includes("jpg")) {
+      return ".jpg";
+    }
+    return mediaType === "video" ? ".mp4" : ".jpg";
+  };
+  const getMediaTypeFromExtension = (extension: string): "video" | "image" | undefined => {
+    if ([".mp4", ".mov", ".webm", ".mkv"].includes(extension.toLowerCase())) {
+      return "video";
+    }
+    if ([".png", ".jpg", ".jpeg", ".webp"].includes(extension.toLowerCase())) {
+      return "image";
+    }
+    return undefined;
   };
 
   ipcMain.handle("automation:workflow:getConfig", () => workflowConfigService.get());
@@ -1173,6 +1266,221 @@ export function registerAutomationIpc(
   );
   ipcMain.handle("automation:create:inspectSceneScript", (_event, packagePath: string) =>
     productionPackageService.inspectSceneScript(packagePath)
+  );
+  ipcMain.handle(
+    "automation:create:searchPixabayAssets",
+    async (_event, request: PixabayAssetSearchRequest): Promise<PixabayAssetResult[]> => {
+      const apiKey = request.apiKey?.trim();
+      const query = request.query?.trim();
+      if (!apiKey) {
+        throw new Error("Pixabay API Key가 필요합니다.");
+      }
+      if (!query) {
+        throw new Error("Pixabay 검색어를 입력해 주세요.");
+      }
+
+      const endpoint =
+        request.mediaType === "video"
+          ? "https://pixabay.com/api/videos/"
+          : "https://pixabay.com/api/";
+      const url = new URL(endpoint);
+      url.searchParams.set("key", apiKey);
+      url.searchParams.set("q", query);
+      url.searchParams.set("lang", "ko");
+      url.searchParams.set("safesearch", "true");
+      url.searchParams.set("order", "popular");
+      url.searchParams.set("per_page", String(Math.max(3, Math.min(30, request.perPage ?? 12))));
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Pixabay API HTTP ${response.status}: ${await response.text()}`);
+      }
+      const payload = (await response.json()) as { hits?: Array<Record<string, unknown>> };
+      const hits = Array.isArray(payload.hits) ? payload.hits : [];
+      return hits
+        .map((hit): PixabayAssetResult | undefined => {
+          const id = String(hit.id ?? "");
+          if (!id) {
+            return undefined;
+          }
+          if (request.mediaType === "video") {
+            const pickedVideo = pickPixabayVideoUrl(hit.videos);
+            const previewUrl = pickPixabayVideoPreviewUrl(hit);
+            if (!pickedVideo?.url) {
+              return undefined;
+            }
+            return {
+              id,
+              mediaType: "video",
+              title: String(hit.tags ?? `Pixabay video ${id}`),
+              previewUrl,
+              downloadUrl: pickedVideo.url,
+              sourceUrl: typeof hit.pageURL === "string" ? hit.pageURL : "https://pixabay.com/videos/",
+              width: pickedVideo.width,
+              height: pickedVideo.height,
+              durationSec: typeof hit.duration === "number" ? hit.duration : undefined,
+              tags: typeof hit.tags === "string" ? hit.tags : undefined,
+              user: typeof hit.user === "string" ? hit.user : undefined
+            };
+          }
+          const downloadUrl =
+            typeof hit.largeImageURL === "string"
+              ? hit.largeImageURL
+              : typeof hit.webformatURL === "string"
+                ? hit.webformatURL
+                : "";
+          const previewUrl =
+            typeof hit.previewURL === "string"
+              ? hit.previewURL
+              : typeof hit.webformatURL === "string"
+                ? hit.webformatURL
+                : "";
+          if (!downloadUrl) {
+            return undefined;
+          }
+          return {
+            id,
+            mediaType: "image",
+            title: String(hit.tags ?? `Pixabay image ${id}`),
+            previewUrl,
+            downloadUrl,
+            sourceUrl: typeof hit.pageURL === "string" ? hit.pageURL : "https://pixabay.com/images/",
+            width: typeof hit.imageWidth === "number" ? hit.imageWidth : undefined,
+            height: typeof hit.imageHeight === "number" ? hit.imageHeight : undefined,
+            tags: typeof hit.tags === "string" ? hit.tags : undefined,
+            user: typeof hit.user === "string" ? hit.user : undefined
+          };
+        })
+        .filter((result): result is PixabayAssetResult => Boolean(result));
+    }
+  );
+  ipcMain.handle(
+    "automation:create:importPixabayAsset",
+    async (_event, request: PixabayAssetImportRequest) => {
+      const packagePath = request.packagePath?.trim();
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        throw new Error("유효한 작업 패키지 경로가 필요합니다.");
+      }
+      const asset = request.asset;
+      if (!asset?.downloadUrl) {
+        throw new Error("가져올 Pixabay 자산 URL이 없습니다.");
+      }
+      const response = await fetch(asset.downloadUrl);
+      if (!response.ok) {
+        throw new Error(`Pixabay asset download HTTP ${response.status}`);
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const extension = getDownloadedAssetExtension(
+        asset.mediaType,
+        response.headers.get("content-type"),
+        asset.downloadUrl
+      );
+      const libraryDir = path.join(packagePath, "assets", "library", "pixabay");
+      fs.mkdirSync(libraryDir, { recursive: true });
+      const token = sanitizeFileToken(`${asset.mediaType}-${asset.id}-${asset.title}`);
+      const libraryPath = path.join(libraryDir, `${token}${extension}`);
+      fs.writeFileSync(libraryPath, bytes);
+
+      let localPath = libraryPath;
+      let appliedSceneNo: number | undefined;
+      if (request.applyToScene && request.sceneNo) {
+        const sceneToken = String(request.sceneNo).padStart(2, "0");
+        const scenePath = path.join(packagePath, "assets", `scene-${sceneToken}${extension}`);
+        fs.mkdirSync(path.dirname(scenePath), { recursive: true });
+        fs.copyFileSync(libraryPath, scenePath);
+        localPath = scenePath;
+        appliedSceneNo = request.sceneNo;
+      }
+
+      return {
+        localPath,
+        relativePath: path.relative(packagePath, localPath),
+        appliedSceneNo
+      };
+    }
+  );
+  ipcMain.handle(
+    "automation:create:importLocalAsset",
+    async (event, request: LocalAssetImportRequest) => {
+      const packagePath = request.packagePath?.trim();
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        throw new Error("유효한 작업 패키지 경로가 필요합니다.");
+      }
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      const options: OpenDialogOptions = {
+        properties: ["openFile"],
+        filters: [
+          {
+            name: "Media files",
+            extensions: ["mp4", "mov", "webm", "mkv", "png", "jpg", "jpeg", "webp"]
+          }
+        ]
+      };
+      const result = ownerWindow
+        ? await dialog.showOpenDialog(ownerWindow, options)
+        : await dialog.showOpenDialog(options);
+      if (result.canceled || !result.filePaths[0]) {
+        return undefined;
+      }
+
+      const sourcePath = result.filePaths[0];
+      const extension = path.extname(sourcePath).toLowerCase();
+      const mediaType = getMediaTypeFromExtension(extension);
+      if (!mediaType) {
+        throw new Error("지원하지 않는 소재 파일 형식입니다.");
+      }
+
+      const libraryDir = path.join(packagePath, "assets", "library", "local");
+      fs.mkdirSync(libraryDir, { recursive: true });
+      const token = sanitizeFileToken(path.basename(sourcePath, extension));
+      const libraryPath = path.join(libraryDir, `${Date.now()}-${token}${extension}`);
+      fs.copyFileSync(sourcePath, libraryPath);
+
+      let localPath = libraryPath;
+      let appliedSceneNo: number | undefined;
+      if (request.applyToScene && request.sceneNo) {
+        const sceneToken = String(request.sceneNo).padStart(2, "0");
+        const scenePath = path.join(packagePath, "assets", `scene-${sceneToken}${extension}`);
+        fs.copyFileSync(libraryPath, scenePath);
+        localPath = scenePath;
+        appliedSceneNo = request.sceneNo;
+      }
+
+      return {
+        localPath,
+        relativePath: path.relative(packagePath, localPath),
+        mediaType,
+        appliedSceneNo
+      };
+    }
+  );
+  ipcMain.handle(
+    "automation:create:generateVoiceLayer",
+    async (_event, request: VoiceLayerGenerationRequest): Promise<VoiceLayerGenerationResult> => {
+      const packagePath = request.packagePath?.trim();
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        throw new Error("유효한 작업 패키지 경로가 필요합니다.");
+      }
+      const text = request.text?.trim();
+      if (!text) {
+        throw new Error("음성으로 만들 문장을 입력해 주세요.");
+      }
+      const result = await voiceoverService.generateStandaloneVoiceLayer(
+        text,
+        packagePath,
+        request.voiceProfile
+      );
+      if (!result.relativePath || result.source === "none") {
+        throw new Error(result.error ?? "음성 생성에 실패했습니다.");
+      }
+      const localPath = path.join(packagePath, result.relativePath);
+      return {
+        localPath,
+        relativePath: result.relativePath,
+        durationSec: result.durationSec,
+        source: result.source
+      };
+    }
   );
   ipcMain.handle(
     "automation:create:updateSceneScript",

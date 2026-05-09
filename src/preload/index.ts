@@ -135,6 +135,14 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath),
   inspectSceneScript: (packagePath: string): Promise<SceneScriptDocument> =>
     ipcRenderer.invoke("automation:create:inspectSceneScript", packagePath),
+  searchPixabayAssets: (request) =>
+    ipcRenderer.invoke("automation:create:searchPixabayAssets", request),
+  importPixabayAsset: (request) =>
+    ipcRenderer.invoke("automation:create:importPixabayAsset", request),
+  importLocalAsset: (request) =>
+    ipcRenderer.invoke("automation:create:importLocalAsset", request),
+  generateVoiceLayer: (request) =>
+    ipcRenderer.invoke("automation:create:generateVoiceLayer", request),
   updateSceneScript: (
     packagePath: string,
     document: SceneScriptDocument

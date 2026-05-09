@@ -191,6 +191,7 @@ export async function bootstrap(): Promise<void> {
       checkpointWorkflowService,
       productionPackageService,
       shortformScriptService,
+      voiceoverService,
       pathService
     );
 

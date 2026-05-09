@@ -768,16 +768,6 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
             width: "half"
           },
           {
-            id: "videoSubtitleMode",
-            label: "Subtitle Output",
-            type: "select",
-            width: "half",
-            options: [
-              { label: "Hard burn-in", value: "hard" },
-              { label: "Soft subtitle track", value: "soft" }
-            ]
-          },
-          {
             id: "videoRenderQuality",
             label: "Render Quality",
             type: "select",
@@ -812,7 +802,6 @@ export const MCP_CONTRACT_REGISTRY: Record<string, MCPRuntimeContract> = {
           { id: "rerender_selected_scenes", label: "Re-render Selected Scenes", kind: "secondary" },
           { id: "refresh_create_assets", label: "Refresh Selected Assets", kind: "secondary" },
           { id: "refresh_create_voiceover", label: "Refresh Voiceover", kind: "secondary" },
-          { id: "refresh_create_subtitles", label: "Refresh Subtitles", kind: "secondary" },
           { id: "generate_scene_plan", label: "Generate Scene Plan", kind: "secondary" },
           { id: "save_checkpoint_3", label: "Save checkpoint-3", kind: "primary" }
         ]

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { spawn } from "node:child_process";
 import type { WorkflowAiConnectionRef } from "../../../common/types/automation";
 import type { SceneScriptVoiceProfile, VoiceoverCue } from "../../../common/types/media-generation";
@@ -36,7 +37,7 @@ export class VoiceoverService {
     }
 
     const apiKey = this.resolveOpenAiApiKey();
-    const settings = this.settingsRepository.get();
+    const settings = this.settingsRepository.refreshSecrets();
     const azureSpeechKey = settings.azureSpeechKey?.trim();
     const azureSpeechRegion = settings.azureSpeechRegion?.trim();
     const azureSpeechVoice =
@@ -80,12 +81,87 @@ export class VoiceoverService {
     return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice);
   }
 
+  async generateStandaloneVoiceLayer(
+    text: string,
+    packagePath: string,
+    voiceProfile?: SceneScriptVoiceProfile
+  ): Promise<VoiceoverGenerationResult> {
+    const input = text.trim();
+    if (!input) {
+      return {
+        source: "none",
+        error: "Voice text was empty."
+      };
+    }
+
+    const relativePath = path.join("assets", "voice", `voice-${Date.now()}.mp3`);
+    const cue: VoiceoverCue = {
+      sceneIndex: 1,
+      startSec: 0,
+      endSec: 0,
+      text: input
+    };
+    const apiKey = this.resolveOpenAiApiKey();
+    const settings = this.settingsRepository.refreshSecrets();
+    const azureSpeechKey = settings.azureSpeechKey?.trim();
+    const azureSpeechRegion = settings.azureSpeechRegion?.trim();
+    const azureSpeechVoice =
+      voiceProfile?.provider === "azure"
+        ? voiceProfile.voiceId?.trim() ||
+          settings.azureSpeechVoice?.trim() ||
+          "ko-KR-SunHiNeural"
+        : settings.azureSpeechVoice?.trim() || "ko-KR-SunHiNeural";
+    const preferredProvider = voiceProfile?.provider;
+    const openAiVoice = voiceProfile?.voiceId?.trim() || "alloy";
+    const openAiModel = voiceProfile?.modelId?.trim() || "gpt-4o-mini-tts";
+    const canUseAzure = Boolean(azureSpeechKey && azureSpeechRegion);
+    const canUseOpenAi = Boolean(apiKey);
+
+    if (preferredProvider === "azure" && canUseAzure) {
+      return this.generateWithAzure(
+        [cue],
+        input,
+        packagePath,
+        azureSpeechKey!,
+        azureSpeechRegion!,
+        azureSpeechVoice,
+        relativePath
+      );
+    }
+
+    if ((preferredProvider === "openai" || preferredProvider === "elevenlabs") && canUseOpenAi) {
+      return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice, relativePath);
+    }
+
+    if (canUseAzure) {
+      return this.generateWithAzure(
+        [cue],
+        input,
+        packagePath,
+        azureSpeechKey!,
+        azureSpeechRegion!,
+        azureSpeechVoice,
+        relativePath
+      );
+    }
+
+    if (!canUseOpenAi) {
+      return {
+        source: "none",
+        error: "No Azure Speech or OpenAI TTS credentials were available."
+      };
+    }
+
+    return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice, relativePath);
+  }
+
   private async generateWithOpenAi(
     input: string,
     packagePath: string,
     apiKey: string,
     model: string,
-    voice: string
+    voice: string,
+    relativePath = "voiceover.mp3"
   ): Promise<VoiceoverGenerationResult> {
     const response = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
@@ -111,13 +187,11 @@ export class VoiceoverService {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const relativePath = "voiceover.mp3";
-    this.fileService.writeBinaryFile(
-      `${packagePath}\\${relativePath}`,
-      Buffer.from(arrayBuffer)
-    );
+    const outputPath = path.join(packagePath, relativePath);
+    this.fileService.ensureDir(path.dirname(outputPath));
+    this.fileService.writeBinaryFile(outputPath, Buffer.from(arrayBuffer));
 
-    const durationSec = await this.probeDurationSec(`${packagePath}\\${relativePath}`);
+    const durationSec = await this.probeDurationSec(outputPath);
     return {
       source: "openai",
       relativePath,
@@ -131,7 +205,8 @@ export class VoiceoverService {
     packagePath: string,
     speechKey: string,
     speechRegion: string,
-    speechVoice: string
+    speechVoice: string,
+    relativePath = "voiceover.mp3"
   ): Promise<VoiceoverGenerationResult> {
     const endpoint = `https://${speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
     const styledResponse = await fetch(endpoint, {
@@ -160,20 +235,28 @@ export class VoiceoverService {
     }
 
     if (!response.ok) {
+      const responseText = await response.text();
+      if (response.status === 401) {
+        return {
+          source: "none",
+          error:
+            `Azure Speech HTTP 401: Azure Speech Key와 Region 인증이 실패했습니다. ` +
+            `설정의 Azure Speech Key가 ${speechRegion} 리전에서 발급된 Speech 리소스 키인지 확인해 주세요. ` +
+            `현재 Region=${speechRegion}, Voice=${speechVoice}. 원문: ${responseText}`
+        };
+      }
       return {
         source: "none",
-        error: `Azure Speech HTTP ${response.status}: ${await response.text()}`
+        error: `Azure Speech HTTP ${response.status}: ${responseText}`
       };
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const relativePath = "voiceover.mp3";
-    this.fileService.writeBinaryFile(
-      `${packagePath}\\${relativePath}`,
-      Buffer.from(arrayBuffer)
-    );
+    const outputPath = path.join(packagePath, relativePath);
+    this.fileService.ensureDir(path.dirname(outputPath));
+    this.fileService.writeBinaryFile(outputPath, Buffer.from(arrayBuffer));
 
-    const durationSec = await this.probeDurationSec(`${packagePath}\\${relativePath}`);
+    const durationSec = await this.probeDurationSec(outputPath);
     return {
       source: "azure",
       relativePath,

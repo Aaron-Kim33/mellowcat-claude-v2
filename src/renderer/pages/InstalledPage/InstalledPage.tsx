@@ -326,7 +326,6 @@ export function InstalledPage() {
   const [createSubtitleTheme, setCreateSubtitleTheme] = useState<
     "clean_dark" | "clean_light" | "story_bold"
   >("story_bold");
-  const [createVideoSubtitleMode, setCreateVideoSubtitleMode] = useState<"soft" | "hard">("hard");
   const [createVideoRenderQuality, setCreateVideoRenderQuality] = useState<"standard" | "high">(
     "high"
   );
@@ -1220,10 +1219,6 @@ export function InstalledPage() {
         setValue: (value: string) =>
           setCreateSubtitleTheme(value as "clean_dark" | "clean_light" | "story_bold")
       },
-      videoSubtitleMode: {
-        value: createVideoSubtitleMode,
-        setValue: (value: string) => setCreateVideoSubtitleMode(value as "soft" | "hard")
-      },
       videoRenderQuality: {
         value: createVideoRenderQuality,
         setValue: (value: string) => setCreateVideoRenderQuality(value as "standard" | "high")
@@ -1650,7 +1645,6 @@ export function InstalledPage() {
     setCreateTargetDurationSec(String(workflowConfig?.createTargetDurationSec ?? 60));
     setCreateMinimumSceneCount(String(workflowConfig?.createMinimumSceneCount ?? 3));
     setCreateSubtitleTheme(workflowConfig?.createSubtitleTheme ?? "story_bold");
-    setCreateVideoSubtitleMode(workflowConfig?.createVideoSubtitleMode ?? "hard");
     setCreateVideoRenderQuality(workflowConfig?.createVideoRenderQuality ?? "high");
     setCreateRerenderSceneIndexes(workflowConfig?.createRerenderSceneIndexes ?? "");
     setYoutubeChannelLabel(workflowConfig?.youtubeChannelLabel ?? "");
@@ -1967,7 +1961,6 @@ export function InstalledPage() {
           ? parsedCreateMinimumSceneCount
           : undefined,
       createSubtitleTheme,
-      createVideoSubtitleMode,
       createVideoRenderQuality,
       createRerenderSceneIndexes: createRerenderSceneIndexes.trim() || undefined,
       youtubeChannelLabel: youtubeChannelLabel.trim() || undefined,

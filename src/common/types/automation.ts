@@ -117,6 +117,7 @@ export interface ShortformWorkflowConfig {
   instagramAccountHandle?: string;
   instagramAccessToken?: string;
   pexelsApiKey?: string;
+  pixabayApiKey?: string;
   createAssetSource?: "pexels" | "flux";
   fluxApiKey?: string;
   fluxApiBaseUrl?: string;

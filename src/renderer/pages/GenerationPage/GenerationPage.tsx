@@ -12,9 +12,13 @@ import type {
   CardNewsTemplateRecord,
   CardNewsLayoutPreset,
   CardNewsTransitionStyle,
+  PixabayAssetResult,
   SceneScriptDocument,
   SceneScriptItem,
+  SceneScriptAudioLayer,
   SceneScriptSubtitleStyle,
+  SceneScriptVideoMediaLayer,
+  SceneScriptVideoTextOverlay,
   SceneScriptVoiceProfile
 } from "@common/types/media-generation";
 import { getMcpRuntimeContract } from "../../../common/contracts/mcp-contract-registry";
@@ -31,12 +35,131 @@ const MOTION_OPTIONS: Array<SceneScriptItem["motion"]> = [
   "shake"
 ];
 
-const SUBTITLE_MODE_OPTIONS: Array<SceneScriptSubtitleStyle["mode"]> = ["outline", "box"];
 const VOICE_PROVIDER_OPTIONS: Array<SceneScriptVoiceProfile["provider"]> = [
   "elevenlabs",
   "azure",
   "openai"
 ];
+const DEFAULT_VIDEO_TEXT_OVERLAY: SceneScriptVideoTextOverlay = {
+  text: "새 텍스트",
+  startSec: 0,
+  durationSec: 5,
+  trackIndex: 0,
+  xPct: 50,
+  yPct: 50,
+  widthPct: 42,
+  heightPct: 15,
+  fontSize: 64,
+  fontWeight: 800,
+  textColor: "#ffffff",
+  outlineColor: "#000000",
+  outlineThickness: 5,
+  backgroundColor: "transparent"
+};
+const TIMELINE_ELEMENT_TRACK_ROW_HEIGHT = 30;
+const TIMELINE_RESIZE_SENSITIVITY = 1;
+const CANVAS_SNAP_THRESHOLD_PCT = 1.5;
+const roundTimelineSeconds = (value: number, min = 0) =>
+  Math.max(min, Math.round((Number(value) || 0) * 20) / 20);
+const formatTimelineSeconds = (value: number) => `${roundTimelineSeconds(value).toFixed(2)}s`;
+const buildLayerId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const buildIconDataUrl = (body: string, viewBox = "0 0 128 128") =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${body}</svg>`
+  )}`;
+const VIDEO_ICON_LIBRARY = [
+  {
+    id: "alert",
+    labelKo: "주의",
+    labelEn: "Alert",
+    tags: "alert warning caution danger",
+    dataUrl: buildIconDataUrl(
+      '<path d="M64 10 120 112H8L64 10Z" fill="#FFD53D" stroke="#111827" stroke-width="8" stroke-linejoin="round"/><path d="M64 42v34" stroke="#111827" stroke-width="10" stroke-linecap="round"/><circle cx="64" cy="94" r="6" fill="#111827"/>'
+    )
+  },
+  {
+    id: "check",
+    labelKo: "체크",
+    labelEn: "Check",
+    tags: "check success confirm",
+    dataUrl: buildIconDataUrl(
+      '<circle cx="64" cy="64" r="54" fill="#22C55E" stroke="#111827" stroke-width="7"/><path d="M38 65 56 83l36-42" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>'
+    )
+  },
+  {
+    id: "question",
+    labelKo: "질문",
+    labelEn: "Question",
+    tags: "question why qna",
+    dataUrl: buildIconDataUrl(
+      '<circle cx="64" cy="64" r="54" fill="#38BDF8" stroke="#111827" stroke-width="7"/><path d="M49 48c2-13 28-18 34-3 6 16-15 19-17 33" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/><circle cx="64" cy="95" r="6" fill="#fff"/>'
+    )
+  },
+  {
+    id: "fire",
+    labelKo: "불꽃",
+    labelEn: "Fire",
+    tags: "fire hot viral trend",
+    dataUrl: buildIconDataUrl(
+      '<path d="M72 10c8 24-8 31 11 50 6 6 10 16 10 27 0 22-17 35-38 35-18 0-34-12-34-33 0-19 13-31 24-44 7-8 11-17 10-29 18 10 12 30 17 42 12-15 5-31 0-48Z" fill="#FF7A1A" stroke="#111827" stroke-width="6" stroke-linejoin="round"/><path d="M58 78c7-9 3-19 0-27 16 12 26 24 21 42-3 12-13 20-25 20-11 0-20-8-20-20 0-10 8-16 24-15Z" fill="#FFD53D"/>'
+    )
+  },
+  {
+    id: "money",
+    labelKo: "돈",
+    labelEn: "Money",
+    tags: "money dollar revenue price",
+    dataUrl: buildIconDataUrl(
+      '<rect x="14" y="30" width="100" height="68" rx="12" fill="#22C55E" stroke="#111827" stroke-width="7"/><circle cx="64" cy="64" r="22" fill="#DCFCE7" stroke="#111827" stroke-width="5"/><path d="M64 46v36M53 56c3-7 21-8 22 1 2 12-21 6-21 18 0 9 19 8 23 1" fill="none" stroke="#111827" stroke-width="6" stroke-linecap="round"/>'
+    )
+  },
+  {
+    id: "globe",
+    labelKo: "세계",
+    labelEn: "Globe",
+    tags: "world global earth news",
+    dataUrl: buildIconDataUrl(
+      '<circle cx="64" cy="64" r="52" fill="#38BDF8" stroke="#111827" stroke-width="7"/><path d="M22 62c20 7 30-6 42 1 17 10 22 1 42 5M44 21c9 11 2 22 10 30 8 8 21 4 28 15 7 12-8 20-2 38M64 13c-21 20-21 82 0 102M64 13c21 20 21 82 0 102" fill="none" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/>'
+    )
+  },
+  {
+    id: "arrow",
+    labelKo: "화살표",
+    labelEn: "Arrow",
+    tags: "arrow point next direction",
+    dataUrl: buildIconDataUrl(
+      '<path d="M16 64h78" stroke="#111827" stroke-width="16" stroke-linecap="round"/><path d="M70 25 111 64 70 103" fill="none" stroke="#111827" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 64h78" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/><path d="M70 25 111 64 70 103" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+    )
+  },
+  {
+    id: "chat",
+    labelKo: "댓글",
+    labelEn: "Chat",
+    tags: "comment chat message talk",
+    dataUrl: buildIconDataUrl(
+      '<path d="M20 28h88v58H57l-25 22V86H20V28Z" fill="#FFFFFF" stroke="#111827" stroke-width="7" stroke-linejoin="round"/><circle cx="48" cy="58" r="6" fill="#111827"/><circle cx="64" cy="58" r="6" fill="#111827"/><circle cx="80" cy="58" r="6" fill="#111827"/>'
+    )
+  }
+];
+const getSceneVideoTextOverlays = (scene?: SceneScriptItem | null): SceneScriptVideoTextOverlay[] => {
+  if (!scene) {
+    return [];
+  }
+  if (scene.videoTextOverlays && scene.videoTextOverlays.length > 0) {
+    return scene.videoTextOverlays.map((overlay) => ({
+      ...DEFAULT_VIDEO_TEXT_OVERLAY,
+      ...overlay
+    }));
+  }
+  return scene.videoTextOverlay
+    ? [
+        {
+          ...DEFAULT_VIDEO_TEXT_OVERLAY,
+          ...scene.videoTextOverlay
+        }
+      ]
+    : [];
+};
 const CARD_NEWS_TEXT_PRESETS = [
   { id: "headline", labelKo: "헤드라인", labelEn: "Headline", fontSize: 64, fontWeight: 800 as const, lineHeight: 1.2 },
   { id: "story", labelKo: "본문", labelEn: "Story", fontSize: 48, fontWeight: 700 as const, lineHeight: 1.28 },
@@ -181,6 +304,17 @@ function buildScenePreviewCandidates(packagePath: string, sceneNo: number): Arra
     { kind: "image", src: toFileUrl(`${base}.png`) },
     { kind: "image", src: toFileUrl(`${base}.webp`) },
     { kind: "video", src: toFileUrl(`${base}.mp4`) }
+  ];
+}
+
+function buildPackagePreviewFallbackCandidates(packagePath: string): Array<{
+  kind: "image" | "video";
+  src: string;
+}> {
+  return [
+    { kind: "video", src: toFileUrl(`${packagePath}\\final-video.mp4`) },
+    { kind: "image", src: toFileUrl(`${packagePath}\\assets\\background.png`) },
+    { kind: "video", src: toFileUrl(`${packagePath}\\assets\\background.mp4`) }
   ];
 }
 
@@ -570,6 +704,10 @@ export function GenerationPage() {
     saveSceneScript,
     captureCardPreviewImageAs,
     saveWorkflowConfig,
+    searchPixabayAssets,
+    importPixabayAsset,
+    importLocalAsset,
+    generateVoiceLayer,
     pickCreateBackgroundFile,
     pickYouTubePackageFolder,
     refreshCardNewsTemplates,
@@ -586,13 +724,65 @@ export function GenerationPage() {
   const resolvedPackagePath = selectedPackagePath || packagePath;
   const [editableDocument, setEditableDocument] = useState<SceneScriptDocument | null>(null);
   const [selectedSceneNo, setSelectedSceneNo] = useState<number>(1);
-  const [editorTab, setEditorTab] = useState<"scene" | "subtitle" | "voice">("scene");
+  const [editorTab, setEditorTab] = useState<"scene" | "text" | "voice">("scene");
   const [previewAssetIndex, setPreviewAssetIndex] = useState(0);
+  const [timelineTimeSec, setTimelineTimeSec] = useState(0);
+  const [timelinePlaying, setTimelinePlaying] = useState(false);
   const [hasGeneratedAssets, setHasGeneratedAssets] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [cardDesignDrag, setCardDesignDrag] = useState<CardDesignDragState | null>(null);
+  const [videoTextDrag, setVideoTextDrag] = useState<{
+    sceneNo: number;
+    overlayIndex: number;
+    startClientX: number;
+    startClientY: number;
+    startXPct: number;
+    startYPct: number;
+  } | null>(null);
+  const [videoMediaDrag, setVideoMediaDrag] = useState<{
+    layerId: string;
+    startClientX: number;
+    startClientY: number;
+    startXPct: number;
+    startYPct: number;
+  } | null>(null);
+  const [timelineResizeDrag, setTimelineResizeDrag] = useState<{
+    kind:
+      | "scene-duration"
+      | "text-duration"
+      | "text-track"
+      | "media-duration"
+      | "media-track"
+      | "audio-duration"
+      | "audio-track";
+    sceneNo: number;
+    overlayIndex?: number;
+    layerId?: string;
+    startClientX: number;
+    startClientY: number;
+    startDurationSec: number;
+    startTextStartSec?: number;
+    startLayerStartSec?: number;
+    startTrackIndex?: number;
+    secondsPerPixel: number;
+    timelineBaseDurationSec: number;
+    previewDurationSec?: number;
+    baseSegments: Array<{
+      sceneNo: number;
+      startSec: number;
+      durationSec: number;
+    }>;
+  } | null>(null);
+  const [timelineSeekDrag, setTimelineSeekDrag] = useState(false);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState(0);
+  const [selectedVideoTextIndex, setSelectedVideoTextIndex] = useState(0);
+  const [selectedVideoMediaLayerId, setSelectedVideoMediaLayerId] = useState<string | null>(null);
+  const [selectedAudioLayerId, setSelectedAudioLayerId] = useState<string | null>(null);
+  const [editingVideoText, setEditingVideoText] = useState<{
+    sceneNo: number;
+    overlayIndex: number;
+  } | null>(null);
   const [editingPreviewBox, setEditingPreviewBox] = useState<{
     sceneNo: number;
     boxIndex: number;
@@ -606,7 +796,30 @@ export function GenerationPage() {
   const [redoStack, setRedoStack] = useState<SceneScriptDocument[]>([]);
   const [showCardBoxOutline, setShowCardBoxOutline] = useState(false);
   const [symbolSearch, setSymbolSearch] = useState("");
+  const [videoIconSearch, setVideoIconSearch] = useState("");
+  const [pixabayApiKeyDraft, setPixabayApiKeyDraft] = useState(workflowConfig?.pixabayApiKey ?? "");
+  const [pixabayQuery, setPixabayQuery] = useState("");
+  const [pixabayMediaType, setPixabayMediaType] = useState<"video" | "image">("video");
+  const [pixabayResults, setPixabayResults] = useState<PixabayAssetResult[]>([]);
+  const [pixabayBusy, setPixabayBusy] = useState(false);
+  const [voiceLayerText, setVoiceLayerText] = useState("");
+  const [voiceLayerBusy, setVoiceLayerBusy] = useState(false);
+  const [assetPreviewVersion, setAssetPreviewVersion] = useState(0);
   const editableDocumentRef = useRef<SceneScriptDocument | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaLayerVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  const audioLayerRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+  const videoMediaLayersRef = useRef<SceneScriptVideoMediaLayer[]>([]);
+  const audioLayersRef = useRef<SceneScriptAudioLayer[]>([]);
+  const timelineSegmentsRef = useRef<Array<{
+    scene: SceneScriptItem;
+    startSec: number;
+    endSec: number;
+    durationSec: number;
+  }>>([]);
+  const selectedSceneNoRef = useRef(selectedSceneNo);
+  const timelineTimeSecRef = useRef(0);
+  const timelineTrackRef = useRef<HTMLDivElement | null>(null);
   const editingPreviewDirtyRef = useRef(false);
   const activeRichTextSelectionRef = useRef<{
     sceneNo: number;
@@ -677,6 +890,10 @@ export function GenerationPage() {
       void refreshCardNewsTemplates();
     }
   }, [cardNewsTemplates.length, isCardNewsModule, refreshCardNewsTemplates]);
+
+  useEffect(() => {
+    setPixabayApiKeyDraft(workflowConfig?.pixabayApiKey ?? "");
+  }, [workflowConfig?.pixabayApiKey]);
 
   const applyDocumentUpdate = (
     updater: (current: SceneScriptDocument) => SceneScriptDocument,
@@ -813,6 +1030,20 @@ export function GenerationPage() {
     () => editableDocument?.scenes.find((scene) => scene.sceneNo === selectedSceneNo),
     [editableDocument, selectedSceneNo]
   );
+  const videoMediaLayers = useMemo(
+    () => editableDocument?.videoMediaLayers ?? [],
+    [editableDocument?.videoMediaLayers]
+  );
+  const audioLayers = useMemo(
+    () => editableDocument?.audioLayers ?? [],
+    [editableDocument?.audioLayers]
+  );
+  const selectedVideoMediaLayer = useMemo(
+    () => videoMediaLayers.find((layer) => layer.id === selectedVideoMediaLayerId) ?? null,
+    [selectedVideoMediaLayerId, videoMediaLayers]
+  );
+  const selectedVideoTextOverlays = useMemo(() => getSceneVideoTextOverlays(selectedScene), [selectedScene]);
+  const selectedVideoTextOverlay = selectedVideoTextOverlays[selectedVideoTextIndex] ?? selectedVideoTextOverlays[0];
   const selectedCardDesignBoxes = useMemo(() => {
     if (!selectedScene) {
       return [] as Array<NonNullable<SceneScriptItem["cardDesign"]>>;
@@ -876,16 +1107,436 @@ export function GenerationPage() {
         item.label.toLowerCase().includes(keyword)
     );
   }, [symbolSearch]);
+  const filteredVideoIcons = useMemo(() => {
+    const keyword = videoIconSearch.trim().toLowerCase();
+    if (!keyword) {
+      return VIDEO_ICON_LIBRARY;
+    }
+    return VIDEO_ICON_LIBRARY.filter(
+      (item) =>
+        item.id.includes(keyword) ||
+        item.labelKo.toLowerCase().includes(keyword) ||
+        item.labelEn.toLowerCase().includes(keyword) ||
+        item.tags.includes(keyword)
+    );
+  }, [videoIconSearch]);
   const totalDurationSec = useMemo(
     () =>
       Math.max(
         1,
-        Math.round(
+        roundTimelineSeconds(
           editableDocument?.scenes.reduce((sum, scene) => sum + Number(scene.durationSec || 0), 0) ?? 0
         )
       ),
     [editableDocument]
   );
+  const timelineSegments = useMemo(() => {
+    let cursor = 0;
+    return (editableDocument?.scenes ?? []).map((scene) => {
+      const durationSec = Math.max(1, Number(scene.durationSec || 1));
+      const segment = {
+        scene,
+        startSec: cursor,
+        endSec: cursor + durationSec,
+        durationSec
+      };
+      cursor += durationSec;
+      return segment;
+    });
+  }, [editableDocument]);
+  const videoElementTrackCount = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...timelineSegments.flatMap((segment) =>
+          getSceneVideoTextOverlays(segment.scene).map((overlay) => Math.max(0, Number(overlay.trackIndex ?? 0) || 0) + 1)
+        )
+      ),
+    [timelineSegments]
+  );
+  const videoMediaTrackCount = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...videoMediaLayers.map((layer) => Math.max(0, Number(layer.trackIndex ?? 0) || 0) + 1)
+      ),
+    [videoMediaLayers]
+  );
+  const audioTrackCount = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...audioLayers.map((layer) => Math.max(0, Number(layer.trackIndex ?? 0) || 0) + 1)
+      ),
+    [audioLayers]
+  );
+  const getTimelineDisplaySegment = (sceneNo: number) => {
+    if (!timelineResizeDrag || timelineResizeDrag.kind !== "scene-duration") {
+      return timelineSegments.find((segment) => segment.scene.sceneNo === sceneNo);
+    }
+    const baseSegment = timelineResizeDrag.baseSegments.find((segment) => segment.sceneNo === sceneNo);
+    const targetBaseSegment = timelineResizeDrag.baseSegments.find(
+      (segment) => segment.sceneNo === timelineResizeDrag.sceneNo
+    );
+    if (!baseSegment || !targetBaseSegment) {
+      return timelineSegments.find((segment) => segment.scene.sceneNo === sceneNo);
+    }
+    const targetDurationSec = Math.max(
+      1,
+      Number(timelineResizeDrag.previewDurationSec ?? timelineResizeDrag.startDurationSec)
+    );
+    const durationDeltaSec = targetDurationSec - timelineResizeDrag.startDurationSec;
+    return {
+      sceneNo,
+      startSec:
+        baseSegment.startSec > targetBaseSegment.startSec
+          ? baseSegment.startSec + durationDeltaSec
+          : baseSegment.startSec,
+      durationSec: sceneNo === timelineResizeDrag.sceneNo ? targetDurationSec : baseSegment.durationSec
+    };
+  };
+  const timelineDisplayDurationSec = timelineResizeDrag?.timelineBaseDurationSec ?? totalDurationSec;
+  const activeTimelineSegment = useMemo(
+    () =>
+      timelineSegments.find((segment) => segment.scene.sceneNo === selectedSceneNo) ??
+      timelineSegments[0],
+    [selectedSceneNo, timelineSegments]
+  );
+  const timelineTickMarks = useMemo(() => {
+    const step = totalDurationSec <= 30 ? 5 : totalDurationSec <= 90 ? 10 : 15;
+    const ticks: number[] = [];
+    for (let current = 0; current <= totalDurationSec; current += step) {
+      ticks.push(current);
+    }
+    if (ticks[ticks.length - 1] !== totalDurationSec) {
+      ticks.push(totalDurationSec);
+    }
+    return ticks;
+  }, [totalDurationSec]);
+
+  const seekTimeline = (nextTimeSec: number) => {
+    const clampedTime = Math.max(0, Math.min(totalDurationSec, nextTimeSec));
+    timelineTimeSecRef.current = clampedTime;
+    setTimelineTimeSec(clampedTime);
+    const targetSegment =
+      timelineSegments.find((segment) => clampedTime >= segment.startSec && clampedTime < segment.endSec) ??
+      timelineSegments[timelineSegments.length - 1];
+    if (targetSegment && targetSegment.scene.sceneNo !== selectedSceneNo) {
+      setSelectedSceneNo(targetSegment.scene.sceneNo);
+    }
+  };
+
+  const seekSceneStart = (sceneNo: number) => {
+    const targetSegment = timelineSegments.find((segment) => segment.scene.sceneNo === sceneNo);
+    if (targetSegment) {
+      seekTimeline(targetSegment.startSec);
+      return;
+    }
+    setSelectedSceneNo(sceneNo);
+  };
+
+  const seekTimelineFromClientX = (clientX: number) => {
+    const track = timelineTrackRef.current;
+    if (!track) {
+      return;
+    }
+    const rect = track.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    setTimelinePlaying(false);
+    seekTimeline(ratio * totalDurationSec);
+  };
+
+  const updateSceneDuration = (sceneNo: number, durationSec: number) => {
+    const nextDurationSec = roundTimelineSeconds(durationSec, 1);
+    applyDocumentUpdate((current) => ({
+      ...current,
+      scenes: current.scenes.map((scene) => {
+        if (scene.sceneNo !== sceneNo) {
+          return scene;
+        }
+        const overlays = getSceneVideoTextOverlays(scene).map((overlay) => {
+          const startSec = Math.min(Math.max(0, nextDurationSec - 0.5), Math.max(0, Number(overlay.startSec ?? 0) || 0));
+          const durationSec = Math.min(
+            Math.max(0.5, nextDurationSec - startSec),
+            Math.max(0.5, Number(overlay.durationSec ?? nextDurationSec) || 0.5)
+          );
+          return {
+            ...overlay,
+            startSec,
+            durationSec
+          };
+        });
+        return {
+          ...scene,
+          durationSec: nextDurationSec,
+          videoTextOverlay: overlays[0] ?? scene.videoTextOverlay,
+          videoTextOverlays: overlays.length > 0 ? overlays : scene.videoTextOverlays
+        };
+      })
+    }));
+  };
+
+  const beginTimelineSceneResize = (event: ReactMouseEvent, scene: SceneScriptItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    const trackWidth = Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1);
+    setTimelineResizeDrag({
+      kind: "scene-duration",
+      sceneNo: scene.sceneNo,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(1, Number(scene.durationSec || 1)),
+      secondsPerPixel: totalDurationSec / trackWidth,
+      timelineBaseDurationSec: totalDurationSec,
+      previewDurationSec: Math.max(1, Number(scene.durationSec || 1)),
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const beginTimelineTextResize = (event: ReactMouseEvent, scene: SceneScriptItem, overlayIndex: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    const trackWidth = Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1);
+    const overlay = getSceneVideoTextOverlays(scene)[overlayIndex] ?? DEFAULT_VIDEO_TEXT_OVERLAY;
+    setTimelineResizeDrag({
+      kind: "text-duration",
+      sceneNo: scene.sceneNo,
+      overlayIndex,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(0.5, Number(overlay.durationSec ?? scene.durationSec) || 0.5),
+      startTextStartSec: Math.max(0, Number(overlay.startSec ?? 0) || 0),
+      startTrackIndex: Math.max(0, Number(overlay.trackIndex ?? 0) || 0),
+      secondsPerPixel: totalDurationSec / trackWidth,
+      timelineBaseDurationSec: totalDurationSec,
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const beginTimelineTextTrackMove = (event: ReactMouseEvent, scene: SceneScriptItem, overlayIndex: number) => {
+    if ((event.target as HTMLElement).closest(".video-element-resize-handle")) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    const overlay = getSceneVideoTextOverlays(scene)[overlayIndex] ?? DEFAULT_VIDEO_TEXT_OVERLAY;
+    setSelectedVideoTextIndex(overlayIndex);
+    setTimelineResizeDrag({
+      kind: "text-track",
+      sceneNo: scene.sceneNo,
+      overlayIndex,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(0.5, Number(overlay.durationSec ?? scene.durationSec) || 0.5),
+      startTextStartSec: Math.max(0, Number(overlay.startSec ?? 0) || 0),
+      startTrackIndex: Math.max(0, Number(overlay.trackIndex ?? 0) || 0),
+      secondsPerPixel: totalDurationSec / Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1),
+      timelineBaseDurationSec: totalDurationSec,
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const updateVideoMediaLayer = (layerId: string, patch: Partial<SceneScriptVideoMediaLayer>) => {
+    applyDocumentUpdate((current) => ({
+      ...current,
+      videoMediaLayers: (current.videoMediaLayers ?? []).map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              ...patch
+            }
+          : layer
+      )
+    }));
+  };
+
+  const updateAudioLayer = (layerId: string, patch: Partial<SceneScriptAudioLayer>) => {
+    applyDocumentUpdate((current) => ({
+      ...current,
+      audioLayers: (current.audioLayers ?? []).map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              ...patch
+            }
+          : layer
+      )
+    }));
+  };
+
+  const getVideoMediaLayerBox = (layer: SceneScriptVideoMediaLayer) => ({
+    xPct: Number(layer.xPct ?? 50),
+    yPct: Number(layer.yPct ?? 50),
+    widthPct: Number(layer.widthPct ?? 100),
+    heightPct: Number(layer.heightPct ?? 100)
+  });
+
+  const beginVideoMediaDrag = (event: ReactMouseEvent<HTMLElement>, layer: SceneScriptVideoMediaLayer) => {
+    if (event.button !== 0 || timelinePlaying) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const box = getVideoMediaLayerBox(layer);
+    setSelectedVideoMediaLayerId(layer.id);
+    setVideoMediaDrag({
+      layerId: layer.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startXPct: box.xPct,
+      startYPct: box.yPct
+    });
+  };
+
+  const beginTimelineMediaResize = (event: ReactMouseEvent, layer: SceneScriptVideoMediaLayer) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    setSelectedVideoMediaLayerId(layer.id);
+    const trackWidth = Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1);
+    setTimelineResizeDrag({
+      kind: "media-duration",
+      sceneNo: selectedSceneNo,
+      layerId: layer.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(0.5, Number(layer.durationSec || 0.5)),
+      startLayerStartSec: Math.max(0, Number(layer.startSec || 0)),
+      startTrackIndex: Math.max(0, Number(layer.trackIndex ?? 0) || 0),
+      secondsPerPixel: totalDurationSec / trackWidth,
+      timelineBaseDurationSec: totalDurationSec,
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const beginTimelineMediaTrackMove = (event: ReactMouseEvent, layer: SceneScriptVideoMediaLayer) => {
+    if ((event.target as HTMLElement).closest(".video-element-resize-handle")) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    setSelectedVideoMediaLayerId(layer.id);
+    setTimelineResizeDrag({
+      kind: "media-track",
+      sceneNo: selectedSceneNo,
+      layerId: layer.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(0.5, Number(layer.durationSec || 0.5)),
+      startLayerStartSec: Math.max(0, Number(layer.startSec || 0)),
+      startTrackIndex: Math.max(0, Number(layer.trackIndex ?? 0) || 0),
+      secondsPerPixel: totalDurationSec / Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1),
+      timelineBaseDurationSec: totalDurationSec,
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const beginTimelineAudioResize = (event: ReactMouseEvent, layer: SceneScriptAudioLayer) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    setSelectedAudioLayerId(layer.id);
+    const trackWidth = Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1);
+    setTimelineResizeDrag({
+      kind: "audio-duration",
+      sceneNo: selectedSceneNo,
+      layerId: layer.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(0.5, Number(layer.durationSec || 0.5)),
+      startLayerStartSec: Math.max(0, Number(layer.startSec || 0)),
+      startTrackIndex: Math.max(0, Number(layer.trackIndex ?? 0) || 0),
+      secondsPerPixel: totalDurationSec / trackWidth,
+      timelineBaseDurationSec: totalDurationSec,
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const beginTimelineAudioTrackMove = (event: ReactMouseEvent, layer: SceneScriptAudioLayer) => {
+    if ((event.target as HTMLElement).closest(".video-element-resize-handle")) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setTimelinePlaying(false);
+    setSelectedAudioLayerId(layer.id);
+    setTimelineResizeDrag({
+      kind: "audio-track",
+      sceneNo: selectedSceneNo,
+      layerId: layer.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startDurationSec: Math.max(0.5, Number(layer.durationSec || 0.5)),
+      startLayerStartSec: Math.max(0, Number(layer.startSec || 0)),
+      startTrackIndex: Math.max(0, Number(layer.trackIndex ?? 0) || 0),
+      secondsPerPixel: totalDurationSec / Math.max(1, timelineTrackRef.current?.getBoundingClientRect().width ?? 1),
+      timelineBaseDurationSec: totalDurationSec,
+      baseSegments: timelineSegments.map((segment) => ({
+        sceneNo: segment.scene.sceneNo,
+        startSec: segment.startSec,
+        durationSec: segment.durationSec
+      }))
+    });
+  };
+
+  const updateVideoTextTiming = (
+    scene: SceneScriptItem,
+    patch: Partial<Pick<SceneScriptVideoTextOverlay, "startSec" | "durationSec">>,
+    overlayIndex = selectedVideoTextIndex
+  ) => {
+    const sceneDuration = Math.max(1, Number(scene.durationSec || 1));
+    const overlay = getSceneVideoTextOverlays(scene)[overlayIndex] ?? {
+      ...DEFAULT_VIDEO_TEXT_OVERLAY,
+      durationSec: Math.min(5, sceneDuration)
+    };
+    const currentStart = Math.max(0, Number(overlay.startSec ?? 0) || 0);
+    const currentDuration = Math.max(0.5, Number(overlay.durationSec ?? sceneDuration) || 0.5);
+    const nextStart = Math.min(
+      Math.max(0, sceneDuration - 0.5),
+      Math.max(0, Number(patch.startSec ?? currentStart) || 0)
+    );
+    const maxDurationFromStart = Math.max(0.5, sceneDuration - nextStart);
+    const nextDuration = Math.min(
+      maxDurationFromStart,
+      Math.max(0.5, Number(patch.durationSec ?? currentDuration) || 0.5)
+    );
+    updateVideoTextOverlay(
+      scene.sceneNo,
+      {
+        startSec: nextStart,
+        durationSec: nextDuration
+      },
+      overlayIndex
+    );
+  };
 
   useEffect(() => {
     if (selectedCardDesignBoxes.length === 0) {
@@ -898,6 +1549,65 @@ export function GenerationPage() {
       setSelectedBoxIndex(0);
     }
   }, [selectedBoxIndex, selectedCardDesignBoxes.length]);
+
+  useEffect(() => {
+    if (selectedVideoTextOverlays.length === 0) {
+      if (selectedVideoTextIndex !== 0) {
+        setSelectedVideoTextIndex(0);
+      }
+      return;
+    }
+    if (selectedVideoTextIndex > selectedVideoTextOverlays.length - 1) {
+      setSelectedVideoTextIndex(0);
+    }
+  }, [selectedVideoTextIndex, selectedVideoTextOverlays.length]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isCardNewsModule || editingVideoText || editingPreviewBox || !selectedScene) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest("input, textarea, select, [contenteditable='true']") ||
+        (event.key !== "Delete" && event.key !== "Backspace")
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (selectedAudioLayerId) {
+        applyDocumentUpdate((current) => ({
+          ...current,
+          audioLayers: (current.audioLayers ?? []).filter((layer) => layer.id !== selectedAudioLayerId)
+        }));
+        setSelectedAudioLayerId(null);
+        return;
+      }
+      if (selectedVideoMediaLayerId) {
+        applyDocumentUpdate((current) => ({
+          ...current,
+          videoMediaLayers: (current.videoMediaLayers ?? []).filter((layer) => layer.id !== selectedVideoMediaLayerId)
+        }));
+        setSelectedVideoMediaLayerId(null);
+        return;
+      }
+      if (selectedVideoTextOverlays.length === 0) {
+        return;
+      }
+      removeVideoTextOverlay(selectedScene.sceneNo, selectedVideoTextIndex);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    editingPreviewBox,
+    editingVideoText,
+    isCardNewsModule,
+    selectedScene,
+    selectedAudioLayerId,
+    selectedVideoMediaLayerId,
+    selectedVideoTextIndex,
+    selectedVideoTextOverlays.length
+  ]);
 
   useEffect(() => {
     setDraggingLayerIndex(null);
@@ -937,13 +1647,24 @@ export function GenerationPage() {
   useEffect(() => {
     setCardStagePan({ x: 0, y: 0 });
   }, [selectedSceneNo]);
+
+  useEffect(() => {
+    timelineTimeSecRef.current = timelineTimeSec;
+  }, [timelineTimeSec]);
+
   const sceneAssetCandidates = useMemo(() => {
     if (!resolvedPackagePath || !selectedScene) {
       return [];
     }
     const generatedCandidates = buildScenePreviewCandidates(resolvedPackagePath, selectedScene.sceneNo);
     if (!isCardNewsModule) {
-      return generatedCandidates;
+      return [
+        ...generatedCandidates,
+        ...buildPackagePreviewFallbackCandidates(resolvedPackagePath)
+      ].map((candidate) => ({
+        ...candidate,
+        src: `${candidate.src}${candidate.src.includes("?") ? "&" : "?"}v=${assetPreviewVersion}`
+      }));
     }
 
     const configuredImagePath =
@@ -956,8 +1677,381 @@ export function GenerationPage() {
       ...generatedCandidates,
       { kind: "image" as const, src: buildCardNewsPlaceholderPreview(selectedScene.sceneNo) }
     ];
-  }, [editableDocument?.cardNews?.coverImagePath, editableDocument?.cardNews?.templateBackgroundPath, isCardNewsModule, resolvedPackagePath, selectedScene]);
+  }, [assetPreviewVersion, editableDocument?.cardNews?.coverImagePath, editableDocument?.cardNews?.templateBackgroundPath, isCardNewsModule, resolvedPackagePath, selectedScene]);
   const activePreviewAsset = sceneAssetCandidates[previewAssetIndex];
+  const getVideoMediaLayerSrc = (layer: SceneScriptVideoMediaLayer) => {
+    if (layer.localPath) {
+      return `${toFileUrl(layer.localPath)}?v=${assetPreviewVersion}`;
+    }
+    return layer.previewUrl || layer.sourceUrl || "";
+  };
+  const getAudioLayerSrc = (layer: SceneScriptAudioLayer) => {
+    if (layer.localPath) {
+      return `${toFileUrl(layer.localPath)}?v=${assetPreviewVersion}`;
+    }
+    if (layer.relativePath && resolvedPackagePath) {
+      return `${toFileUrl(`${resolvedPackagePath}\\${layer.relativePath}`)}?v=${assetPreviewVersion}`;
+    }
+    return "";
+  };
+  const activeVideoMediaLayers = useMemo(
+    () =>
+      videoMediaLayers.filter((layer) => {
+        const startSec = Math.max(0, Number(layer.startSec || 0));
+        const durationSec = Math.max(0.5, Number(layer.durationSec || 0.5));
+        return timelineTimeSec >= startSec && timelineTimeSec <= startSec + durationSec;
+      }),
+    [timelineTimeSec, videoMediaLayers]
+  );
+  useEffect(() => {
+    videoMediaLayersRef.current = videoMediaLayers;
+  }, [videoMediaLayers]);
+  useEffect(() => {
+    audioLayersRef.current = audioLayers;
+  }, [audioLayers]);
+  useEffect(() => {
+    timelineSegmentsRef.current = timelineSegments;
+  }, [timelineSegments]);
+  useEffect(() => {
+    selectedSceneNoRef.current = selectedSceneNo;
+  }, [selectedSceneNo]);
+  const syncMediaLayerVideo = (
+    layer: SceneScriptVideoMediaLayer,
+    video: HTMLVideoElement | null,
+    options?: { forceSeek?: boolean; controlPlayback?: boolean }
+  ) => {
+    if (!video || layer.mediaType !== "video") {
+      return;
+    }
+    const rawLocalTime = Math.max(0, timelineTimeSecRef.current - Math.max(0, Number(layer.startSec || 0)));
+    const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    const localTime = mediaDuration > 0 ? rawLocalTime % mediaDuration : rawLocalTime;
+    const drift = Math.abs(video.currentTime - localTime);
+    const seekThreshold = options?.forceSeek ? 0.05 : timelinePlaying ? 1.2 : 0.15;
+    if (Number.isFinite(localTime) && drift > seekThreshold) {
+      try {
+        video.currentTime = localTime;
+      } catch {
+        // Some remote media can reject early seeks until metadata is ready.
+      }
+    }
+    if (options?.controlPlayback === false) {
+      return;
+    }
+    if (timelinePlaying) {
+      void video.play().catch(() => undefined);
+    } else {
+      video.pause();
+    }
+  };
+  const syncAudioLayer = (
+    layer: SceneScriptAudioLayer,
+    audio: HTMLAudioElement | null,
+    options?: { forceSeek?: boolean; controlPlayback?: boolean }
+  ) => {
+    if (!audio) {
+      return;
+    }
+    const startSec = Math.max(0, Number(layer.startSec || 0));
+    const durationSec = Math.max(0.5, Number(layer.durationSec || 0.5));
+    const isActive = timelineTimeSecRef.current >= startSec && timelineTimeSecRef.current <= startSec + durationSec;
+    const localTime = Math.max(0, timelineTimeSecRef.current - startSec);
+    const drift = Math.abs(audio.currentTime - localTime);
+    const seekThreshold = options?.forceSeek ? 0.05 : timelinePlaying ? 0.8 : 0.12;
+    audio.volume = Math.max(0, Math.min(1, Number(layer.volume ?? 1)));
+    if (Number.isFinite(localTime) && drift > seekThreshold) {
+      try {
+        audio.currentTime = localTime;
+      } catch {
+        // Audio may reject seeks until metadata is available.
+      }
+    }
+    if (options?.controlPlayback === false) {
+      return;
+    }
+    if (timelinePlaying && isActive) {
+      void audio.play().catch(() => undefined);
+    } else {
+      audio.pause();
+    }
+  };
+  useEffect(() => {
+    if (isCardNewsModule || !activePreviewAsset || activePreviewAsset.kind !== "video") {
+      return;
+    }
+    if (timelinePlaying) {
+      return;
+    }
+    const video = previewVideoRef.current;
+    if (!video || !activeTimelineSegment) {
+      return;
+    }
+    const rawLocalTime = Math.max(0, Math.min(activeTimelineSegment.durationSec, timelineTimeSec - activeTimelineSegment.startSec));
+    const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    const localTime = mediaDuration > 0 ? rawLocalTime % mediaDuration : rawLocalTime;
+    if (Number.isFinite(localTime) && Math.abs(video.currentTime - localTime) > 0.15) {
+      video.currentTime = localTime;
+    }
+  }, [activePreviewAsset, activeTimelineSegment, isCardNewsModule, timelinePlaying, timelineTimeSec]);
+
+  useEffect(() => {
+    if (isCardNewsModule) {
+      return;
+    }
+    if (timelinePlaying) {
+      return;
+    }
+    videoMediaLayersRef.current
+      .filter((layer) => {
+        const startSec = Math.max(0, Number(layer.startSec || 0));
+        const durationSec = Math.max(0.5, Number(layer.durationSec || 0.5));
+        return timelineTimeSecRef.current >= startSec && timelineTimeSecRef.current <= startSec + durationSec;
+      })
+      .forEach((layer) => {
+      syncMediaLayerVideo(layer, mediaLayerVideoRefs.current[layer.id], { forceSeek: true });
+    });
+    audioLayersRef.current.forEach((layer) => {
+      syncAudioLayer(layer, audioLayerRefs.current[layer.id], { forceSeek: true });
+    });
+  }, [activeVideoMediaLayers, isCardNewsModule, timelinePlaying, timelineTimeSec]);
+
+  useEffect(() => {
+    if (!editableDocument) {
+      setTimelineTimeSec(0);
+      setTimelinePlaying(false);
+      return;
+    }
+    if (timelineTimeSec > totalDurationSec) {
+      setTimelineTimeSec(totalDurationSec);
+    }
+  }, [editableDocument, timelineTimeSec, totalDurationSec]);
+
+  useEffect(() => {
+    if (!timelinePlaying || isCardNewsModule) {
+      return;
+    }
+    let animationFrameId = 0;
+    let lastFrameAt = performance.now();
+    let lastStateSyncAt = 0;
+    const video = activePreviewAsset?.kind === "video" ? previewVideoRef.current : null;
+
+    if (video) {
+      video.loop = true;
+      void video.play().catch(() => {
+        // Timeline playback is driven by the editor clock, not by media playback.
+      });
+    }
+    activeVideoMediaLayers.forEach((layer) => {
+      syncMediaLayerVideo(layer, mediaLayerVideoRefs.current[layer.id], { forceSeek: true });
+    });
+    audioLayersRef.current.forEach((layer) => {
+      syncAudioLayer(layer, audioLayerRefs.current[layer.id], { forceSeek: true });
+    });
+
+    const tick = () => {
+      const now = performance.now();
+      const deltaSec = (now - lastFrameAt) / 1000;
+      lastFrameAt = now;
+      const nextGlobalTime = Math.min(totalDurationSec, timelineTimeSecRef.current + deltaSec);
+      timelineTimeSecRef.current = nextGlobalTime;
+      const segments = timelineSegmentsRef.current;
+      const nextSegment =
+        segments.find((segment) => nextGlobalTime >= segment.startSec && nextGlobalTime < segment.endSec) ??
+        segments[segments.length - 1];
+      if (nextSegment && nextSegment.scene.sceneNo !== selectedSceneNoRef.current) {
+        selectedSceneNoRef.current = nextSegment.scene.sceneNo;
+        setSelectedSceneNo(nextSegment.scene.sceneNo);
+      }
+      if (now - lastStateSyncAt > 120) {
+        lastStateSyncAt = now;
+        setTimelineTimeSec(nextGlobalTime);
+        audioLayersRef.current.forEach((layer) => {
+          syncAudioLayer(layer, audioLayerRefs.current[layer.id]);
+        });
+      }
+
+      if (nextGlobalTime >= totalDurationSec) {
+        timelineTimeSecRef.current = totalDurationSec;
+        setTimelineTimeSec(totalDurationSec);
+        setTimelinePlaying(false);
+        previewVideoRef.current?.pause();
+        return;
+      }
+
+      animationFrameId = window.requestAnimationFrame(tick);
+    };
+
+    animationFrameId = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      previewVideoRef.current?.pause();
+      Object.values(mediaLayerVideoRefs.current).forEach((layerVideo) => layerVideo?.pause());
+      Object.values(audioLayerRefs.current).forEach((audio) => audio?.pause());
+    };
+  }, [
+    activePreviewAsset,
+    isCardNewsModule,
+    timelinePlaying,
+    totalDurationSec
+  ]);
+
+  useEffect(() => {
+    if (!timelineResizeDrag) {
+      return;
+    }
+    const handlePointerMove = (event: PointerEvent) => {
+      const deltaSec =
+        (event.clientX - timelineResizeDrag.startClientX) *
+        timelineResizeDrag.secondsPerPixel *
+        TIMELINE_RESIZE_SENSITIVITY;
+      const scene = editableDocumentRef.current?.scenes.find((item) => item.sceneNo === timelineResizeDrag.sceneNo);
+      if (!scene) {
+        return;
+      }
+      if (timelineResizeDrag.kind === "audio-track") {
+        const layerId = timelineResizeDrag.layerId;
+        if (!layerId) {
+          return;
+        }
+        const laneDelta = Math.round((event.clientY - timelineResizeDrag.startClientY) / 26);
+        const nextTrackIndex = Math.max(0, (timelineResizeDrag.startTrackIndex ?? 0) + laneDelta);
+        const nextStartSec = roundTimelineSeconds(
+          Math.max(
+            0,
+            Math.min(
+              Math.max(0, totalDurationSec - timelineResizeDrag.startDurationSec),
+              (timelineResizeDrag.startLayerStartSec ?? 0) + deltaSec
+            )
+          )
+        );
+        updateAudioLayer(layerId, {
+          trackIndex: nextTrackIndex,
+          startSec: nextStartSec
+        });
+        return;
+      }
+      if (timelineResizeDrag.kind === "audio-duration") {
+        const layerId = timelineResizeDrag.layerId;
+        if (!layerId) {
+          return;
+        }
+        const startSec = timelineResizeDrag.startLayerStartSec ?? 0;
+        const maxDuration = Math.max(0.5, totalDurationSec - startSec);
+        updateAudioLayer(layerId, {
+          durationSec: Math.min(maxDuration, roundTimelineSeconds(timelineResizeDrag.startDurationSec + deltaSec, 0.5))
+        });
+        return;
+      }
+      if (timelineResizeDrag.kind === "media-track") {
+        const layerId = timelineResizeDrag.layerId;
+        if (!layerId) {
+          return;
+        }
+        const laneDelta = Math.round((event.clientY - timelineResizeDrag.startClientY) / 26);
+        const nextTrackIndex = Math.max(0, (timelineResizeDrag.startTrackIndex ?? 0) + laneDelta);
+        const nextStartSec = roundTimelineSeconds(
+          Math.max(
+            0,
+            Math.min(
+              Math.max(0, totalDurationSec - timelineResizeDrag.startDurationSec),
+              (timelineResizeDrag.startLayerStartSec ?? 0) + deltaSec
+            )
+          )
+        );
+        updateVideoMediaLayer(layerId, {
+          trackIndex: nextTrackIndex,
+          startSec: nextStartSec
+        });
+        return;
+      }
+      if (timelineResizeDrag.kind === "media-duration") {
+        const layerId = timelineResizeDrag.layerId;
+        if (!layerId) {
+          return;
+        }
+        const startSec = timelineResizeDrag.startLayerStartSec ?? 0;
+        const maxDuration = Math.max(0.5, totalDurationSec - startSec);
+        updateVideoMediaLayer(layerId, {
+          durationSec: Math.min(maxDuration, roundTimelineSeconds(timelineResizeDrag.startDurationSec + deltaSec, 0.5))
+        });
+        return;
+      }
+      if (timelineResizeDrag.kind === "text-track") {
+        const laneDelta = Math.round((event.clientY - timelineResizeDrag.startClientY) / 26);
+        const nextTrackIndex = Math.max(0, (timelineResizeDrag.startTrackIndex ?? 0) + laneDelta);
+        const nextStartSec = roundTimelineSeconds(
+          Math.max(
+            0,
+            Math.min(
+              Math.max(0, Number(scene.durationSec || 1) - timelineResizeDrag.startDurationSec),
+              (timelineResizeDrag.startTextStartSec ?? 0) + deltaSec
+            )
+          )
+        );
+        updateVideoTextOverlay(
+          scene.sceneNo,
+          {
+            trackIndex: nextTrackIndex,
+            startSec: nextStartSec
+          },
+          timelineResizeDrag.overlayIndex ?? 0
+        );
+        return;
+      }
+      if (timelineResizeDrag.kind === "scene-duration") {
+        const nextDurationSec = roundTimelineSeconds(timelineResizeDrag.startDurationSec + deltaSec, 1);
+        setTimelineResizeDrag((current) =>
+          current && current.kind === "scene-duration"
+            ? {
+                ...current,
+                previewDurationSec: nextDurationSec
+              }
+            : current
+        );
+        return;
+      }
+      const textStartSec = timelineResizeDrag.startTextStartSec ?? 0;
+      const maxDuration = Math.max(0.5, Number(scene.durationSec || 1) - textStartSec);
+      updateVideoTextTiming(
+        scene,
+        {
+          durationSec: Math.min(maxDuration, roundTimelineSeconds(timelineResizeDrag.startDurationSec + deltaSec, 0.5))
+        },
+        timelineResizeDrag.overlayIndex ?? 0
+      );
+    };
+    const handlePointerUp = () => {
+      setTimelineResizeDrag((current) => {
+        if (current?.kind === "scene-duration") {
+          updateSceneDuration(current.sceneNo, current.previewDurationSec ?? current.startDurationSec);
+        }
+        return null;
+      });
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [timelineResizeDrag]);
+
+  useEffect(() => {
+    if (!timelineSeekDrag) {
+      return;
+    }
+    const handlePointerMove = (event: PointerEvent) => {
+      seekTimelineFromClientX(event.clientX);
+    };
+    const handlePointerUp = () => setTimelineSeekDrag(false);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [timelineSeekDrag, totalDurationSec, timelineSegments, selectedSceneNo]);
+
   const getCardNewsRailPreviewSrc = (scene: SceneScriptItem): string => {
     const configuredImagePath =
       scene.cardTemplateImagePath?.trim() ||
@@ -979,6 +2073,12 @@ export function GenerationPage() {
   }, [selectedSceneNo, resolvedPackagePath]);
 
   useEffect(() => {
+    if (selectedScene?.assetSearchQuery && !pixabayQuery) {
+      setPixabayQuery(selectedScene.assetSearchQuery);
+    }
+  }, [pixabayQuery, selectedScene?.assetSearchQuery]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!resolvedPackagePath || !editableDocument || editableDocument.scenes.length === 0) {
       setHasGeneratedAssets(false);
@@ -987,9 +2087,12 @@ export function GenerationPage() {
 
     const detectGeneratedAssets = async () => {
       for (const scene of editableDocument.scenes) {
-        const candidates = buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo);
+        const candidates = [
+          ...buildScenePreviewCandidates(resolvedPackagePath, scene.sceneNo),
+          ...buildPackagePreviewFallbackCandidates(resolvedPackagePath)
+        ];
         for (const candidate of candidates) {
-          // Detect from actual scene files so we can switch UI only after generation.
+          // Detect actual generated media, including single-background composer packages.
           const exists = await probePreviewAsset(candidate.kind, candidate.src);
           if (exists) {
             if (!cancelled) {
@@ -1704,6 +2807,186 @@ export function GenerationPage() {
   }, [cardDesignDrag]);
 
   useEffect(() => {
+    if (!videoTextDrag) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      const stage = document.querySelector<HTMLElement>(".video-canvas-frame");
+      const bounds = stage?.getBoundingClientRect();
+      if (!bounds) {
+        return;
+      }
+      const scene = editableDocumentRef.current?.scenes.find((item) => item.sceneNo === videoTextDrag.sceneNo);
+      const overlay = getSceneVideoTextOverlays(scene)[videoTextDrag.overlayIndex] ?? DEFAULT_VIDEO_TEXT_OVERLAY;
+      const deltaXPct = ((event.clientX - videoTextDrag.startClientX) / Math.max(1, bounds.width)) * 100;
+      const deltaYPct = ((event.clientY - videoTextDrag.startClientY) / Math.max(1, bounds.height)) * 100;
+      let nextXPct = Math.max(0, Math.min(100 - overlay.widthPct, videoTextDrag.startXPct + deltaXPct));
+      let nextYPct = Math.max(0, Math.min(100 - overlay.heightPct, videoTextDrag.startYPct + deltaYPct));
+      const nextGuides: { verticalPct?: number; horizontalPct?: number } = {};
+      const otherOverlays = getSceneVideoTextOverlays(scene).filter((_, index) => index !== videoTextDrag.overlayIndex);
+      const xTargets = [
+        0,
+        50,
+        100,
+        ...otherOverlays.flatMap((item) => [
+          item.xPct,
+          item.xPct + item.widthPct / 2,
+          item.xPct + item.widthPct
+        ])
+      ];
+      const yTargets = [
+        0,
+        50,
+        100,
+        ...otherOverlays.flatMap((item) => [
+          item.yPct,
+          item.yPct + item.heightPct / 2,
+          item.yPct + item.heightPct
+        ])
+      ];
+      for (const target of xTargets) {
+        const currentPoints = [
+          { value: nextXPct, offset: 0 },
+          { value: nextXPct + overlay.widthPct / 2, offset: overlay.widthPct / 2 },
+          { value: nextXPct + overlay.widthPct, offset: overlay.widthPct }
+        ];
+        const match = currentPoints.find((point) => Math.abs(point.value - target) <= CANVAS_SNAP_THRESHOLD_PCT);
+        if (match) {
+          nextXPct = Math.max(0, Math.min(100 - overlay.widthPct, target - match.offset));
+          nextGuides.verticalPct = target;
+          break;
+        }
+      }
+      for (const target of yTargets) {
+        const currentPoints = [
+          { value: nextYPct, offset: 0 },
+          { value: nextYPct + overlay.heightPct / 2, offset: overlay.heightPct / 2 },
+          { value: nextYPct + overlay.heightPct, offset: overlay.heightPct }
+        ];
+        const match = currentPoints.find((point) => Math.abs(point.value - target) <= CANVAS_SNAP_THRESHOLD_PCT);
+        if (match) {
+          nextYPct = Math.max(0, Math.min(100 - overlay.heightPct, target - match.offset));
+          nextGuides.horizontalPct = target;
+          break;
+        }
+      }
+      setSnapGuides(nextGuides);
+      updateVideoTextOverlay(
+        videoTextDrag.sceneNo,
+        {
+          xPct: Number(nextXPct.toFixed(2)),
+          yPct: Number(nextYPct.toFixed(2))
+        },
+        videoTextDrag.overlayIndex
+      );
+    };
+    const onMouseUp = () => {
+      setVideoTextDrag(null);
+      setSnapGuides({});
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [videoTextDrag]);
+
+  useEffect(() => {
+    if (!videoMediaDrag) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      const stage = document.querySelector<HTMLElement>(".video-canvas-frame");
+      const bounds = stage?.getBoundingClientRect();
+      const layer = editableDocumentRef.current?.videoMediaLayers?.find(
+        (item) => item.id === videoMediaDrag.layerId
+      );
+      if (!bounds || !layer) {
+        return;
+      }
+      const box = getVideoMediaLayerBox(layer);
+      const deltaXPct = ((event.clientX - videoMediaDrag.startClientX) / Math.max(1, bounds.width)) * 100;
+      const deltaYPct = ((event.clientY - videoMediaDrag.startClientY) / Math.max(1, bounds.height)) * 100;
+      let nextXPct = Math.max(box.widthPct / 2, Math.min(100 - box.widthPct / 2, videoMediaDrag.startXPct + deltaXPct));
+      let nextYPct = Math.max(box.heightPct / 2, Math.min(100 - box.heightPct / 2, videoMediaDrag.startYPct + deltaYPct));
+      const nextGuides: { verticalPct?: number; horizontalPct?: number } = {};
+      const otherLayers = (editableDocumentRef.current?.videoMediaLayers ?? []).filter(
+        (item) => item.id !== videoMediaDrag.layerId
+      );
+      const xTargets = [
+        0,
+        50,
+        100,
+        ...otherLayers.flatMap((item) => {
+          const otherBox = getVideoMediaLayerBox(item);
+          return [
+            otherBox.xPct - otherBox.widthPct / 2,
+            otherBox.xPct,
+            otherBox.xPct + otherBox.widthPct / 2
+          ];
+        })
+      ];
+      const yTargets = [
+        0,
+        50,
+        100,
+        ...otherLayers.flatMap((item) => {
+          const otherBox = getVideoMediaLayerBox(item);
+          return [
+            otherBox.yPct - otherBox.heightPct / 2,
+            otherBox.yPct,
+            otherBox.yPct + otherBox.heightPct / 2
+          ];
+        })
+      ];
+      const movingXPoints = [
+        { offset: -box.widthPct / 2, apply: (target: number) => target + box.widthPct / 2 },
+        { offset: 0, apply: (target: number) => target },
+        { offset: box.widthPct / 2, apply: (target: number) => target - box.widthPct / 2 }
+      ];
+      const movingYPoints = [
+        { offset: -box.heightPct / 2, apply: (target: number) => target + box.heightPct / 2 },
+        { offset: 0, apply: (target: number) => target },
+        { offset: box.heightPct / 2, apply: (target: number) => target - box.heightPct / 2 }
+      ];
+      for (const point of movingXPoints) {
+        const currentPoint = nextXPct + point.offset;
+        const target = xTargets.find((candidate) => Math.abs(candidate - currentPoint) <= CANVAS_SNAP_THRESHOLD_PCT);
+        if (target !== undefined) {
+          nextXPct = Math.max(box.widthPct / 2, Math.min(100 - box.widthPct / 2, point.apply(target)));
+          nextGuides.verticalPct = target;
+          break;
+        }
+      }
+      for (const point of movingYPoints) {
+        const currentPoint = nextYPct + point.offset;
+        const target = yTargets.find((candidate) => Math.abs(candidate - currentPoint) <= CANVAS_SNAP_THRESHOLD_PCT);
+        if (target !== undefined) {
+          nextYPct = Math.max(box.heightPct / 2, Math.min(100 - box.heightPct / 2, point.apply(target)));
+          nextGuides.horizontalPct = target;
+          break;
+        }
+      }
+      setSnapGuides(nextGuides);
+      updateVideoMediaLayer(videoMediaDrag.layerId, {
+        xPct: Number(nextXPct.toFixed(2)),
+        yPct: Number(nextYPct.toFixed(2))
+      });
+    };
+    const onMouseUp = () => {
+      setVideoMediaDrag(null);
+      setSnapGuides({});
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [videoMediaDrag, timelinePlaying]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isCardNewsModule) {
         return;
@@ -1789,16 +3072,6 @@ export function GenerationPage() {
     });
   };
 
-  const updateSubtitleStyle = (patch: Partial<SceneScriptSubtitleStyle>) => {
-    applyDocumentUpdate((current) => ({
-      ...current,
-      subtitleStyle: {
-        ...current.subtitleStyle,
-        ...patch
-      }
-    }));
-  };
-
   const updateVoiceProfile = (patch: Partial<SceneScriptVoiceProfile>) => {
     applyDocumentUpdate((current) => ({
       ...current,
@@ -1834,6 +3107,96 @@ export function GenerationPage() {
         },
         cardNews: nextCardNews
       };
+    });
+  };
+
+  const addVideoTextOverlay = (scene: SceneScriptItem) => {
+    const overlays = getSceneVideoTextOverlays(scene);
+    const nextIndex = overlays.length;
+    const nextOverlay: SceneScriptVideoTextOverlay = {
+      ...DEFAULT_VIDEO_TEXT_OVERLAY,
+      durationSec: Math.min(5, Math.max(1, Number(scene.durationSec || 1))),
+      text: DEFAULT_VIDEO_TEXT_OVERLAY.text,
+      xPct: Math.min(70, DEFAULT_VIDEO_TEXT_OVERLAY.xPct + nextIndex * 5),
+      yPct: Math.min(75, DEFAULT_VIDEO_TEXT_OVERLAY.yPct + nextIndex * 7),
+      trackIndex: nextIndex
+    };
+    const nextOverlays = [...overlays, nextOverlay];
+    updateScene(scene.sceneNo, {
+      videoTextOverlay: nextOverlays[0],
+      videoTextOverlays: nextOverlays
+    });
+    setSelectedVideoTextIndex(nextIndex);
+    setEditingVideoText({ sceneNo: scene.sceneNo, overlayIndex: nextIndex });
+    setEditorTab("text");
+  };
+
+  const updateVideoTextOverlay = (
+    sceneNo: number,
+    patch: Partial<SceneScriptVideoTextOverlay>,
+    overlayIndex = selectedVideoTextIndex
+  ) => {
+    applyDocumentUpdate((current) => {
+      const scenes = current.scenes.map((scene) => {
+        if (scene.sceneNo !== sceneNo) {
+          return scene;
+        }
+        const overlays = getSceneVideoTextOverlays(scene);
+        const safeIndex = Math.max(0, Math.min(overlayIndex, Math.max(0, overlays.length - 1)));
+        const base = overlays.length > 0 ? overlays : [{ ...DEFAULT_VIDEO_TEXT_OVERLAY }];
+        const nextOverlays = base.map((overlay, index) =>
+          index === safeIndex
+            ? {
+                ...DEFAULT_VIDEO_TEXT_OVERLAY,
+                ...overlay,
+                ...patch
+              }
+            : overlay
+        );
+        return {
+          ...scene,
+          videoTextOverlay: nextOverlays[0],
+          videoTextOverlays: nextOverlays
+        };
+      });
+      return { ...current, scenes };
+    });
+  };
+
+  const removeVideoTextOverlay = (sceneNo: number, overlayIndex = selectedVideoTextIndex) => {
+    applyDocumentUpdate((current) => ({
+      ...current,
+      scenes: current.scenes.map((scene) => {
+        if (scene.sceneNo !== sceneNo) {
+          return scene;
+        }
+        const nextOverlays = getSceneVideoTextOverlays(scene).filter((_, index) => index !== overlayIndex);
+        return {
+          ...scene,
+          videoTextOverlay: nextOverlays[0],
+          videoTextOverlays: nextOverlays
+        };
+      })
+    }));
+    setSelectedVideoTextIndex(Math.max(0, overlayIndex - 1));
+    setEditingVideoText(null);
+  };
+
+  const beginVideoTextDrag = (event: ReactMouseEvent<HTMLDivElement>, scene: SceneScriptItem, overlayIndex: number) => {
+    const overlay = getSceneVideoTextOverlays(scene)[overlayIndex];
+    if (!overlay || event.button !== 0 || editingVideoText?.sceneNo === scene.sceneNo) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedVideoTextIndex(overlayIndex);
+    setVideoTextDrag({
+      sceneNo: scene.sceneNo,
+      overlayIndex,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startXPct: overlay.xPct,
+      startYPct: overlay.yPct
     });
   };
 
@@ -1928,6 +3291,297 @@ export function GenerationPage() {
       );
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleSearchPixabayAssets = async () => {
+    const apiKey = pixabayApiKeyDraft.trim();
+    const query = pixabayQuery.trim() || selectedScene?.assetSearchQuery?.trim() || "";
+    setPixabayBusy(true);
+    setMessage("");
+    try {
+      if (apiKey !== (workflowConfig?.pixabayApiKey ?? "")) {
+        await saveWorkflowConfig({ pixabayApiKey: apiKey });
+      }
+      const results = await searchPixabayAssets({
+        apiKey,
+        query,
+        mediaType: pixabayMediaType,
+        perPage: 12
+      });
+      setPixabayResults(results);
+      setPixabayQuery(query);
+      setMessage(
+        results.length > 0
+          ? isKorean
+            ? `Pixabay에서 ${results.length}개 소재를 찾았습니다.`
+            : `Found ${results.length} Pixabay assets.`
+          : isKorean
+            ? "검색 결과가 없습니다. 다른 키워드를 시도해 주세요."
+            : "No results. Try another keyword."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "Pixabay 검색에 실패했습니다."
+            : "Pixabay search failed."
+      );
+    } finally {
+      setPixabayBusy(false);
+    }
+  };
+
+  const handleApplyPixabayAsset = async (asset: PixabayAssetResult) => {
+    if (!resolvedPackagePath) {
+      setMessage(isKorean ? "선택된 패키지가 없습니다." : "No package selected.");
+      return;
+    }
+    setPixabayBusy(true);
+    setMessage("");
+    try {
+      const result = await importPixabayAsset({
+        packagePath: resolvedPackagePath,
+        asset,
+        applyToScene: false
+      });
+      const layerStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
+      const layerDurationSec = Math.min(
+        Math.max(0.5, Number(asset.durationSec ?? 5) || 5),
+        Math.max(0.5, totalDurationSec - layerStartSec)
+      );
+      const nextLayer: SceneScriptVideoMediaLayer = {
+        id: buildLayerId("media"),
+        mediaType: asset.mediaType,
+        source: "pixabay",
+        label: asset.title || asset.tags || `${asset.mediaType} asset`,
+        localPath: result.localPath,
+        relativePath: result.relativePath,
+        sourceUrl: asset.sourceUrl || asset.downloadUrl,
+        previewUrl: asset.previewUrl,
+        startSec: layerStartSec,
+        durationSec: layerDurationSec,
+        trackIndex: 0,
+        fit: "cover",
+        opacity: 1,
+        xPct: 50,
+        yPct: 50,
+        widthPct: 100,
+        heightPct: 100
+      };
+      applyDocumentUpdate((current) => ({
+        ...current,
+        videoMediaLayers: [...(current.videoMediaLayers ?? []), nextLayer],
+        scenes: current.scenes
+      }));
+      setSelectedVideoMediaLayerId(nextLayer.id);
+      setAssetPreviewVersion((current) => current + 1);
+      setMessage(
+        isKorean
+          ? `${formatTimelineSeconds(layerStartSec)} 지점에 소재 레이어를 추가했습니다: ${result.relativePath}`
+          : `Added asset as a timeline layer at ${formatTimelineSeconds(layerStartSec)}: ${result.relativePath}`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "Pixabay 소재 적용에 실패했습니다."
+            : "Failed to apply Pixabay asset."
+      );
+    } finally {
+      setPixabayBusy(false);
+    }
+  };
+
+  const handleDownloadPixabayAsset = async (asset: PixabayAssetResult) => {
+    if (!resolvedPackagePath) {
+      setMessage(isKorean ? "선택된 패키지가 없습니다." : "No package selected.");
+      return;
+    }
+    setPixabayBusy(true);
+    setMessage("");
+    try {
+      const result = await importPixabayAsset({
+        packagePath: resolvedPackagePath,
+        asset,
+        applyToScene: false
+      });
+      setMessage(
+        isKorean
+          ? `소재를 라이브러리에 저장했습니다: ${result.relativePath}`
+          : `Downloaded asset to library: ${result.relativePath}`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "Pixabay 소재 다운로드에 실패했습니다."
+            : "Failed to download Pixabay asset."
+      );
+    } finally {
+      setPixabayBusy(false);
+    }
+  };
+
+  const handleAddVideoIconLayer = (icon: (typeof VIDEO_ICON_LIBRARY)[number]) => {
+    if (!editableDocument) {
+      setMessage(isKorean ? "편집할 씬 스크립트가 없습니다." : "No scene script is loaded.");
+      return;
+    }
+    const layerStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
+    const nextLayer: SceneScriptVideoMediaLayer = {
+      id: buildLayerId("icon"),
+      mediaType: "icon",
+      source: "manual",
+      label: isKorean ? icon.labelKo : icon.labelEn,
+      previewUrl: icon.dataUrl,
+      startSec: layerStartSec,
+      durationSec: Math.min(5, Math.max(0.5, totalDurationSec - layerStartSec)),
+      trackIndex: videoMediaTrackCount,
+      fit: "contain",
+      opacity: 1,
+      xPct: 50,
+      yPct: 50,
+      widthPct: 16,
+      heightPct: 16
+    };
+    applyDocumentUpdate((current) => ({
+      ...current,
+      videoMediaLayers: [...(current.videoMediaLayers ?? []), nextLayer]
+    }));
+    setSelectedVideoMediaLayerId(nextLayer.id);
+    setMessage(
+      isKorean
+        ? `${formatTimelineSeconds(layerStartSec)} 지점에 픽토그램을 추가했습니다.`
+        : `Added an icon at ${formatTimelineSeconds(layerStartSec)}.`
+    );
+  };
+
+  const handleGenerateVoiceLayer = async () => {
+    if (!resolvedPackagePath || !editableDocument) {
+      setMessage(isKorean ? "선택된 패키지가 없습니다." : "No package selected.");
+      return;
+    }
+    const text = voiceLayerText.trim() || selectedScene?.text.trim() || "";
+    if (!text) {
+      setMessage(isKorean ? "음성으로 만들 문장을 입력해 주세요." : "Enter text to generate voice.");
+      return;
+    }
+    setVoiceLayerBusy(true);
+    setMessage("");
+    try {
+      const result = await generateVoiceLayer({
+        packagePath: resolvedPackagePath,
+        text,
+        voiceProfile: editableDocument.voiceProfile
+      });
+      const layerStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
+      const durationSec = Math.min(
+        Math.max(0.5, Number(result.durationSec ?? 5) || 5),
+        Math.max(0.5, totalDurationSec - layerStartSec)
+      );
+      const nextLayer: SceneScriptAudioLayer = {
+        id: buildLayerId("voice"),
+        source: "tts",
+        label: text.slice(0, 32) || (isKorean ? "AI 음성" : "AI Voice"),
+        localPath: result.localPath,
+        relativePath: result.relativePath,
+        startSec: layerStartSec,
+        durationSec,
+        trackIndex: audioTrackCount,
+        volume: 1
+      };
+      applyDocumentUpdate((current) => ({
+        ...current,
+        audioLayers: [...(current.audioLayers ?? []), nextLayer]
+      }));
+      setSelectedAudioLayerId(nextLayer.id);
+      setAssetPreviewVersion((current) => current + 1);
+      setMessage(
+        isKorean
+          ? `${formatTimelineSeconds(layerStartSec)} 지점에 음성 레이어를 추가했습니다.`
+          : `Added voice layer at ${formatTimelineSeconds(layerStartSec)}.`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "음성 생성에 실패했습니다."
+            : "Failed to generate voice."
+      );
+    } finally {
+      setVoiceLayerBusy(false);
+    }
+  };
+
+  const handleImportLocalAsset = async (applyToScene: boolean) => {
+    if (!resolvedPackagePath) {
+      setMessage(isKorean ? "선택된 패키지가 없습니다." : "No package selected.");
+      return;
+    }
+    setPixabayBusy(true);
+    setMessage("");
+    try {
+      const result = await importLocalAsset({
+        packagePath: resolvedPackagePath,
+        applyToScene: false
+      });
+      if (!result) {
+        return;
+      }
+      if (applyToScene) {
+        const layerStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
+        const layerDurationSec = Math.min(
+          Math.max(0.5, 5),
+          Math.max(0.5, totalDurationSec - layerStartSec)
+        );
+        const nextLayer: SceneScriptVideoMediaLayer = {
+          id: buildLayerId("media"),
+          mediaType: result.mediaType,
+          source: "local",
+          label: result.relativePath,
+          localPath: result.localPath,
+          relativePath: result.relativePath,
+          startSec: layerStartSec,
+          durationSec: layerDurationSec,
+          trackIndex: 0,
+          fit: "cover",
+          opacity: 1,
+          xPct: 50,
+          yPct: 50,
+          widthPct: 100,
+          heightPct: 100
+        };
+        applyDocumentUpdate((current) => ({
+          ...current,
+          videoMediaLayers: [...(current.videoMediaLayers ?? []), nextLayer]
+        }));
+        setSelectedVideoMediaLayerId(nextLayer.id);
+        setAssetPreviewVersion((current) => current + 1);
+      }
+      setMessage(
+        applyToScene
+          ? isKorean
+            ? `${formatTimelineSeconds(timelineTimeSecRef.current)} 지점에 내 파일 레이어를 추가했습니다: ${result.relativePath}`
+            : `Added local file as a timeline layer at ${formatTimelineSeconds(timelineTimeSecRef.current)}: ${result.relativePath}`
+          : isKorean
+            ? `내 파일을 라이브러리에 저장했습니다: ${result.relativePath}`
+            : `Saved local file to library: ${result.relativePath}`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "내 파일 가져오기에 실패했습니다."
+            : "Failed to import local file."
+      );
+    } finally {
+      setPixabayBusy(false);
     }
   };
 
@@ -2032,7 +3686,7 @@ export function GenerationPage() {
 
   return (
     <GenerationErrorBoundary>
-    <section className="page">
+    <section className="page generation-page">
       <div className="hero">
         <div>
           <p className="eyebrow">{copy.eyebrow}</p>
@@ -2078,14 +3732,14 @@ export function GenerationPage() {
         !hasGeneratedAssets && !isCardNewsModule ? (
           <div className="card generation-prebuild">
             <div className="card-row">
-              <strong>{isKorean ? "ìƒì„± ì „ íŽ¸ì§‘" : "Pre-generation Edit"}</strong>
+              <strong>{isKorean ? "생성 전 편집" : "Pre-generation Edit"}</strong>
               <span className="pill">
                 {moduleCopy.sceneLabel} {selectedScene?.sceneNo ?? "-"}
               </span>
             </div>
             <p className="subtle">
               {isKorean
-                ? "ìžì‚° ìƒì„± ì „ì—ëŠ” ìŠ¤í¬ë¦½íŠ¸, í”„ë¡¬í”„íŠ¸, ê¸¸ì´ë§Œ ë¹ ë¥´ê²Œ ìˆ˜ì •í•  ìˆ˜ ìžˆìŠµë‹ˆë‹¤. ì´ë¯¸ì§€/ì˜ìƒì´ ìƒì„±ë˜ë©´ ê³ ê¸‰ íŽ¸ì§‘ í™”ë©´ìœ¼ë¡œ ìžë™ ì „í™˜ë©ë‹ˆë‹¤."
+                ? "자산 생성 전에는 스크립트, 프롬프트, 길이만 빠르게 수정할 수 있습니다. 이미지/영상이 생성되면 고급 편집 화면으로 자동 전환됩니다."
                 : "Before assets are generated, you can quickly edit script, prompt, and duration. The advanced editor opens automatically after generation."}
             </p>
 
@@ -2117,10 +3771,10 @@ export function GenerationPage() {
                     <span className="subtle">
                       {selectedScene.sceneNo === 1
                         ? isKorean
-                          ? "1ìž¥ì€ ì–´ê·¸ë¡œ ì»¤ë²„ ì¹´ë“œìž…ë‹ˆë‹¤. ì´ë¯¸ì§€/í”„ë¡¬í”„íŠ¸ ì¤‘ì‹¬ìœ¼ë¡œ íŽ¸ì§‘í•˜ì„¸ìš”."
+                          ? "1장은 어그로 커버 카드입니다. 이미지/프롬프트 중심으로 편집하세요."
                           : "Card 1 is the hook cover card. Focus on image/prompt."
                         : isKorean
-                          ? "2ìž¥ ì´í›„ëŠ” í…œí”Œë¦¿ ì¹´ë“œìž…ë‹ˆë‹¤. ë³¸ë¬¸ í…ìŠ¤íŠ¸ ì¤‘ì‹¬ìœ¼ë¡œ íŽ¸ì§‘í•˜ì„¸ìš”."
+                          ? "2장 이후는 템플릿 카드입니다. 본문 텍스트 중심으로 편집하세요."
                           : "Card 2+ are template cards. Focus on copy text."}
                     </span>
                   </div>
@@ -2185,7 +3839,7 @@ export function GenerationPage() {
             )}
           </div>
         ) : (
-        <div className={isCardNewsModule ? "generation-shell generation-shell--canvas" : "generation-shell"}>
+        <div className={isCardNewsModule ? "generation-shell generation-shell--canvas" : "generation-shell generation-shell--video"}>
           <div className="generation-editor card">
             <div className="generation-editor-header">
               <div>
@@ -2193,8 +3847,8 @@ export function GenerationPage() {
                 <h4>{moduleCopy.pageTitle}</h4>
                 <p className="subtle">
                   {isCardNewsModule ? `${editableDocument.scenes.length} cards` : isKorean
-                    ? `ì”¬ ${editableDocument.scenes.length}ê°œ Â· ì´ ${totalDurationSec}ì´ˆ`
-                    : `${editableDocument.scenes.length} scenes Â· ${totalDurationSec}s total`}
+                    ? `씬 ${editableDocument.scenes.length}개 · 총 ${formatTimelineSeconds(totalDurationSec)}`
+                    : `${editableDocument.scenes.length} scenes · ${formatTimelineSeconds(totalDurationSec)} total`}
                 </p>
               </div>
             </div>
@@ -2210,10 +3864,10 @@ export function GenerationPage() {
                 </button>
                 <button
                   type="button"
-                  className={editorTab === "subtitle" ? "pill-button active" : "pill-button"}
-                  onClick={() => setEditorTab("subtitle")}
+                  className={editorTab === "text" ? "pill-button active" : "pill-button"}
+                  onClick={() => setEditorTab("text")}
                 >
-                  {isKorean ? "Subtitle" : "Subtitle"}
+                  Text
                 </button>
                 <button
                   type="button"
@@ -2330,6 +3984,151 @@ export function GenerationPage() {
 
                 {!isCardNewsModule ? (
                   <>
+                    <details className="asset-library-panel" open>
+                      <summary className="asset-library-summary">
+                        <span>{isKorean ? "소재 라이브러리" : "Asset Library"}</span>
+                        <span className="pill">Pixabay · Local</span>
+                      </summary>
+                      <div className="asset-library-body">
+                        <p className="subtle">
+                          {isKorean
+                            ? "Pixabay 검색 또는 내 파일을 현재 재생 위치에 요소 레이어로 추가합니다. 씬은 흰 도화지처럼 유지됩니다."
+                            : "Search Pixabay or import local files as timeline element layers at the playhead. Scenes stay as a blank canvas."}
+                        </p>
+                        <div className="asset-library-local-row">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            disabled={pixabayBusy}
+                            onClick={() => void handleImportLocalAsset(true)}
+                          >
+                            {isKorean ? "내 파일 요소 추가" : "Add Local Element"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            disabled={pixabayBusy}
+                            onClick={() => void handleImportLocalAsset(false)}
+                          >
+                            {isKorean ? "내 파일 저장만" : "Save Local Only"}
+                          </button>
+                        </div>
+                        <details className="icon-library-panel" open>
+                          <summary className="icon-library-summary">
+                            <span>{isKorean ? "픽토그램 · 아이콘" : "Pictograms · Icons"}</span>
+                          </summary>
+                          <div className="icon-library-body">
+                            <input
+                              className="text-input"
+                              type="text"
+                              value={videoIconSearch}
+                              onChange={(event) => setVideoIconSearch(event.target.value)}
+                              placeholder={isKorean ? "아이콘 검색: 주의, 돈, 세계..." : "Search icons: alert, money, world..."}
+                            />
+                            <div className="icon-library-grid">
+                              {filteredVideoIcons.map((icon) => (
+                                <button
+                                  key={icon.id}
+                                  type="button"
+                                  className="icon-library-item"
+                                  onClick={() => handleAddVideoIconLayer(icon)}
+                                  title={isKorean ? icon.labelKo : icon.labelEn}
+                                >
+                                  <img src={icon.dataUrl} alt={isKorean ? icon.labelKo : icon.labelEn} />
+                                  <span>{isKorean ? icon.labelKo : icon.labelEn}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </details>
+                        <div className="asset-library-controls">
+                          <label className="field">
+                            <span>{isKorean ? "Pixabay API Key" : "Pixabay API Key"}</span>
+                            <input
+                              className="text-input"
+                              type="password"
+                              value={pixabayApiKeyDraft}
+                              onChange={(event) => setPixabayApiKeyDraft(event.target.value)}
+                              onBlur={() => void saveWorkflowConfig({ pixabayApiKey: pixabayApiKeyDraft.trim() })}
+                              placeholder="Pixabay API Key"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>{isKorean ? "검색어" : "Search Query"}</span>
+                            <input
+                              className="text-input"
+                              type="text"
+                              value={pixabayQuery}
+                              onChange={(event) => setPixabayQuery(event.target.value)}
+                              placeholder={selectedScene?.assetSearchQuery || "cinematic background"}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>{isKorean ? "유형" : "Type"}</span>
+                            <select
+                              className="text-input"
+                              value={pixabayMediaType}
+                              onChange={(event) =>
+                                setPixabayMediaType(event.target.value as "video" | "image")
+                              }
+                            >
+                              <option value="video">{isKorean ? "영상" : "Video"}</option>
+                              <option value="image">{isKorean ? "이미지" : "Image"}</option>
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            className="primary-button"
+                            disabled={pixabayBusy}
+                            onClick={() => void handleSearchPixabayAssets()}
+                          >
+                            {pixabayBusy
+                              ? isKorean
+                                ? "검색 중"
+                                : "Searching"
+                              : isKorean
+                                ? "소재 검색"
+                                : "Search Assets"}
+                          </button>
+                        </div>
+                        {pixabayResults.length > 0 ? (
+                          <div className="asset-library-results">
+                            {pixabayResults.map((asset) => (
+                              <article key={`${asset.mediaType}-${asset.id}`} className="asset-library-card">
+                                <div className="asset-library-thumb">
+                                  {asset.mediaType === "video" ? (
+                                    <video
+                                      src={asset.downloadUrl}
+                                      poster={asset.previewUrl || undefined}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                    />
+                                  ) : asset.previewUrl ? (
+                                    <img src={asset.previewUrl} alt={asset.title} />
+                                  ) : (
+                                    <span>{asset.mediaType}</span>
+                                )}
+                              </div>
+                                <span className="asset-library-duration">
+                                  {asset.durationSec ? `${asset.durationSec}s` : asset.mediaType}
+                                </span>
+                                <div className="button-row">
+                                  <button
+                                    type="button"
+                                    className="secondary-button"
+                                    disabled={pixabayBusy}
+                                    onClick={() => void handleApplyPixabayAsset(asset)}
+                                  >
+                                    {isKorean ? "요소 추가" : "Add Element"}
+                                  </button>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
                     <div className="card-row">
                       <strong>{moduleCopy.sceneList}</strong>
                       <span className="pill">{editableDocument.scenes.length}</span>
@@ -3000,8 +4799,129 @@ export function GenerationPage() {
               </>
             )}
 
-            {!isCardNewsModule && editorTab === "subtitle" && (
+            {!isCardNewsModule && editorTab === "text" && (
               <>
+                <h4>{isKorean ? "텍스트" : "Text"}</h4>
+                <p className="subtle">
+                  {isKorean
+                    ? "캔버스 위에 텍스트를 올리고 직접 드래그해서 배치합니다."
+                    : "Place text on the canvas and drag it into position."}
+                </p>
+                {selectedScene ? (
+                  <>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => addVideoTextOverlay(selectedScene)}
+                    >
+                      {isKorean ? "텍스트 박스 추가" : "Add Text Box"}
+                    </button>
+                    {selectedVideoTextOverlays.length > 0 ? (
+                      <div className="button-row">
+                        {selectedVideoTextOverlays.map((overlay, index) => (
+                          <button
+                            key={`video-text-picker-${selectedScene.sceneNo}-${index}`}
+                            type="button"
+                            className={index === selectedVideoTextIndex ? "chip-button active" : "chip-button"}
+                            onClick={() => setSelectedVideoTextIndex(index)}
+                          >
+                            {isKorean ? `텍스트 ${index + 1}` : `Text ${index + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {selectedVideoTextOverlay ? (
+                      <div className="form-grid">
+                        <p className="subtle field-span-2">
+                          {isKorean
+                            ? "문구는 왼쪽 입력칸이 아니라, 미리보기의 텍스트 박스를 더블클릭해서 직접 수정합니다."
+                            : "Edit wording by double-clicking the text box directly on the preview."}
+                        </p>
+                        <label className="field">
+                          <span>{isKorean ? "시작(초)" : "Start"}</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={selectedScene.durationSec}
+                            step={0.1}
+                            value={selectedVideoTextOverlay.startSec ?? 0}
+                            onChange={(event) =>
+                              updateVideoTextTiming(selectedScene, { startSec: Number(event.target.value) || 0 })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{isKorean ? "길이(초)" : "Duration"}</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0.5}
+                            max={selectedScene.durationSec}
+                            step={0.1}
+                            value={selectedVideoTextOverlay.durationSec ?? selectedScene.durationSec}
+                            onChange={(event) =>
+                              updateVideoTextTiming(selectedScene, { durationSec: Number(event.target.value) || 0.5 })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{copy.fontSize}</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={12}
+                            max={180}
+                            value={selectedVideoTextOverlay.fontSize}
+                            onChange={(event) =>
+                              updateVideoTextOverlay(selectedScene.sceneNo, {
+                                fontSize: Math.max(12, Number(event.target.value) || 12)
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{copy.textColor}</span>
+                          <input
+                            className="text-input"
+                            type="color"
+                            value={selectedVideoTextOverlay.textColor}
+                            onChange={(event) =>
+                              updateVideoTextOverlay(selectedScene.sceneNo, { textColor: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{copy.outline}</span>
+                          <input
+                            className="text-input"
+                            type="number"
+                            min={0}
+                            max={24}
+                            value={selectedVideoTextOverlay.outlineThickness}
+                            onChange={(event) =>
+                              updateVideoTextOverlay(selectedScene.sceneNo, {
+                                outlineThickness: Math.max(0, Number(event.target.value) || 0)
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{copy.outlineColor}</span>
+                          <input
+                            className="text-input"
+                            type="color"
+                            value={selectedVideoTextOverlay.outlineColor}
+                            onChange={(event) =>
+                              updateVideoTextOverlay(selectedScene.sceneNo, { outlineColor: event.target.value })
+                            }
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+
                 <h4>{copy.presetTitle}</h4>
                 <p className="subtle">{copy.presetSubtitle}</p>
                 {sceneStylePresets.length === 0 ? (
@@ -3025,101 +4945,43 @@ export function GenerationPage() {
                   </div>
                 )}
 
-                <h4>{copy.subtitleStyleTitle}</h4>
-                <div className="form-grid">
-                  <div className="field">
-                    <span>{copy.subtitleMode}</span>
-                    <select
-                      className="text-input"
-                      value={editableDocument.subtitleStyle.mode}
-                      onChange={(event) =>
-                        updateSubtitleStyle({
-                          mode: event.target.value as SceneScriptSubtitleStyle["mode"]
-                        })
-                      }
-                    >
-                      {SUBTITLE_MODE_OPTIONS.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <span>{copy.fontFamily}</span>
-                    <input
-                      className="text-input"
-                      type="text"
-                      value={editableDocument.subtitleStyle.fontFamily}
-                      onChange={(event) =>
-                        updateSubtitleStyle({
-                          fontFamily: event.target.value
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <span>{copy.fontSize}</span>
-                    <input
-                      className="text-input"
-                      type="number"
-                      min={8}
-                      max={120}
-                      value={editableDocument.subtitleStyle.fontSize}
-                      onChange={(event) =>
-                        updateSubtitleStyle({
-                          fontSize: Math.max(8, Number(event.target.value) || 8)
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <span>{copy.outline}</span>
-                    <input
-                      className="text-input"
-                      type="number"
-                      min={0}
-                      max={20}
-                      value={editableDocument.subtitleStyle.outline}
-                      onChange={(event) =>
-                        updateSubtitleStyle({
-                          outline: Math.max(0, Number(event.target.value) || 0)
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <span>{copy.textColor}</span>
-                    <input
-                      className="text-input"
-                      type="text"
-                      value={editableDocument.subtitleStyle.color}
-                      onChange={(event) =>
-                        updateSubtitleStyle({
-                          color: event.target.value
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <span>{copy.outlineColor}</span>
-                    <input
-                      className="text-input"
-                      type="text"
-                      value={editableDocument.subtitleStyle.outlineColor}
-                      onChange={(event) =>
-                        updateSubtitleStyle({
-                          outlineColor: event.target.value
-                        })
-                      }
-                    />
-                  </div>
-                </div>
               </>
             )}
 
             {editorTab === "voice" && !isCardNewsModule && (
               <>
+                <h4>{isKorean ? "음성 레이어" : "Voice Layer"}</h4>
+                <p className="subtle">
+                  {isKorean
+                    ? "입력한 문장을 TTS로 생성해서 현재 재생 위치에 VOICE 트랙으로 추가합니다."
+                    : "Generate TTS from text and add it to the VOICE track at the playhead."}
+                </p>
+                <div className="form-grid">
+                  <label className="field field-span-2">
+                    <span>{isKorean ? "음성 문장" : "Voice Text"}</span>
+                    <textarea
+                      className="text-input textarea-input"
+                      rows={5}
+                      value={voiceLayerText}
+                      onChange={(event) => setVoiceLayerText(event.target.value)}
+                      placeholder={selectedScene?.text || (isKorean ? "음성으로 만들 문장을 입력하세요." : "Enter text to synthesize.")}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-button field-span-2"
+                    disabled={voiceLayerBusy}
+                    onClick={() => void handleGenerateVoiceLayer()}
+                  >
+                    {voiceLayerBusy
+                      ? isKorean
+                        ? "음성 생성 중"
+                        : "Generating Voice"
+                      : isKorean
+                        ? "음성 생성 후 타임라인 추가"
+                        : "Generate Voice Layer"}
+                  </button>
+                </div>
                 <h4>{copy.voiceProfileTitle}</h4>
                 <div className="form-grid">
                   <div className="field">
@@ -3140,19 +5002,30 @@ export function GenerationPage() {
                       ))}
                     </select>
                   </div>
-                  <div className="field">
-                    <span>{copy.voiceModelId}</span>
-                    <input
-                      className="text-input"
-                      type="text"
-                      value={editableDocument.voiceProfile.modelId ?? ""}
-                      onChange={(event) =>
-                        updateVoiceProfile({
-                          modelId: event.target.value || undefined
-                        })
-                      }
-                    />
-                  </div>
+                  {editableDocument.voiceProfile.provider !== "azure" ? (
+                    <div className="field">
+                      <span>{copy.voiceModelId}</span>
+                      <input
+                        className="text-input"
+                        type="text"
+                        value={editableDocument.voiceProfile.modelId ?? ""}
+                        onChange={(event) =>
+                          updateVoiceProfile({
+                            modelId: event.target.value || undefined
+                          })
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div className="generation-preview-prompt field-span-2">
+                      <p className="eyebrow">{isKorean ? "Azure 음성 안내" : "Azure Voice Note"}</p>
+                      <p>
+                        {isKorean
+                          ? "Azure Speech는 모델 ID를 쓰지 않고 Voice ID만 사용합니다. 예: ko-KR-SunHiNeural, ko-KR-HyunsuNeural"
+                          : "Azure Speech uses Voice ID only, not Model ID. Example: ko-KR-SunHiNeural, ko-KR-HyunsuNeural"}
+                      </p>
+                    </div>
+                  )}
                   <div className="field">
                     <span>{copy.voiceId}</span>
                     <input
@@ -3233,7 +5106,7 @@ export function GenerationPage() {
 
           <div className="generation-preview card">
             <div className="card-row">
-              <strong>{isKorean ? "Preview" : "Preview"}</strong>
+              <strong>{isCardNewsModule ? (isKorean ? "Preview" : "Preview") : isKorean ? "영상 캔버스" : "Video Canvas"}</strong>
               <div className="button-row">
                 <span className="pill">
                   {moduleCopy.sceneLabel} {selectedScene?.sceneNo ?? "-"}
@@ -3265,6 +5138,48 @@ export function GenerationPage() {
               <p className="subtle">{copy.selectScene}</p>
             ) : (
               <>
+                {!isCardNewsModule ? (
+                  <div className="video-edit-toolbar" aria-label={isKorean ? "영상 편집 도구" : "Video edit tools"}>
+                    <button
+                      type="button"
+                      className={editorTab === "scene" ? "video-tool-button active" : "video-tool-button"}
+                      onClick={() => setEditorTab("scene")}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className={editorTab === "text" ? "video-tool-button active" : "video-tool-button"}
+                      onClick={() => setEditorTab("text")}
+                    >
+                      Text
+                    </button>
+                    <button
+                      type="button"
+                      className={editorTab === "voice" ? "video-tool-button active" : "video-tool-button"}
+                      onClick={() => setEditorTab("voice")}
+                    >
+                      Voice
+                    </button>
+                    <span className="video-toolbar-divider" />
+                    <label className="video-tool-chip video-tool-duration-chip">
+                      <input
+                        aria-label={isKorean ? "선택 씬 길이" : "Selected scene duration"}
+                        type="number"
+                        min={1}
+                        max={600}
+                        step={0.05}
+                        value={selectedScene.durationSec}
+                        onChange={(event) =>
+                          updateSceneDuration(selectedScene.sceneNo, Number(event.target.value))
+                        }
+                      />
+                      <span>s</span>
+                    </label>
+                    <span className="video-tool-chip">{selectedScene.motion}</span>
+                    <span className="video-tool-chip">1920 × 1080</span>
+                  </div>
+                ) : null}
                 <div className="generation-preview-banner">
                   <p className="subtle">
                     {isCardNewsModule
@@ -3272,8 +5187,8 @@ export function GenerationPage() {
                         ? "카드를 직접 보면서 편집하세요. Ctrl+휠로 확대/축소, 우클릭 드래그로 이동할 수 있습니다."
                         : "Edit while previewing the card. Ctrl+wheel zooms, right-drag pans."
                       : isKorean
-                        ? "선택한 씬의 내레이션, 키워드, 모션을 확인하세요."
-                        : "Quickly review selected scene narration, keyword, and motion here."}
+                        ? "프리뷰에서 씬 결과를 크게 확인하고, 아래 타임라인에서 장면을 바꿉니다."
+                        : "Review the scene in a larger preview, then switch scenes from the timeline below."}
                   </p>
                 </div>
 
@@ -3364,7 +5279,7 @@ export function GenerationPage() {
                       }
                     }}
                   >
-                  {activePreviewAsset ? (
+                  {isCardNewsModule && activePreviewAsset ? (
                     activePreviewAsset.kind === "image" ? (
                       <div
                         ref={isCardNewsModule ? previewStageRef : null}
@@ -3381,7 +5296,7 @@ export function GenerationPage() {
                         }
                       >
                         <div
-                          className={isCardNewsModule ? "generation-card-stage" : undefined}
+                          className={isCardNewsModule ? "generation-card-stage" : "video-canvas-frame"}
                           style={
                             isCardNewsModule
                               ? { transform: `scale(${cardStageScale})` }
@@ -3397,6 +5312,82 @@ export function GenerationPage() {
                               )
                             }
                           />
+                          {!isCardNewsModule
+                            ? selectedVideoTextOverlays.map((overlay, overlayIndex) => {
+                                const localTime = timelineTimeSec - (activeTimelineSegment?.startSec ?? 0);
+                                const isVisible =
+                                  localTime >= (overlay.startSec ?? 0) &&
+                                  localTime <= (overlay.startSec ?? 0) + (overlay.durationSec ?? selectedScene.durationSec);
+                                if (!isVisible) {
+                                  return null;
+                                }
+                                const isEditing =
+                                  editingVideoText?.sceneNo === selectedScene.sceneNo &&
+                                  editingVideoText.overlayIndex === overlayIndex;
+                                return (
+                                  <div
+                                    key={`video-text-${selectedScene.sceneNo}-${overlayIndex}-${isEditing ? "edit" : "view"}`}
+                                    className={[
+                                      "video-text-overlay",
+                                      overlayIndex === selectedVideoTextIndex ? "is-active" : "",
+                                      isEditing ? "is-editing" : ""
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" ")}
+                                    contentEditable={isEditing}
+                                    suppressContentEditableWarning={isEditing}
+                                    spellCheck={false}
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    data-gramm="false"
+                                    data-gramm_editor="false"
+                                    onDoubleClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelectedVideoTextIndex(overlayIndex);
+                                      setEditingVideoText({ sceneNo: selectedScene.sceneNo, overlayIndex });
+                                      window.setTimeout(() => {
+                                        const target = event.currentTarget;
+                                        target.focus();
+                                        const range = document.createRange();
+                                        range.selectNodeContents(target);
+                                        range.collapse(false);
+                                        const selection = window.getSelection();
+                                        selection?.removeAllRanges();
+                                        selection?.addRange(range);
+                                      }, 0);
+                                    }}
+                                    onMouseDown={(event) => beginVideoTextDrag(event, selectedScene, overlayIndex)}
+                                    onBlur={(event) => {
+                                      updateVideoTextOverlay(selectedScene.sceneNo, { text: event.currentTarget.innerText }, overlayIndex);
+                                      setEditingVideoText(null);
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (!isEditing) {
+                                        return;
+                                      }
+                                      event.stopPropagation();
+                                      if (event.key === "Escape") {
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                    style={{
+                                      left: `${overlay.xPct}%`,
+                                      top: `${overlay.yPct}%`,
+                                      width: `${overlay.widthPct}%`,
+                                      height: `${overlay.heightPct}%`,
+                                      color: overlay.textColor,
+                                      fontSize: overlay.fontSize,
+                                      fontWeight: overlay.fontWeight,
+                                      WebkitTextStroke: `${overlay.outlineThickness}px ${overlay.outlineColor}`,
+                                      textShadow: `0 4px 18px ${overlay.outlineColor}`,
+                                      background: overlay.backgroundColor ?? "transparent"
+                                    }}
+                                  >
+                                    {overlay.text}
+                                  </div>
+                                );
+                              })
+                            : null}
                           {isCardNewsModule
                             ? previewCardDesignBoxes.map((box) => {
                               const sourceIndex = box._sourceIndex;
@@ -3680,18 +5671,299 @@ export function GenerationPage() {
                         </div>
                       </div>
                     ) : (
-                      <video
-                        src={activePreviewAsset.src}
-                        controls
-                        muted
-                        playsInline
-                        onError={() =>
-                          setPreviewAssetIndex((current) =>
-                            Math.min(current + 1, sceneAssetCandidates.length)
-                          )
-                        }
-                      />
+                      <div className="video-canvas-frame">
+                        {activePreviewAsset.kind === "video" ? (
+                          <video
+                            ref={previewVideoRef}
+                            src={activePreviewAsset.src}
+                            muted
+                            loop
+                            playsInline
+                            preload="metadata"
+                            onError={() =>
+                              setPreviewAssetIndex((current) =>
+                                Math.min(current + 1, sceneAssetCandidates.length)
+                              )
+                            }
+                          />
+                        ) : (
+                          <img
+                            src={activePreviewAsset.src}
+                            alt={isKorean ? "씬 미리보기" : "Scene preview"}
+                            onError={() =>
+                              setPreviewAssetIndex((current) =>
+                                Math.min(current + 1, sceneAssetCandidates.length)
+                              )
+                            }
+                          />
+                        )}
+                        {activeVideoMediaLayers.map((layer) => {
+                          const src = getVideoMediaLayerSrc(layer);
+                          if (!src) {
+                            return null;
+                          }
+                          const box = getVideoMediaLayerBox(layer);
+                          const style: CSSProperties = {
+                            position: "absolute",
+                            left: `${box.xPct}%`,
+                            top: `${box.yPct}%`,
+                            zIndex: 2,
+                            width: `${box.widthPct}%`,
+                            height: `${box.heightPct}%`,
+                            transform: "translate(-50%, -50%)",
+                            objectFit: layer.fit ?? "cover",
+                            opacity: layer.opacity ?? 1,
+                            pointerEvents: "auto",
+                            cursor: timelinePlaying ? "default" : "grab"
+                          };
+                          return layer.mediaType === "video" ? (
+                            <video
+                              key={layer.id}
+                              ref={(element) => {
+                                mediaLayerVideoRefs.current[layer.id] = element;
+                              }}
+                              className={layer.id === selectedVideoMediaLayerId ? "video-media-layer is-active" : "video-media-layer"}
+                              src={src}
+                              muted
+                              playsInline
+                              loop
+                              preload="metadata"
+                              onLoadedMetadata={(event) =>
+                                syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true })
+                              }
+                              onCanPlay={(event) =>
+                                syncMediaLayerVideo(layer, event.currentTarget, { controlPlayback: false })
+                              }
+                              onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
+                              style={style}
+                            />
+                          ) : (
+                            <img
+                              key={layer.id}
+                              className={layer.id === selectedVideoMediaLayerId ? "video-media-layer is-active" : "video-media-layer"}
+                              src={src}
+                              alt={layer.label ?? "media layer"}
+                              onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
+                              style={style}
+                            />
+                          );
+                        })}
+                        {selectedVideoTextOverlays.map((overlay, overlayIndex) => {
+                          const localTime = timelineTimeSec - (activeTimelineSegment?.startSec ?? 0);
+                          const isVisible =
+                            localTime >= (overlay.startSec ?? 0) &&
+                            localTime <= (overlay.startSec ?? 0) + (overlay.durationSec ?? selectedScene.durationSec);
+                          if (!isVisible) {
+                            return null;
+                          }
+                          const isEditing =
+                            editingVideoText?.sceneNo === selectedScene.sceneNo &&
+                            editingVideoText.overlayIndex === overlayIndex;
+                          return (
+                            <div
+                              key={`video-text-${selectedScene.sceneNo}-${overlayIndex}-${isEditing ? "edit" : "view"}`}
+                              className={[
+                                "video-text-overlay",
+                                overlayIndex === selectedVideoTextIndex ? "is-active" : "",
+                                isEditing ? "is-editing" : ""
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              contentEditable={isEditing}
+                              suppressContentEditableWarning={isEditing}
+                              spellCheck={false}
+                              autoCorrect="off"
+                              autoCapitalize="off"
+                              data-gramm="false"
+                              data-gramm_editor="false"
+                              onDoubleClick={(event) => {
+                                event.stopPropagation();
+                                setSelectedVideoTextIndex(overlayIndex);
+                                setEditingVideoText({ sceneNo: selectedScene.sceneNo, overlayIndex });
+                                window.setTimeout(() => {
+                                  const target = event.currentTarget;
+                                  target.focus();
+                                  const range = document.createRange();
+                                  range.selectNodeContents(target);
+                                  range.collapse(false);
+                                  const selection = window.getSelection();
+                                  selection?.removeAllRanges();
+                                  selection?.addRange(range);
+                                }, 0);
+                              }}
+                              onMouseDown={(event) => beginVideoTextDrag(event, selectedScene, overlayIndex)}
+                              onBlur={(event) => {
+                                updateVideoTextOverlay(selectedScene.sceneNo, { text: event.currentTarget.innerText }, overlayIndex);
+                                setEditingVideoText(null);
+                              }}
+                              onKeyDown={(event) => {
+                                if (!isEditing) {
+                                  return;
+                                }
+                                event.stopPropagation();
+                                if (event.key === "Escape") {
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              style={{
+                                left: `${overlay.xPct}%`,
+                                top: `${overlay.yPct}%`,
+                                width: `${overlay.widthPct}%`,
+                                height: `${overlay.heightPct}%`,
+                                color: overlay.textColor,
+                                fontSize: overlay.fontSize,
+                                fontWeight: overlay.fontWeight,
+                                WebkitTextStroke: `${overlay.outlineThickness}px ${overlay.outlineColor}`,
+                                textShadow: `0 4px 18px ${overlay.outlineColor}`,
+                                background: overlay.backgroundColor ?? "transparent"
+                              }}
+                            >
+                              {overlay.text}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )
+                  ) : !isCardNewsModule ? (
+                    <div className="video-canvas-frame video-canvas-frame--blank">
+                      {activeVideoMediaLayers.map((layer) => {
+                        const src = getVideoMediaLayerSrc(layer);
+                        if (!src) {
+                          return null;
+                        }
+                        const box = getVideoMediaLayerBox(layer);
+                        const style: CSSProperties = {
+                          position: "absolute",
+                          left: `${box.xPct}%`,
+                          top: `${box.yPct}%`,
+                          zIndex: 2,
+                          width: `${box.widthPct}%`,
+                          height: `${box.heightPct}%`,
+                          transform: "translate(-50%, -50%)",
+                          objectFit: layer.fit ?? "cover",
+                          opacity: layer.opacity ?? 1,
+                          pointerEvents: "auto",
+                          cursor: timelinePlaying ? "default" : "grab"
+                        };
+                        return layer.mediaType === "video" ? (
+                          <video
+                            key={layer.id}
+                            ref={(element) => {
+                              mediaLayerVideoRefs.current[layer.id] = element;
+                            }}
+                            className={layer.id === selectedVideoMediaLayerId ? "video-media-layer is-active" : "video-media-layer"}
+                            src={src}
+                            muted
+                            playsInline
+                            loop
+                            preload="metadata"
+                            onLoadedMetadata={(event) =>
+                              syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true })
+                            }
+                            onCanPlay={(event) =>
+                              syncMediaLayerVideo(layer, event.currentTarget, { controlPlayback: false })
+                            }
+                            onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
+                            style={style}
+                          />
+                        ) : (
+                          <img
+                            key={layer.id}
+                            className={layer.id === selectedVideoMediaLayerId ? "video-media-layer is-active" : "video-media-layer"}
+                            src={src}
+                            alt={layer.label ?? "media layer"}
+                            onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
+                            style={style}
+                          />
+                        );
+                      })}
+                      {selectedVideoTextOverlays.map((overlay, overlayIndex) => {
+                        const localTime = timelineTimeSec - (activeTimelineSegment?.startSec ?? 0);
+                        const isVisible =
+                          localTime >= (overlay.startSec ?? 0) &&
+                          localTime <= (overlay.startSec ?? 0) + (overlay.durationSec ?? selectedScene.durationSec);
+                        if (!isVisible) {
+                          return null;
+                        }
+                        const isEditing =
+                          editingVideoText?.sceneNo === selectedScene.sceneNo &&
+                          editingVideoText.overlayIndex === overlayIndex;
+                        return (
+                          <div
+                            key={`video-text-${selectedScene.sceneNo}-${overlayIndex}-${isEditing ? "edit" : "view"}`}
+                            className={[
+                              "video-text-overlay",
+                              overlayIndex === selectedVideoTextIndex ? "is-active" : "",
+                              isEditing ? "is-editing" : ""
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            contentEditable={isEditing}
+                            suppressContentEditableWarning={isEditing}
+                            spellCheck={false}
+                            autoCorrect="off"
+                            autoCapitalize="off"
+                            data-gramm="false"
+                            data-gramm_editor="false"
+                            onDoubleClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedVideoTextIndex(overlayIndex);
+                              setEditingVideoText({ sceneNo: selectedScene.sceneNo, overlayIndex });
+                              window.setTimeout(() => {
+                                const target = event.currentTarget;
+                                target.focus();
+                                const range = document.createRange();
+                                range.selectNodeContents(target);
+                                range.collapse(false);
+                                const selection = window.getSelection();
+                                selection?.removeAllRanges();
+                                selection?.addRange(range);
+                              }, 0);
+                            }}
+                            onMouseDown={(event) => beginVideoTextDrag(event, selectedScene, overlayIndex)}
+                            onBlur={(event) => {
+                              updateVideoTextOverlay(selectedScene.sceneNo, { text: event.currentTarget.innerText }, overlayIndex);
+                              setEditingVideoText(null);
+                            }}
+                            onKeyDown={(event) => {
+                              if (!isEditing) {
+                                return;
+                              }
+                              event.stopPropagation();
+                              if (event.key === "Escape") {
+                                event.currentTarget.blur();
+                              }
+                            }}
+                            style={{
+                              left: `${overlay.xPct}%`,
+                              top: `${overlay.yPct}%`,
+                              width: `${overlay.widthPct}%`,
+                              height: `${overlay.heightPct}%`,
+                              color: overlay.textColor,
+                              fontSize: overlay.fontSize,
+                              fontWeight: overlay.fontWeight,
+                              WebkitTextStroke: `${overlay.outlineThickness}px ${overlay.outlineColor}`,
+                              textShadow: `0 4px 18px ${overlay.outlineColor}`,
+                              background: overlay.backgroundColor ?? "transparent"
+                            }}
+                          >
+                            {overlay.text}
+                          </div>
+                        );
+                      })}
+                      {snapGuides.verticalPct !== undefined ? (
+                        <div
+                          className="canvas-snap-guide canvas-snap-guide--vertical"
+                          style={{ left: `${snapGuides.verticalPct}%` }}
+                        />
+                      ) : null}
+                      {snapGuides.horizontalPct !== undefined ? (
+                        <div
+                          className="canvas-snap-guide canvas-snap-guide--horizontal"
+                          style={{ top: `${snapGuides.horizontalPct}%` }}
+                        />
+                      ) : null}
+                    </div>
                   ) : (
                     <p className="subtle">
                       {isKorean ? "아직 미리보기 이미지가 없습니다." : "No generated scene preview is available yet."}
@@ -3700,25 +5972,19 @@ export function GenerationPage() {
                   </div>
                 </div>
 
-                <div className="meta-list">
-                  {!isCardNewsModule || selectedScene.sceneNo === 1 ? (
-                    <div>
-                      <strong>{moduleCopy.assetSearchQuery}</strong>
-                      <span>{selectedScene.assetSearchQuery || "-"}</span>
-                    </div>
-                  ) : (
-                    <div>
-                      <strong>{isKorean ? "카드 배경" : "Card Background"}</strong>
-                      <span>{isKorean ? "선택한 템플릿 또는 공통 배경 사용" : "Selected template or shared background"}</span>
-                    </div>
-                  )}
-                  {!isCardNewsModule ? (
-                    <div>
-                      <strong>{copy.motion}</strong>
-                      <span>{selectedScene.motion}</span>
-                    </div>
-                  ) : null}
-                  {isCardNewsModule ? (
+                {isCardNewsModule ? (
+                  <div className="meta-list">
+                    {selectedScene.sceneNo === 1 ? (
+                      <div>
+                        <strong>{moduleCopy.assetSearchQuery}</strong>
+                        <span>{selectedScene.assetSearchQuery || "-"}</span>
+                      </div>
+                    ) : (
+                      <div>
+                        <strong>{isKorean ? "카드 배경" : "Card Background"}</strong>
+                        <span>{isKorean ? "선택한 템플릿 또는 공통 배경 사용" : "Selected template or shared background"}</span>
+                      </div>
+                    )}
                     <>
                       <div>
                         <strong>{isKorean ? "레이아웃" : "Layout"}</strong>
@@ -3733,38 +5999,321 @@ export function GenerationPage() {
                         <span>{editableDocument.cardNews?.outputFormat ?? "square_1_1"}</span>
                       </div>
                     </>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
 
-                <div className="generation-preview-text">
-                  <p className="eyebrow">{textFieldLabel}</p>
-                  <p>{selectedScene.text}</p>
-                </div>
+                {isCardNewsModule ? (
+                  <div className="generation-preview-text">
+                    <p className="eyebrow">{textFieldLabel}</p>
+                    <p>{selectedScene.text}</p>
+                  </div>
+                ) : null}
 
                 {!isCardNewsModule ? (
-                  <div className="generation-preview-prompt">
-                    <p className="eyebrow">{moduleCopy.fluxPrompt}</p>
-                    <p>{selectedScene.fluxPrompt}</p>
+                  <div className="audio-layer-sinks" aria-hidden="true">
+                    {audioLayers.map((layer) => {
+                      const src = getAudioLayerSrc(layer);
+                      if (!src) {
+                        return null;
+                      }
+                      return (
+                        <audio
+                          key={`audio-layer-${layer.id}`}
+                          ref={(element) => {
+                            audioLayerRefs.current[layer.id] = element;
+                          }}
+                          src={src}
+                          preload="metadata"
+                          onLoadedMetadata={(event) =>
+                            syncAudioLayer(layer, event.currentTarget, {
+                              forceSeek: true,
+                              controlPlayback: false
+                            })
+                          }
+                        />
+                      );
+                    })}
                   </div>
                 ) : null}
 
                 <div className="generation-timeline">
-                  <p className="eyebrow">{isKorean ? "Timeline" : "Timeline"}</p>
-                  {editableDocument.scenes.map((scene) => (
-                    <div
-                      key={`timeline-${scene.sceneNo}`}
-                      className={
-                        scene.sceneNo === selectedScene.sceneNo
-                          ? "generation-timeline-item active"
-                          : "generation-timeline-item"
-                      }
-                    >
-                      <span>
-                        {moduleCopy.sceneLabel} {scene.sceneNo}
-                      </span>
-                      {!isCardNewsModule ? <span>{scene.durationSec}s</span> : null}
-                    </div>
-                  ))}
+                  {!isCardNewsModule ? (
+                    <>
+                      <div className="video-timeline-header">
+                        <div className="video-timeline-playback">
+                          <button
+                            type="button"
+                            className="video-play-button"
+                            onClick={() => {
+                              if (timelineTimeSec >= totalDurationSec) {
+                                seekTimeline(0);
+                              }
+                              setTimelinePlaying((value) => !value);
+                            }}
+                          >
+                            {timelinePlaying ? "⏸" : "▶"}
+                          </button>
+                          <p className="eyebrow">{isKorean ? "Timeline" : "Timeline"}</p>
+                        </div>
+                        <strong>
+                          {Math.floor(timelineTimeSec / 60)}:{String(Math.floor(timelineTimeSec % 60)).padStart(2, "0")} /{" "}
+                          {Math.floor(totalDurationSec / 60)}:{String(Math.floor(totalDurationSec % 60)).padStart(2, "0")}
+                        </strong>
+                      </div>
+                      <div
+                        className="video-timeline-ruler"
+                        onMouseDown={(event) => {
+                          if (event.button !== 0) {
+                            return;
+                          }
+                          setTimelineSeekDrag(true);
+                          seekTimelineFromClientX(event.clientX);
+                        }}
+                      >
+                        {timelineTickMarks.map((tick) => (
+                          <span
+                            key={`timeline-tick-${tick}`}
+                            style={{ left: `${(tick / timelineDisplayDurationSec) * 100}%` }}
+                          >
+                            {tick}s
+                          </span>
+                        ))}
+                      </div>
+                      <div
+                        className="video-timeline-track"
+                        ref={timelineTrackRef}
+                        onMouseDown={(event) => {
+                          if (event.button !== 0 || (event.target as HTMLElement).closest("button")) {
+                            return;
+                          }
+                          setTimelineSeekDrag(true);
+                          seekTimelineFromClientX(event.clientX);
+                        }}
+                      >
+                        {timelineSegments.map((segment) => {
+                          const displaySegment = getTimelineDisplaySegment(segment.scene.sceneNo) ?? segment;
+                          return (
+                            <div
+                              key={`timeline-segment-${segment.scene.sceneNo}`}
+                              className={
+                                segment.scene.sceneNo === selectedScene.sceneNo
+                                  ? "video-timeline-segment active"
+                                  : "video-timeline-segment"
+                              }
+                              style={{
+                                left: `${(displaySegment.startSec / timelineDisplayDurationSec) * 100}%`,
+                                width: `${(displaySegment.durationSec / timelineDisplayDurationSec) * 100}%`
+                              }}
+                            >
+                              <button type="button" onClick={() => seekTimeline(segment.startSec)}>
+                                <span>{moduleCopy.sceneLabel} {segment.scene.sceneNo}</span>
+                                <small>{formatTimelineSeconds(segment.durationSec)}</small>
+                              </button>
+                              <span className="video-timeline-duration-badge">{formatTimelineSeconds(segment.durationSec)}</span>
+                              <button
+                                type="button"
+                                className="video-timeline-resize-handle"
+                                aria-label={`${moduleCopy.sceneLabel} ${segment.scene.sceneNo} length resize`}
+                                onMouseDown={(event) => beginTimelineSceneResize(event, segment.scene)}
+                              />
+                            </div>
+                          );
+                        })}
+                        <span
+                          className="video-timeline-playhead"
+                          style={{ left: `${(timelineTimeSec / timelineDisplayDurationSec) * 100}%` }}
+                        />
+                      </div>
+                      {videoMediaLayers.length > 0 ? (
+                        <div className="video-element-track video-media-track">
+                          <span className="video-track-label">Media</span>
+                          <div
+                            className="video-element-track-lane"
+                            style={{
+                              height: `${Math.max(70, 12 + videoMediaTrackCount * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT)}px`
+                            }}
+                          >
+                            {videoMediaLayers.map((layer) => {
+                              const startSec = Math.max(0, Math.min(totalDurationSec - 0.5, Number(layer.startSec || 0)));
+                              const durationSec = Math.max(
+                                0.5,
+                                Math.min(totalDurationSec - startSec, Number(layer.durationSec || 0.5))
+                              );
+                              const trackIndex = Math.max(0, Number(layer.trackIndex ?? 0) || 0);
+                              return (
+                                <div
+                                  key={`media-track-${layer.id}`}
+                                  className={[
+                                    "video-element-clip",
+                                    "video-media-clip",
+                                    layer.id === selectedVideoMediaLayerId ? "active" : ""
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  style={{
+                                    left: `${(startSec / timelineDisplayDurationSec) * 100}%`,
+                                    width: `${(durationSec / timelineDisplayDurationSec) * 100}%`,
+                                    top: `${6 + trackIndex * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT}px`
+                                  }}
+                                  onMouseDown={(event) => beginTimelineMediaTrackMove(event, layer)}
+                                  onClick={() => {
+                                    setSelectedVideoMediaLayerId(layer.id);
+                                    seekTimeline(startSec);
+                                  }}
+                                >
+                                  <span>{layer.label || (layer.mediaType === "video" ? "Video" : "Image")}</span>
+                                  <small>{formatTimelineSeconds(startSec)} · {formatTimelineSeconds(durationSec)}</small>
+                                  <button
+                                    type="button"
+                                    className="video-element-resize-handle"
+                                    aria-label={`Media length resize ${layer.label ?? layer.id}`}
+                                    onMouseDown={(event) => beginTimelineMediaResize(event, layer)}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                      {audioLayers.length > 0 ? (
+                        <div className="video-element-track video-audio-track">
+                          <span className="video-track-label">Voice</span>
+                          <div
+                            className="video-element-track-lane"
+                            style={{
+                              height: `${Math.max(70, 12 + audioTrackCount * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT)}px`
+                            }}
+                          >
+                            {audioLayers.map((layer) => {
+                              const startSec = Math.max(0, Math.min(totalDurationSec - 0.5, Number(layer.startSec || 0)));
+                              const durationSec = Math.max(
+                                0.5,
+                                Math.min(totalDurationSec - startSec, Number(layer.durationSec || 0.5))
+                              );
+                              const trackIndex = Math.max(0, Number(layer.trackIndex ?? 0) || 0);
+                              return (
+                                <div
+                                  key={`audio-track-${layer.id}`}
+                                  className={[
+                                    "video-element-clip",
+                                    "video-audio-clip",
+                                    layer.id === selectedAudioLayerId ? "active" : ""
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  style={{
+                                    left: `${(startSec / timelineDisplayDurationSec) * 100}%`,
+                                    width: `${(durationSec / timelineDisplayDurationSec) * 100}%`,
+                                    top: `${6 + trackIndex * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT}px`
+                                  }}
+                                  onMouseDown={(event) => beginTimelineAudioTrackMove(event, layer)}
+                                  onClick={() => {
+                                    setSelectedAudioLayerId(layer.id);
+                                    setSelectedVideoMediaLayerId(null);
+                                    seekTimeline(startSec);
+                                  }}
+                                >
+                                  <span>{layer.label || "Voice"}</span>
+                                  <small>{formatTimelineSeconds(startSec)} · {formatTimelineSeconds(durationSec)}</small>
+                                  <button
+                                    type="button"
+                                    className="video-element-resize-handle"
+                                    aria-label={`Voice length resize ${layer.label ?? layer.id}`}
+                                    onMouseDown={(event) => beginTimelineAudioResize(event, layer)}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                      {timelineSegments.some((segment) => getSceneVideoTextOverlays(segment.scene).length > 0) ? (
+                        <div className="video-element-track">
+                          <span className="video-track-label">Text</span>
+                          <div
+                            className="video-element-track-lane"
+                            style={{
+                              height: `${Math.max(100, 12 + videoElementTrackCount * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT)}px`
+                            }}
+                          >
+                            {timelineSegments.flatMap((segment) =>
+                              getSceneVideoTextOverlays(segment.scene).map((overlay, overlayIndex) => {
+                              const displaySegment = getTimelineDisplaySegment(segment.scene.sceneNo) ?? segment;
+                              const localStartSec = Math.min(
+                                Math.max(0, segment.durationSec - 0.5),
+                                Math.max(0, Number(overlay.startSec ?? 0) || 0)
+                              );
+                              const durationSec = Math.min(
+                                Math.max(0.5, segment.durationSec - localStartSec),
+                                Math.max(0.5, Number(overlay.durationSec ?? segment.durationSec) || 0.5)
+                              );
+                              const trackIndex = Math.max(0, Number(overlay.trackIndex ?? 0) || 0);
+                              const startSec = segment.startSec + localStartSec;
+                              const displayStartSec = displaySegment.startSec + localStartSec;
+                              return (
+                                <div
+                                  key={`text-track-${segment.scene.sceneNo}-${overlayIndex}`}
+                                  className={[
+                                    "video-element-clip",
+                                    segment.scene.sceneNo === selectedScene.sceneNo && overlayIndex === selectedVideoTextIndex ? "active" : ""
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  style={{
+                                    left: `${(displayStartSec / timelineDisplayDurationSec) * 100}%`,
+                                    width: `${(durationSec / timelineDisplayDurationSec) * 100}%`,
+                                    top: `${6 + trackIndex * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT}px`
+                                  }}
+                                  onMouseDown={(event) => beginTimelineTextTrackMove(event, segment.scene, overlayIndex)}
+                                  onClick={() => {
+                                    setSelectedSceneNo(segment.scene.sceneNo);
+                                    setSelectedVideoTextIndex(overlayIndex);
+                                    seekTimeline(startSec);
+                                  }}
+                                >
+                                  <span>{overlay.text || `Text ${overlayIndex + 1}`}</span>
+                                  <small>{formatTimelineSeconds(localStartSec)} · {formatTimelineSeconds(durationSec)}</small>
+                                  <button
+                                    type="button"
+                                    className="video-element-resize-handle"
+                                    aria-label={`Text length resize scene ${segment.scene.sceneNo}`}
+                                    onMouseDown={(event) => beginTimelineTextResize(event, segment.scene, overlayIndex)}
+                                  />
+                                </div>
+                              );
+                            }))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <p className="eyebrow">{isKorean ? "Timeline" : "Timeline"}</p>
+                      {editableDocument.scenes.map((scene) => (
+                        <div
+                          key={`timeline-${scene.sceneNo}`}
+                          role="button"
+                          tabIndex={0}
+                          className={
+                            scene.sceneNo === selectedScene.sceneNo
+                              ? "generation-timeline-item active"
+                              : "generation-timeline-item"
+                          }
+                          onClick={() => seekSceneStart(scene.sceneNo)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              seekSceneStart(scene.sceneNo);
+                            }
+                          }}
+                        >
+                          <span>
+                            {moduleCopy.sceneLabel} {scene.sceneNo}
+                          </span>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
 
                 <div className="generation-thumb-strip">

@@ -858,7 +858,7 @@ export class ProductionPackageService {
           ? "video-production-mcp"
           : "youtube-material-generator-mcp";
     const videoCompositionOptions = {
-      burnSubtitles: (workflowConfig.createVideoSubtitleMode ?? "hard") === "hard",
+      burnSubtitles: true,
       ...(createModuleId === "video-production-mcp"
         ? {
             videoCrf: (workflowConfig.createVideoRenderQuality ?? "high") === "high" ? 16 : 18,

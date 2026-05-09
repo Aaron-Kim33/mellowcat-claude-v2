@@ -1,6 +1,17 @@
 import type { AppMeta } from "./app";
 import type { ShortformWorkflowConfig, TelegramControlStatus } from "./automation";
-import type { CardNewsTemplateRecord, SceneScriptDocument } from "./media-generation";
+import type {
+  CardNewsTemplateRecord,
+  LocalAssetImportRequest,
+  LocalAssetImportResult,
+  PixabayAssetImportRequest,
+  PixabayAssetImportResult,
+  PixabayAssetResult,
+  PixabayAssetSearchRequest,
+  SceneScriptDocument,
+  VoiceLayerGenerationRequest,
+  VoiceLayerGenerationResult
+} from "./media-generation";
 import type {
   AuthSession,
   ChangeEmailResponse,
@@ -142,6 +153,10 @@ export interface MellowCatAPI {
     pickYouTubeThumbnailFile: () => Promise<string | undefined>;
     uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
     inspectSceneScript: (packagePath: string) => Promise<SceneScriptDocument>;
+    searchPixabayAssets: (request: PixabayAssetSearchRequest) => Promise<PixabayAssetResult[]>;
+    importPixabayAsset: (request: PixabayAssetImportRequest) => Promise<PixabayAssetImportResult>;
+    importLocalAsset: (request: LocalAssetImportRequest) => Promise<LocalAssetImportResult | undefined>;
+    generateVoiceLayer: (request: VoiceLayerGenerationRequest) => Promise<VoiceLayerGenerationResult>;
     updateSceneScript: (
       packagePath: string,
       document: SceneScriptDocument

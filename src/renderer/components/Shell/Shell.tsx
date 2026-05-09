@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LauncherPage } from "../../pages/LauncherPage/LauncherPage";
 import { CrawlingPage } from "../../pages/CrawlingPage/CrawlingPage";
 import { GenerationPage } from "../../pages/GenerationPage/GenerationPage";
@@ -22,6 +22,13 @@ type Tab =
 
 export function Shell() {
   const [tab, setTab] = useState<Tab>("launcher");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem("mellowcat.sidebarCollapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
   const launcherLanguage = useAppStore((state) => state.settings?.launcherLanguage);
   const authSession = useAppStore((state) => state.authSession);
   const copy = getLauncherCopy(launcherLanguage);
@@ -47,16 +54,43 @@ export function Shell() {
     }
   ];
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("mellowcat.sidebarCollapsed", String(sidebarCollapsed));
+    } catch {
+      // The UI can still collapse even if localStorage is unavailable.
+    }
+  }, [sidebarCollapsed]);
+
   return (
-    <div className="shell">
+    <div className={sidebarCollapsed ? "shell shell--sidebar-collapsed" : "shell"}>
       <aside className="sidebar">
-        <div className="sidebar-brand">
-          <div className="brand-mark">M</div>
-          <div className="sidebar-brand-copy">
-            <p className="eyebrow">{copy.shell.eyebrow}</p>
-            <h1>{copy.shell.title}</h1>
-            <p className="subtle">{copy.shell.subtitle}</p>
+        <div className="sidebar-brand-row">
+          <div className="sidebar-brand">
+            <div className="brand-mark">M</div>
+            <div className="sidebar-brand-copy">
+              <p className="eyebrow">{copy.shell.eyebrow}</p>
+              <h1>{copy.shell.title}</h1>
+              <p className="subtle">{copy.shell.subtitle}</p>
+            </div>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-label={
+              sidebarCollapsed
+                ? isKorean
+                  ? "사이드바 펼치기"
+                  : "Expand sidebar"
+                : isKorean
+                  ? "사이드바 접기"
+                  : "Collapse sidebar"
+            }
+            title={sidebarCollapsed ? (isKorean ? "펼치기" : "Expand") : (isKorean ? "접기" : "Collapse")}
+          >
+            {sidebarCollapsed ? "›" : "‹"}
+          </button>
         </div>
         <nav className="nav">
           {tabGroups.map((group) => (
@@ -69,6 +103,7 @@ export function Shell() {
                     className={tab === item.id ? "nav-button active" : "nav-button"}
                     onClick={() => setTab(item.id)}
                     type="button"
+                    title={item.label}
                   >
                     <span className="nav-button-dot" />
                     <span>{item.label}</span>
