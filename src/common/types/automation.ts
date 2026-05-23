@@ -118,10 +118,12 @@ export interface ShortformWorkflowConfig {
   instagramAccessToken?: string;
   pexelsApiKey?: string;
   pixabayApiKey?: string;
+  freesoundApiKey?: string;
   createAssetSource?: "pexels" | "flux";
   fluxApiKey?: string;
   fluxApiBaseUrl?: string;
   fluxModel?: string;
+  manusApiKey?: string;
   createBackgroundSourceType?: "preset" | "custom";
   createSceneStylePresetId?: string;
   createTargetDurationSec?: number;

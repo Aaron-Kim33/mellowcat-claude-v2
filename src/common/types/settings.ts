@@ -23,11 +23,13 @@ export interface AppSettings {
   instagramAccountHandle?: string;
   instagramAccessToken?: string;
   pexelsApiKey?: string;
+  freesoundApiKey?: string;
   fluxApiKey?: string;
   createBackgroundSourceType?: "preset" | "custom";
   azureSpeechKey?: string;
   azureSpeechRegion?: string;
   azureSpeechVoice?: string;
+  manusApiKey?: string;
   mediaAnalysisPolicy?: "text_only" | "vision_on_demand";
   youtubeChannelLabel?: string;
   youtubePrivacyStatus?: "private" | "unlisted" | "public";

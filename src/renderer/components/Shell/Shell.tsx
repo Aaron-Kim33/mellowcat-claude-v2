@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LauncherPage } from "../../pages/LauncherPage/LauncherPage";
 import { CrawlingPage } from "../../pages/CrawlingPage/CrawlingPage";
 import { GenerationPage } from "../../pages/GenerationPage/GenerationPage";
+import { AIWorkspacePage } from "../../pages/AIWorkspacePage/AIWorkspacePage";
 import { StorePage } from "../../pages/StorePage/StorePage";
 import { InstalledPage } from "../../pages/InstalledPage/InstalledPage";
 import { SettingsPage } from "../../pages/SettingsPage/SettingsPage";
@@ -14,6 +15,7 @@ type Tab =
   | "launcher"
   | "crawling"
   | "generation"
+  | "aiWorkspace"
   | "store"
   | "installed"
   | "settings"
@@ -40,6 +42,7 @@ export function Shell() {
         { id: "launcher", label: copy.shell.tabs.launcher },
         { id: "crawling", label: isKorean ? "크롤링" : "Crawling" },
         { id: "generation", label: copy.shell.tabs.generation },
+        { id: "aiWorkspace", label: isKorean ? "AI 작업실" : "AI Studio" },
         { id: "store", label: copy.shell.tabs.store },
         { id: "installed", label: copy.shell.tabs.installed },
         { id: "settings", label: copy.shell.tabs.settings }
@@ -127,6 +130,7 @@ export function Shell() {
         {tab === "launcher" && <LauncherPage onNavigate={setTab} />}
         {tab === "crawling" && <CrawlingPage />}
         {tab === "generation" && <GenerationPage />}
+        {tab === "aiWorkspace" && <AIWorkspacePage onNavigate={setTab} />}
         {tab === "store" && <StorePage />}
         {tab === "installed" && <InstalledPage />}
         {tab === "settings" && <SettingsPage />}

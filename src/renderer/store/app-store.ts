@@ -9,13 +9,19 @@ import type { ClaudeInstallationStatus, ClaudeSession } from "@common/types/clau
 import type { InstalledMCPRecord, MCPCatalogItem } from "@common/types/mcp";
 import type {
   CardNewsTemplateRecord,
+  FreesoundAudioImportRequest,
+  FreesoundAudioImportResult,
+  FreesoundAudioResult,
+  FreesoundAudioSearchRequest,
   LocalAssetImportRequest,
   LocalAssetImportResult,
+  UploadedAssetRecord,
   PixabayAssetImportRequest,
   PixabayAssetImportResult,
   PixabayAssetResult,
   PixabayAssetSearchRequest,
   SceneScriptDocument,
+  SceneScriptEditorDraft,
   VoiceLayerGenerationRequest,
   VoiceLayerGenerationResult
 } from "@common/types/media-generation";
@@ -126,9 +132,19 @@ interface AppState {
   pickYouTubeThumbnailFile: () => Promise<string | undefined>;
   uploadLastPackageToYouTube: (packagePath?: string) => Promise<void>;
   inspectSceneScript: (packagePath?: string) => Promise<void>;
+  inspectEditorDraft: (packagePath?: string) => Promise<SceneScriptEditorDraft | undefined>;
+  saveEditorDraft: (
+    document: SceneScriptDocument,
+    saveReason: SceneScriptEditorDraft["saveReason"],
+    packagePath?: string
+  ) => Promise<SceneScriptEditorDraft>;
   searchPixabayAssets: (request: PixabayAssetSearchRequest) => Promise<PixabayAssetResult[]>;
   importPixabayAsset: (request: PixabayAssetImportRequest) => Promise<PixabayAssetImportResult>;
+  searchFreesoundAudio: (request: FreesoundAudioSearchRequest) => Promise<FreesoundAudioResult[]>;
+  importFreesoundAudio: (request: FreesoundAudioImportRequest) => Promise<FreesoundAudioImportResult>;
   importLocalAsset: (request: LocalAssetImportRequest) => Promise<LocalAssetImportResult | undefined>;
+  listUploadedAssets: (packagePath: string) => Promise<UploadedAssetRecord[]>;
+  deleteUploadedAsset: (packagePath: string, asset: UploadedAssetRecord) => Promise<UploadedAssetRecord[]>;
   generateVoiceLayer: (request: VoiceLayerGenerationRequest) => Promise<VoiceLayerGenerationResult>;
   saveSceneScript: (document: SceneScriptDocument) => Promise<void>;
   saveSceneCard: (document: SceneScriptDocument, sceneNo: number) => Promise<void>;
@@ -465,12 +481,34 @@ export const useAppStore = create<AppState>((set) => ({
     const sceneScript = await window.mellowcat.automation.inspectSceneScript(resolvedPackagePath);
     set({ sceneScript, sceneScriptPackagePath: resolvedPackagePath });
   },
+  inspectEditorDraft: async (packagePath?: string) => {
+    const resolvedPackagePath = packagePath ?? resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      return undefined;
+    }
+    return window.mellowcat.automation.inspectEditorDraft(resolvedPackagePath);
+  },
+  saveEditorDraft: async (document, saveReason, packagePath) => {
+    const resolvedPackagePath = packagePath ?? resolvePackagePath(useAppStore.getState());
+    if (!resolvedPackagePath) {
+      throw new Error("Package path was not found.");
+    }
+    return window.mellowcat.automation.saveEditorDraft(resolvedPackagePath, document, saveReason);
+  },
   searchPixabayAssets: async (request) =>
     window.mellowcat.automation.searchPixabayAssets(request),
   importPixabayAsset: async (request) =>
     window.mellowcat.automation.importPixabayAsset(request),
+  searchFreesoundAudio: async (request) =>
+    window.mellowcat.automation.searchFreesoundAudio(request),
+  importFreesoundAudio: async (request) =>
+    window.mellowcat.automation.importFreesoundAudio(request),
   importLocalAsset: async (request) =>
     window.mellowcat.automation.importLocalAsset(request),
+  listUploadedAssets: async (packagePath) =>
+    window.mellowcat.automation.listUploadedAssets(packagePath),
+  deleteUploadedAsset: async (packagePath, asset) =>
+    window.mellowcat.automation.deleteUploadedAsset(packagePath, asset),
   generateVoiceLayer: async (request) =>
     window.mellowcat.automation.generateVoiceLayer(request),
   saveSceneScript: async (document: SceneScriptDocument) => {

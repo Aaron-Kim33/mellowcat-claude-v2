@@ -1,19 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
-import type { OpenDialogOptions } from "electron";
+import { load } from "cheerio";
+import { BrowserWindow, desktopCapturer, dialog, ipcMain, nativeImage, screen, shell } from "electron";
+import type { DesktopCapturerSource, OpenDialogOptions } from "electron";
 import type {
   AutomationJobSnapshot,
   ShortformWorkflowConfig
 } from "../../common/types/automation";
 import type {
+  AiWorkspaceGenerateRequest,
+  AiWorkspaceGenerateResult,
+  AiWorkspaceClipboardAssetRequest,
+  AiWorkspaceClipboardAssetResult,
+  AiWorkspaceLinkAnalysisRequest,
+  AiWorkspaceLinkAnalysisResult,
+  AiWorkspaceManusSubmitRequest,
+  AiWorkspaceManusSubmitResult,
   CardNewsTemplateRecord,
+  FreesoundAudioImportRequest,
+  FreesoundAudioImportResult,
+  FreesoundAudioResult,
+  FreesoundAudioSearchRequest,
   LocalAssetImportRequest,
+  UploadedAssetRecord,
   PixabayAssetImportRequest,
   PixabayAssetResult,
   PixabayAssetSearchRequest,
   SceneScriptDocument,
+  SceneScriptEditorDraft,
   VoiceLayerGenerationRequest,
   VoiceLayerGenerationResult
 } from "../../common/types/media-generation";
@@ -60,15 +75,279 @@ export function registerAutomationIpc(
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 48) || "source";
+  const getBundledFfmpegPath = () => {
+    const candidates = [
+      pathService.getBundledToolPath("ffmpeg.exe"),
+      pathService.getBundledToolPath("ffmpeg")
+    ];
+    const ffmpegPath = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!ffmpegPath) {
+      throw new Error("Bundled FFmpeg was not found. Put ffmpeg.exe in resources/bundled/dev.");
+    }
+    return ffmpegPath;
+  };
+  const listDirectShowAudioDevices = () =>
+    new Promise<string[]>((resolve) => {
+      let ffmpegPath: string;
+      try {
+        ffmpegPath = getBundledFfmpegPath();
+      } catch {
+        resolve([]);
+        return;
+      }
+      const child = spawn(ffmpegPath, ["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let output = "";
+      child.stderr.on("data", (chunk) => {
+        output += String(chunk);
+      });
+      child.on("error", () => resolve([]));
+      child.on("close", () => {
+        const devices = [...output.matchAll(/"([^"]+)"\s+\(audio\)/gi)]
+          .map((match) => match[1]?.trim())
+          .filter((value): value is string => Boolean(value));
+        resolve([...new Set(devices)]);
+      });
+    });
+  const findSystemAudioCaptureDevice = async () => {
+    if (process.platform !== "win32") {
+      return undefined;
+    }
+    const devices = await listDirectShowAudioDevices();
+    const loopbackPatterns = [
+      /stereo mix/i,
+      /what u hear/i,
+      /wave out/i,
+      /loopback/i,
+      /virtual-audio-capturer/i,
+      /cable output/i,
+      /vb-audio/i,
+      /스테레오\s*믹스/i
+    ];
+    return devices.find((device) => loopbackPatterns.some((pattern) => pattern.test(device)));
+  };
+  const startChromiumLoopbackRecorder = async (
+    outputPath: string,
+    videoSource: DesktopCapturerSource,
+    log?: (message: string) => void
+  ) => {
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const startedChannel = `mellowcat:source-record:chromium-started:${token}`;
+    const doneChannel = `mellowcat:source-record:chromium-done:${token}`;
+    const errorChannel = `mellowcat:source-record:chromium-error:${token}`;
+    const logChannel = `mellowcat:source-record:chromium-log:${token}`;
+    const recorderWindow = new BrowserWindow({
+      width: 320,
+      height: 240,
+      show: false,
+      autoHideMenuBar: true,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        sandbox: false
+      }
+    });
+    const recorderSession = recorderWindow.webContents.session;
+    recorderSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      callback(permission === "media");
+    });
+    recorderSession.setPermissionCheckHandler((_webContents, permission) => permission === "media");
+    recorderSession.setDisplayMediaRequestHandler((_request, callback) => {
+      callback({ video: { id: videoSource.id, name: videoSource.name }, audio: "loopback" });
+    });
+    log?.(`chromium-recorder source id=${videoSource.id} name=${videoSource.name} display_id=${videoSource.display_id || ""}`);
+
+    let stopped = false;
+    let started = false;
+    let doneSettled = false;
+    let startTimer: NodeJS.Timeout | undefined;
+    let doneResolve: (() => void) | undefined;
+    let doneReject: ((error: Error) => void) | undefined;
+    const done = new Promise<void>((resolve, reject) => {
+      doneResolve = resolve;
+      doneReject = reject;
+    });
+    const recorderHtmlPath = path.join(path.dirname(outputPath), `source-recorder-${token}.html`);
+
+    const cleanup = () => {
+      recorderSession.setDisplayMediaRequestHandler(null);
+      ipcMain.removeListener(startedChannel, onStarted);
+      ipcMain.removeListener(doneChannel, onDone);
+      ipcMain.removeListener(errorChannel, onError);
+      ipcMain.removeListener(logChannel, onLog);
+      if (startTimer) {
+        clearTimeout(startTimer);
+      }
+      if (!recorderWindow.isDestroyed()) {
+        recorderWindow.close();
+      }
+      try {
+        fs.unlinkSync(recorderHtmlPath);
+      } catch {
+        // best-effort cleanup
+      }
+    };
+    const onStarted = () => {
+      started = true;
+    };
+    const onDone = () => {
+      if (doneSettled) {
+        return;
+      }
+      doneSettled = true;
+      cleanup();
+      doneResolve?.();
+    };
+    const onError = (_event: Electron.IpcMainEvent, message?: string) => {
+      if (doneSettled) {
+        return;
+      }
+      doneSettled = true;
+      log?.(`chromium-recorder error: ${message || "unknown"}`);
+      cleanup();
+      doneReject?.(new Error(message || "Chromium screen recorder failed."));
+    };
+    const onLog = (_event: Electron.IpcMainEvent, message?: string) => {
+      if (message) {
+        log?.(message);
+      }
+    };
+
+    ipcMain.on(startedChannel, onStarted);
+    ipcMain.once(doneChannel, onDone);
+    ipcMain.once(errorChannel, onError);
+    ipcMain.on(logChannel, onLog);
+
+    const html = `
+      <!doctype html>
+      <html>
+        <body>
+          <script>
+            const { ipcRenderer } = require("electron");
+            const fs = require("fs");
+            const { Buffer } = require("buffer");
+            const outputPath = ${JSON.stringify(outputPath)};
+            const startedChannel = ${JSON.stringify(startedChannel)};
+            const doneChannel = ${JSON.stringify(doneChannel)};
+            const errorChannel = ${JSON.stringify(errorChannel)};
+            const logChannel = ${JSON.stringify(logChannel)};
+            let stream = null;
+            let recorder = null;
+            let pendingWrite = Promise.resolve();
+            const log = (message) => ipcRenderer.send(logChannel, String(message));
+            const fail = (error) => {
+              ipcRenderer.send(errorChannel, String(error && error.message ? error.message : error));
+            };
+            window.__mellowcatStopRecorder = () => {
+              try {
+                if (recorder && recorder.state !== "inactive") {
+                  recorder.stop();
+                  return;
+                }
+              } catch (error) {
+                fail(error);
+                return;
+              }
+              ipcRenderer.send(doneChannel);
+            };
+            (async () => {
+              try {
+                if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+                  throw new Error("getDisplayMedia is unavailable in recorder window. protocol=" + location.protocol + " secure=" + window.isSecureContext);
+                }
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                  video: { frameRate: 30 },
+                  audio: true
+                });
+                const videoTrack = stream.getVideoTracks()[0];
+                const audioTracks = stream.getAudioTracks();
+                log("tracks video=" + JSON.stringify(videoTrack ? videoTrack.getSettings() : null) + " audioCount=" + audioTracks.length);
+                const mimeType = [
+                  "video/webm;codecs=vp9,opus",
+                  "video/webm;codecs=vp8,opus",
+                  "video/webm"
+                ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
+                recorder = new MediaRecorder(stream, {
+                  ...(mimeType ? { mimeType } : {}),
+                  videoBitsPerSecond: 12000000,
+                  audioBitsPerSecond: 192000
+                });
+                recorder.ondataavailable = (event) => {
+                  if (!event.data || event.data.size <= 0) return;
+                  pendingWrite = pendingWrite.then(async () => {
+                    const buffer = Buffer.from(await event.data.arrayBuffer());
+                    fs.appendFileSync(outputPath, buffer);
+                  });
+                };
+                recorder.onerror = (event) => fail(event.error || "MediaRecorder error");
+                recorder.onstop = async () => {
+                  try {
+                    await pendingWrite;
+                    if (stream) {
+                      stream.getTracks().forEach((track) => track.stop());
+                    }
+                    ipcRenderer.send(doneChannel);
+                  } catch (error) {
+                    fail(error);
+                  }
+                };
+                recorder.start(500);
+                ipcRenderer.send(startedChannel);
+              } catch (error) {
+                fail(error);
+              }
+            })();
+          </script>
+        </body>
+      </html>
+    `;
+    fs.writeFileSync(recorderHtmlPath, html, "utf8");
+
+    try {
+      await recorderWindow.loadFile(recorderHtmlPath);
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      startTimer = setTimeout(() => {
+        if (!started) {
+          cleanup();
+          reject(new Error("Chromium loopback recorder did not start."));
+        }
+      }, 8000);
+      const pollStarted = setInterval(() => {
+        if (started) {
+          clearInterval(pollStarted);
+          if (startTimer) {
+            clearTimeout(startTimer);
+          }
+          resolve();
+        }
+      }, 50);
+    });
+
+    return {
+      stop: async () => {
+        if (stopped || recorderWindow.isDestroyed()) {
+          return;
+        }
+        stopped = true;
+        await recorderWindow.webContents.executeJavaScript("window.__mellowcatStopRecorder && window.__mellowcatStopRecorder();", true);
+      },
+      done
+    };
+  };
   const runBundledFfmpeg = (args: string[]) =>
     new Promise<void>((resolve, reject) => {
-      const candidates = [
-        pathService.getBundledToolPath("ffmpeg.exe"),
-        pathService.getBundledToolPath("ffmpeg")
-      ];
-      const ffmpegPath = candidates.find((candidate) => fs.existsSync(candidate));
-      if (!ffmpegPath) {
-        reject(new Error("Bundled FFmpeg was not found. Put ffmpeg.exe in resources/bundled/dev."));
+      let ffmpegPath: string;
+      try {
+        ffmpegPath = getBundledFfmpegPath();
+      } catch (error) {
+        reject(error);
         return;
       }
 
@@ -89,6 +368,326 @@ export function registerAutomationIpc(
         reject(new Error(`FFmpeg failed with exit code ${code}. ${stderr.slice(-1200)}`));
       });
     });
+  const getAiWorkspaceOpenRouterModel = (rawModel?: string) => {
+    const fallback = "openai/gpt-5.4-mini";
+    const model = rawModel?.trim();
+    if (!model) {
+      return fallback;
+    }
+
+    const normalized = model.toLowerCase();
+    if (
+      normalized.startsWith("anthropic/claude-3") ||
+      normalized === "anthropic/claude-3.5-sonnet"
+    ) {
+      return fallback;
+    }
+    return model;
+  };
+
+  const getMimeTypeForFile = (filePath: string, fallback?: string) => {
+    if (fallback?.trim()) {
+      return fallback.trim();
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    if ([".jpg", ".jpeg"].includes(ext)) {
+      return "image/jpeg";
+    }
+    if (ext === ".png") {
+      return "image/png";
+    }
+    if (ext === ".webp") {
+      return "image/webp";
+    }
+    if (ext === ".gif") {
+      return "image/gif";
+    }
+    if (ext === ".mp4") {
+      return "video/mp4";
+    }
+    if (ext === ".mov") {
+      return "video/quicktime";
+    }
+    if (ext === ".webm") {
+      return "video/webm";
+    }
+    if (ext === ".pdf") {
+      return "application/pdf";
+    }
+    if (ext === ".md") {
+      return "text/markdown";
+    }
+    if (ext === ".txt") {
+      return "text/plain";
+    }
+    return "application/octet-stream";
+  };
+
+  const callManusApi = async <T>(apiKey: string, pathName: string, body: unknown): Promise<T> => {
+    const response = await fetch(`https://api.manus.ai/v2/${pathName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-manus-api-key": apiKey
+      },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Manus API HTTP ${response.status}: ${text}`);
+    }
+    return (text ? JSON.parse(text) : {}) as T;
+  };
+
+  const callManusGet = async <T>(apiKey: string, pathName: string, query: Record<string, string>): Promise<T> => {
+    const url = new URL(`https://api.manus.ai/v2/${pathName}`);
+    Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "x-manus-api-key": apiKey
+      }
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Manus API HTTP ${response.status}: ${text}`);
+    }
+    return (text ? JSON.parse(text) : {}) as T;
+  };
+
+  const waitForManusFileUpload = async (apiKey: string, fileId: string, fileName: string) => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const detail = await callManusGet<{
+        file?: {
+          status?: "pending" | "uploaded" | "deleted" | "error";
+          error_message?: string | null;
+        };
+      }>(apiKey, "file.detail", { file_id: fileId });
+      const status = detail.file?.status;
+      if (status === "uploaded") {
+        return;
+      }
+      if (status === "error" || status === "deleted") {
+        throw new Error(`Manus file upload failed for ${fileName}: ${detail.file?.error_message ?? status}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(`Manus file upload did not finish in time for ${fileName}.`);
+  };
+
+  const submitAiWorkspaceToManus = async (
+    request: AiWorkspaceManusSubmitRequest
+  ): Promise<AiWorkspaceManusSubmitResult> => {
+    const workflowConfig = workflowConfigService.refreshSecrets();
+    const apiKey = workflowConfig.manusApiKey?.trim();
+    if (!apiKey) {
+      throw new Error("Manus API Key가 없습니다. 설정 탭에서 Manus API Key를 저장해 주세요.");
+    }
+
+    const uploadedFiles: AiWorkspaceManusSubmitResult["uploadedFiles"] = [];
+    const content: Array<Record<string, unknown>> = [
+      {
+        type: "text",
+        text: request.prompt
+      }
+    ];
+    const urlReferences = (request.attachments ?? [])
+      .filter((attachment) => attachment.sourceUrl?.trim())
+      .map((attachment, index) => {
+        const title = attachment.label?.trim() || `${attachment.kind} reference ${index + 1}`;
+        return `${index + 1}. [${attachment.kind}] ${title}\n   url: ${attachment.sourceUrl?.trim()}`;
+      });
+    if (urlReferences.length > 0) {
+      content.push({
+        type: "text",
+        text: ["[MELLOWCAT URL REFERENCES]", ...urlReferences].join("\n")
+      });
+    }
+
+    for (const attachment of request.attachments ?? []) {
+      if (!attachment.localPath || !fs.existsSync(attachment.localPath)) {
+        continue;
+      }
+      const fileName = path.basename(attachment.localPath);
+      const mimeType = getMimeTypeForFile(attachment.localPath, attachment.mimeType);
+      const uploadPayload = await callManusApi<{
+        file?: {
+          id?: string;
+          name?: string;
+        };
+        file_id?: string;
+        fileId?: string;
+        upload_url?: string;
+        uploadUrl?: string;
+        presigned_url?: string;
+        url?: string;
+      }>(apiKey, "file.upload", { filename: fileName });
+      const fileId = uploadPayload.file?.id ?? uploadPayload.file_id ?? uploadPayload.fileId;
+      const uploadUrl =
+        uploadPayload.upload_url ?? uploadPayload.uploadUrl ?? uploadPayload.presigned_url ?? uploadPayload.url;
+      if (!fileId || !uploadUrl) {
+        throw new Error(`Manus file.upload returned an unexpected response for ${fileName}.`);
+      }
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": mimeType
+        },
+        body: fs.readFileSync(attachment.localPath)
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Manus file upload HTTP ${uploadResponse.status}: ${await uploadResponse.text()}`);
+      }
+      await waitForManusFileUpload(apiKey, fileId, fileName);
+
+      uploadedFiles.push({
+        id: attachment.id,
+        label: attachment.label,
+        fileId
+      });
+      content.push({
+        type: "file",
+        file_id: fileId
+      });
+    }
+
+    const taskPayload = await callManusApi<{
+      task_id?: string;
+      taskId?: string;
+      id?: string;
+      task_url?: string;
+      taskUrl?: string;
+      url?: string;
+    }>(apiKey, "task.create", {
+      message: {
+        content
+      }
+    });
+
+    const taskId = taskPayload.task_id ?? taskPayload.taskId ?? taskPayload.id;
+    if (!taskId) {
+      throw new Error("Manus task.create returned an unexpected response without task id.");
+    }
+    const taskUrl = taskPayload.task_url ?? taskPayload.taskUrl ?? taskPayload.url ?? `https://manus.im/app/task/${taskId}`;
+
+    return {
+      ok: true,
+      taskId,
+      taskUrl,
+      uploadedFiles,
+      message: `Manus task created: ${taskId}`
+    };
+  };
+
+  const generateAiWorkspacePlan = async (
+    request: AiWorkspaceGenerateRequest
+  ): Promise<AiWorkspaceGenerateResult> => {
+    const aiWorkspaceSystemPrompt =
+      "You are a senior Korean social content creative director. Transform user-provided raw materials into a new, polished content plan. Do not simply restate, summarize, or copy the source text. Return only one valid JSON object that follows the user's schema.";
+    const workflowConfig = workflowConfigService.refreshSecrets();
+    const preferredProvider = workflowConfig.scriptProvider ?? "openrouter_api";
+    const openRouterApiKey = workflowConfig.openRouterApiKey?.trim();
+    const openAiApiKey = workflowConfig.openAiApiKey?.trim();
+    const useOpenAi = preferredProvider === "openai_api" && Boolean(openAiApiKey);
+    const useOpenRouter = !useOpenAi && Boolean(openRouterApiKey);
+
+    if (!useOpenAi && !useOpenRouter) {
+      return {
+        rawText: request.fallbackRawText,
+        provider: "local",
+        model: "local-fallback"
+      };
+    }
+
+    if (useOpenAi) {
+      const model = workflowConfig.openAiModel?.trim() || "gpt-5.4-mini";
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openAiApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: aiWorkspaceSystemPrompt },
+            { role: "user", content: request.prompt }
+          ],
+          temperature: 0.65,
+          response_format: { type: "json_object" }
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`OpenAI HTTP ${response.status}: ${await response.text()}`);
+      }
+      const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const rawText = payload.choices?.[0]?.message?.content ?? "";
+      if (!rawText.trim()) {
+        throw new Error("OpenAI returned empty content.");
+      }
+      return {
+        rawText,
+        provider: "openai",
+        model
+      };
+    }
+
+    const fallbackModel = "openai/gpt-5.4-mini";
+    const configuredModel = getAiWorkspaceOpenRouterModel(workflowConfig.openRouterModel);
+    const callOpenRouter = async (model: string) => {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openRouterApiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://mellowcat.xyz",
+          "X-Title": "MellowCat Claude"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: aiWorkspaceSystemPrompt },
+            { role: "user", content: request.prompt }
+          ],
+          temperature: 0.65,
+          response_format: { type: "json_object" }
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`OpenRouter HTTP ${response.status}: ${await response.text()}`);
+      }
+      const payload = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const rawText = payload.choices?.[0]?.message?.content ?? "";
+      if (!rawText.trim()) {
+        throw new Error("OpenRouter returned empty content.");
+      }
+      return rawText;
+    };
+
+    try {
+      return {
+        rawText: await callOpenRouter(configuredModel),
+        provider: "openrouter",
+        model: configuredModel
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const shouldRetryWithFallback =
+        configuredModel !== fallbackModel &&
+        /OpenRouter HTTP 404|No endpoints found/i.test(message);
+      if (!shouldRetryWithFallback) {
+        throw error;
+      }
+      return {
+        rawText: await callOpenRouter(fallbackModel),
+        provider: "openrouter",
+        model: fallbackModel
+      };
+    }
+  };
   const getCardNewsTemplateStorePath = () => pathService.getUserCardNewsTemplatesPath();
   const getCardNewsTemplateIndexPath = () =>
     path.join(getCardNewsTemplateStorePath(), "templates.json");
@@ -220,7 +819,7 @@ export function registerAutomationIpc(
   };
 
   const getDownloadedAssetExtension = (
-    mediaType: "video" | "image",
+    mediaType: "video" | "image" | "audio",
     contentType: string | null,
     sourceUrl: string
   ) => {
@@ -237,16 +836,152 @@ export function registerAutomationIpc(
     if (contentType?.includes("jpeg") || contentType?.includes("jpg")) {
       return ".jpg";
     }
-    return mediaType === "video" ? ".mp4" : ".jpg";
+    if (contentType?.includes("mpeg") || contentType?.includes("mp3")) {
+      return ".mp3";
+    }
+    if (contentType?.includes("wav")) {
+      return ".wav";
+    }
+    if (contentType?.includes("ogg")) {
+      return ".ogg";
+    }
+    if (contentType?.includes("mp4") && mediaType === "audio") {
+      return ".m4a";
+    }
+    return mediaType === "video" ? ".mp4" : mediaType === "audio" ? ".mp3" : ".jpg";
   };
-  const getMediaTypeFromExtension = (extension: string): "video" | "image" | undefined => {
+  const getMediaTypeFromExtension = (extension: string): "video" | "image" | "audio" | undefined => {
     if ([".mp4", ".mov", ".webm", ".mkv"].includes(extension.toLowerCase())) {
       return "video";
     }
     if ([".png", ".jpg", ".jpeg", ".webp"].includes(extension.toLowerCase())) {
       return "image";
     }
+    if ([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"].includes(extension.toLowerCase())) {
+      return "audio";
+    }
     return undefined;
+  };
+  const getClipboardAssetExtension = (mimeType: string) => {
+    if (mimeType.includes("png")) {
+      return ".png";
+    }
+    if (mimeType.includes("webp")) {
+      return ".webp";
+    }
+    if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
+      return ".jpg";
+    }
+    return ".png";
+  };
+  const listPackageAssetDirectory = (
+    packagePath: string,
+    relativeDir: string,
+    source: UploadedAssetRecord["source"]
+  ): UploadedAssetRecord[] => {
+    const absoluteDir = path.join(packagePath, relativeDir);
+    if (!fs.existsSync(absoluteDir)) {
+      return [];
+    }
+    const records: UploadedAssetRecord[] = [];
+    fs
+      .readdirSync(absoluteDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .forEach((entry) => {
+        const localPath = path.join(absoluteDir, entry.name);
+        const mediaType = getMediaTypeFromExtension(path.extname(entry.name));
+        if (!mediaType) {
+          return;
+        }
+        const stats = fs.statSync(localPath);
+        const relativePath = path.relative(packagePath, localPath);
+        records.push({
+          id: `${source}:${relativePath.replace(/\\/g, "/")}`,
+          label: entry.name,
+          localPath,
+          relativePath,
+          mediaType,
+          source,
+          sizeBytes: stats.size,
+          updatedAt: stats.mtime.toISOString()
+        });
+      });
+    return records;
+  };
+  const listUploadedPackageAssets = (packagePath: string): UploadedAssetRecord[] =>
+    [
+      ...listPackageAssetDirectory(packagePath, path.join("assets", "source-clips"), "source-clip"),
+      ...listPackageAssetDirectory(packagePath, path.join("assets", "library", "ai-workspace"), "clipboard"),
+      ...listPackageAssetDirectory(packagePath, path.join("assets", "library", "local"), "local")
+    ].sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
+  const isPathInside = (targetPath: string, parentPath: string) => {
+    const relative = path.relative(parentPath, targetPath);
+    return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+  };
+  const assertUploadedAssetPath = (packagePath: string, asset: UploadedAssetRecord) => {
+    const resolvedPackagePath = path.resolve(packagePath);
+    const resolvedAssetPath = path.resolve(asset.localPath || path.join(packagePath, asset.relativePath || ""));
+    const allowedDirectories = [
+      path.join(resolvedPackagePath, "assets", "source-clips"),
+      path.join(resolvedPackagePath, "assets", "library", "ai-workspace"),
+      path.join(resolvedPackagePath, "assets", "library", "local")
+    ].map((directory) => path.resolve(directory));
+    const isAllowed = allowedDirectories.some((directory) => isPathInside(resolvedAssetPath, directory));
+    if (!isAllowed) {
+      throw new Error("Uploaded asset delete is only allowed inside this package's upload folders.");
+    }
+    return resolvedAssetPath;
+  };
+  const toAbsolutePageUrl = (value: string | undefined, baseUrl: string) => {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    try {
+      return new URL(trimmed, baseUrl).toString();
+    } catch {
+      return undefined;
+    }
+  };
+  const extractKeywordsFromText = (value: string) => {
+    const stopWords = new Set([
+      "the",
+      "and",
+      "for",
+      "with",
+      "from",
+      "that",
+      "this",
+      "you",
+      "your",
+      "are",
+      "was",
+      "뉴스",
+      "기사",
+      "영상",
+      "이미지",
+      "대한",
+      "관련",
+      "있는",
+      "하는",
+      "했다",
+      "한다",
+      "그리고",
+      "하지만"
+    ]);
+    const words = value
+      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter((word) => word.length >= 2 && !stopWords.has(word.toLowerCase()));
+    const counts = new Map<string, number>();
+    for (const word of words) {
+      counts.set(word, (counts.get(word) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 10)
+      .map(([word]) => word);
   };
 
   ipcMain.handle("automation:workflow:getConfig", () => workflowConfigService.get());
@@ -1019,55 +1754,135 @@ export function registerAutomationIpc(
         fs.mkdirSync(capturesRoot, { recursive: true });
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const hostToken = sanitizeFileToken(parsedUrl.hostname || "source");
-        const frameRoot = path.join(capturesRoot, `source-video-frames-${hostToken}-${timestamp}`);
-        fs.mkdirSync(frameRoot, { recursive: true });
+        const outputPath = path.join(capturesRoot, `source-video-${hostToken}-${timestamp}.mp4`);
+        const debugLogPath = path.join(capturesRoot, `source-video-${hostToken}-${timestamp}.log`);
+        const writeCaptureLog = (message: string) => {
+          fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+        };
+        writeCaptureLog(`start url=${normalizedUrl}`);
+
+        if (process.platform !== "win32") {
+          throw new Error("Smooth source recording is currently supported on Windows only.");
+        }
+
+        const contentBounds = captureWindow.getContentBounds();
+        const display = screen.getDisplayNearestPoint({
+          x: contentBounds.x + captureRect.x,
+          y: contentBounds.y + captureRect.y
+        });
+        const scaleFactor = display.scaleFactor || 1;
+        const screenCaptureRect = {
+          x: Math.max(0, Math.round((contentBounds.x + captureRect.x - display.bounds.x) * scaleFactor)),
+          y: Math.max(0, Math.round((contentBounds.y + captureRect.y - display.bounds.y) * scaleFactor)),
+          width: Math.max(2, Math.round(captureRect.width * scaleFactor)),
+          height: Math.max(2, Math.round(captureRect.height * scaleFactor))
+        };
+        writeCaptureLog(
+          `bounds content=${JSON.stringify(contentBounds)} display=${JSON.stringify(display.bounds)} scale=${scaleFactor} selection=${JSON.stringify(captureRect)} screenCrop=${JSON.stringify(screenCaptureRect)}`
+        );
+        const allDisplays = screen.getAllDisplays();
+        const displayIndex = Math.max(0, allDisplays.findIndex((candidate) => candidate.id === display.id));
+        const screenSources = await desktopCapturer.getSources({
+          types: ["screen"],
+          thumbnailSize: { width: 0, height: 0 }
+        });
+        const displaySource =
+          screenSources.find((source) => source.display_id && String(source.display_id) === String(display.id)) ||
+          screenSources.find((source) => new RegExp(`screen\\s*${displayIndex + 1}\\b`, "i").test(source.name)) ||
+          screenSources[displayIndex] ||
+          screenSources[0];
+        writeCaptureLog(
+          `screenSources=${screenSources.map((source) => `${source.name}:${source.id}:${source.display_id || ""}`).join(" | ")} selected=${displaySource?.name || "none"}`
+        );
+        if (!displaySource) {
+          throw new Error("No screen source was found for loopback recording.");
+        }
 
         await new Promise((resolve) => setTimeout(resolve, 350));
         const recordingControl = createRecordingStopControl();
-        let capturedFrameCount = 0;
-        try {
-          while (!recordingControl.isStopped()) {
-            const image = await captureWindow.capturePage(captureRect);
-            if (image.isEmpty()) {
-              throw new Error("Recording frame capture result is empty.");
-            }
-            capturedFrameCount += 1;
-            const framePath = path.join(
-              frameRoot,
-              `frame-${String(capturedFrameCount).padStart(4, "0")}.png`
-            );
-            fs.writeFileSync(framePath, image.toPNG());
-            const elapsed = recordingControl.tick();
-            if (elapsed >= 180) {
-              break;
-            }
-            await new Promise((resolve) => setTimeout(resolve, Math.round(1000 / frameRate)));
+        const rawOutputPath = path.join(capturesRoot, `source-video-raw-${hostToken}-${timestamp}.webm`);
+        const ffmpegPath = getBundledFfmpegPath();
+        const chromiumRecorder = await startChromiumLoopbackRecorder(rawOutputPath, displaySource, writeCaptureLog);
+        const startedAt = Date.now();
+        const pollStop = setInterval(() => {
+          if (recordingControl.isStopped() || Date.now() - startedAt >= 180_000) {
+            void chromiumRecorder.stop();
           }
+        }, 100);
+        try {
+          await chromiumRecorder.done;
         } finally {
+          clearInterval(pollStop);
           recordingControl.close();
         }
-        if (capturedFrameCount < 2) {
-          throw new Error("Recording is too short. Capture at least a moment before stopping.");
+        if (!fs.existsSync(rawOutputPath) || fs.statSync(rawOutputPath).size <= 0) {
+          throw new Error("Loopback recorder did not write a usable video file.");
         }
+        writeCaptureLog(`raw complete path=${rawOutputPath} size=${fs.statSync(rawOutputPath).size}`);
 
-        const outputPath = path.join(capturesRoot, `source-video-${hostToken}-${timestamp}.mp4`);
-        await runBundledFfmpeg([
-          "-y",
-          "-framerate",
-          String(frameRate),
-          "-i",
-          path.join(frameRoot, "frame-%04d.png"),
-          "-vf",
-          "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-r",
-          "30",
-          outputPath
-        ]);
-        fs.rmSync(frameRoot, { recursive: true, force: true });
+        await new Promise<void>((resolve, reject) => {
+          const cropFilter = [
+            `crop=${screenCaptureRect.width}:${screenCaptureRect.height}:${screenCaptureRect.x}:${screenCaptureRect.y}`,
+            "scale=1080:1920:force_original_aspect_ratio=decrease",
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
+            "setsar=1"
+          ].join(",");
+          const ffmpegArgs = [
+            "-y",
+            "-i",
+            rawOutputPath,
+            "-vf",
+            cropFilter,
+            "-map",
+            "0:v",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            "30",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            outputPath
+          ];
+          writeCaptureLog(`ffmpeg ${ffmpegArgs.join(" ")}`);
+          const child = spawn(ffmpegPath, ffmpegArgs, {
+            windowsHide: true,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+          let stderr = "";
+          let settled = false;
+          child.stderr.on("data", (chunk) => {
+            stderr += String(chunk);
+          });
+          child.on("error", (error) => {
+            if (!settled) {
+              settled = true;
+              reject(error);
+            }
+          });
+          child.on("close", (code) => {
+            writeCaptureLog(`ffmpeg close code=${code} stderr=${stderr.slice(-2000)}`);
+            if (settled) {
+              return;
+            }
+            settled = true;
+            if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+              resolve();
+              return;
+            }
+            reject(new Error(`FFmpeg screen recording failed with exit code ${code}. ${stderr.slice(-1200)}`));
+          });
+        });
 
         const statusPackagePath =
           packagePath?.trim() ||
@@ -1267,6 +2082,34 @@ export function registerAutomationIpc(
   ipcMain.handle("automation:create:inspectSceneScript", (_event, packagePath: string) =>
     productionPackageService.inspectSceneScript(packagePath)
   );
+  ipcMain.handle("automation:create:inspectEditorDraft", (_event, packagePath: string) =>
+    productionPackageService.inspectEditorDraft(packagePath)
+  );
+  ipcMain.handle(
+    "automation:create:saveEditorDraft",
+    (
+      _event,
+      packagePath: string,
+      document: SceneScriptDocument,
+      saveReason: SceneScriptEditorDraft["saveReason"]
+    ) => productionPackageService.saveEditorDraft(packagePath, document, saveReason)
+  );
+  ipcMain.handle("automation:create:inspectAiWorkspace", (_event, packagePath: string) =>
+    productionPackageService.inspectAiWorkspace(packagePath)
+  );
+  ipcMain.handle(
+    "automation:create:updateAiWorkspace",
+    (_event, packagePath: string, workspace: NonNullable<SceneScriptDocument["aiWorkspace"]>) =>
+      productionPackageService.updateAiWorkspace(packagePath, workspace)
+  );
+  ipcMain.handle(
+    "automation:create:generateAiWorkspacePlan",
+    async (_event, request: AiWorkspaceGenerateRequest) => generateAiWorkspacePlan(request)
+  );
+  ipcMain.handle(
+    "automation:create:submitAiWorkspaceToManus",
+    async (_event, request: AiWorkspaceManusSubmitRequest) => submitAiWorkspaceToManus(request)
+  );
   ipcMain.handle(
     "automation:create:searchPixabayAssets",
     async (_event, request: PixabayAssetSearchRequest): Promise<PixabayAssetResult[]> => {
@@ -1400,6 +2243,97 @@ export function registerAutomationIpc(
     }
   );
   ipcMain.handle(
+    "automation:create:searchFreesoundAudio",
+    async (_event, request: FreesoundAudioSearchRequest): Promise<FreesoundAudioResult[]> => {
+      const apiKey = request.apiKey?.trim();
+      const query = request.query?.trim();
+      if (!apiKey) {
+        throw new Error("Freesound API Key가 필요합니다.");
+      }
+      if (!query) {
+        throw new Error("오디오 검색어를 입력해 주세요.");
+      }
+
+      const url = new URL("https://freesound.org/apiv2/search/text/");
+      url.searchParams.set("query", query);
+      url.searchParams.set("filter", "duration:[1 TO 600]");
+      url.searchParams.set("sort", "rating_desc");
+      url.searchParams.set("page_size", String(Math.max(3, Math.min(30, request.perPage ?? 12))));
+      url.searchParams.set("fields", "id,name,username,duration,previews,license,url,tags");
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Token ${apiKey}`
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Freesound API HTTP ${response.status}: ${await response.text()}`);
+      }
+      const payload = (await response.json()) as { results?: Array<Record<string, unknown>> };
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      return results
+        .map((hit): FreesoundAudioResult | undefined => {
+          const id = String(hit.id ?? "");
+          const previews = hit.previews && typeof hit.previews === "object"
+            ? (hit.previews as Record<string, unknown>)
+            : {};
+          const previewUrl =
+            (typeof previews["preview-hq-mp3"] === "string" && previews["preview-hq-mp3"]) ||
+            (typeof previews["preview-lq-mp3"] === "string" && previews["preview-lq-mp3"]) ||
+            (typeof previews["preview-hq-ogg"] === "string" && previews["preview-hq-ogg"]) ||
+            (typeof previews["preview-lq-ogg"] === "string" && previews["preview-lq-ogg"]) ||
+            "";
+          if (!id || !previewUrl) {
+            return undefined;
+          }
+          return {
+            id,
+            title: String(hit.name ?? `Freesound audio ${id}`),
+            previewUrl,
+            downloadUrl: previewUrl,
+            sourceUrl: typeof hit.url === "string" ? hit.url : `https://freesound.org/s/${id}/`,
+            durationSec: typeof hit.duration === "number" ? hit.duration : undefined,
+            tags: Array.isArray(hit.tags) ? hit.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
+            user: typeof hit.username === "string" ? hit.username : undefined,
+            license: typeof hit.license === "string" ? hit.license : undefined
+          };
+        })
+        .filter((result): result is FreesoundAudioResult => Boolean(result));
+    }
+  );
+  ipcMain.handle(
+    "automation:create:importFreesoundAudio",
+    async (_event, request: FreesoundAudioImportRequest): Promise<FreesoundAudioImportResult> => {
+      const packagePath = request.packagePath?.trim();
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        throw new Error("유효한 작업 패키지 경로가 필요합니다.");
+      }
+      const asset = request.asset;
+      if (!asset?.downloadUrl) {
+        throw new Error("가져올 Freesound 오디오 URL이 없습니다.");
+      }
+      const response = await fetch(asset.downloadUrl);
+      if (!response.ok) {
+        throw new Error(`Freesound audio download HTTP ${response.status}`);
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const extension = getDownloadedAssetExtension(
+        "audio",
+        response.headers.get("content-type"),
+        asset.downloadUrl
+      );
+      const libraryDir = path.join(packagePath, "assets", "library", "freesound");
+      fs.mkdirSync(libraryDir, { recursive: true });
+      const token = sanitizeFileToken(`audio-${asset.id}-${asset.title}`);
+      const localPath = path.join(libraryDir, `${token}${extension}`);
+      fs.writeFileSync(localPath, bytes);
+      return {
+        localPath,
+        relativePath: path.relative(packagePath, localPath)
+      };
+    }
+  );
+  ipcMain.handle(
     "automation:create:importLocalAsset",
     async (event, request: LocalAssetImportRequest) => {
       const packagePath = request.packagePath?.trim();
@@ -1412,7 +2346,7 @@ export function registerAutomationIpc(
         filters: [
           {
             name: "Media files",
-            extensions: ["mp4", "mov", "webm", "mkv", "png", "jpg", "jpeg", "webp"]
+            extensions: ["mp4", "mov", "webm", "mkv", "png", "jpg", "jpeg", "webp", "mp3", "wav", "m4a", "aac", "ogg", "flac"]
           }
         ]
       };
@@ -1451,6 +2385,145 @@ export function registerAutomationIpc(
         relativePath: path.relative(packagePath, localPath),
         mediaType,
         appliedSceneNo
+      };
+    }
+  );
+  ipcMain.handle(
+    "automation:create:listUploadedAssets",
+    async (_event, packagePath: string): Promise<UploadedAssetRecord[]> => {
+      const resolvedPackagePath = packagePath?.trim();
+      if (!resolvedPackagePath || !fs.existsSync(resolvedPackagePath)) {
+        return [];
+      }
+      return listUploadedPackageAssets(resolvedPackagePath);
+    }
+  );
+  ipcMain.handle(
+    "automation:create:deleteUploadedAsset",
+    async (_event, packagePath: string, asset: UploadedAssetRecord): Promise<UploadedAssetRecord[]> => {
+      const resolvedPackagePath = packagePath?.trim();
+      if (!resolvedPackagePath || !fs.existsSync(resolvedPackagePath)) {
+        return [];
+      }
+      const targetPath = assertUploadedAssetPath(resolvedPackagePath, asset);
+      if (fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+        fs.unlinkSync(targetPath);
+      }
+      return listUploadedPackageAssets(resolvedPackagePath);
+    }
+  );
+  ipcMain.handle(
+    "automation:create:saveAiWorkspaceClipboardAsset",
+    async (_event, request: AiWorkspaceClipboardAssetRequest): Promise<AiWorkspaceClipboardAssetResult> => {
+      const packagePath = request.packagePath?.trim();
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        throw new Error("AI workspace package path is required before saving clipboard images.");
+      }
+
+      const match = request.dataUrl.match(/^data:([^;]+);base64,([\s\S]+)$/);
+      if (!match) {
+        throw new Error("Clipboard image data was not a valid data URL.");
+      }
+
+      const mimeType = match[1] || "image/png";
+      if (!mimeType.startsWith("image/")) {
+        throw new Error("Only clipboard images can be saved to the AI workspace.");
+      }
+
+      const extension = getClipboardAssetExtension(mimeType);
+      const fileName = request.fileName || `clipboard-image${extension}`;
+      const token = sanitizeFileToken(path.basename(fileName, path.extname(fileName)));
+      const libraryDir = path.join(packagePath, "assets", "library", "ai-workspace");
+      fs.mkdirSync(libraryDir, { recursive: true });
+
+      const localPath = path.join(libraryDir, `${Date.now()}-${token}${extension}`);
+      fs.writeFileSync(localPath, Buffer.from(match[2], "base64"));
+
+      return {
+        localPath,
+        relativePath: path.relative(packagePath, localPath),
+        mediaType: "image",
+        mimeType
+      };
+    }
+  );
+  ipcMain.handle(
+    "automation:create:analyzeAiWorkspaceLink",
+    async (_event, request: AiWorkspaceLinkAnalysisRequest): Promise<AiWorkspaceLinkAnalysisResult> => {
+      const sourceUrl = request.sourceUrl?.trim();
+      if (!sourceUrl) {
+        throw new Error("Link URL is required.");
+      }
+      const parsedUrl = new URL(sourceUrl);
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        throw new Error("Only http and https links can be analyzed.");
+      }
+
+      const response = await fetch(parsedUrl.toString(), {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Link analysis failed with HTTP ${response.status}.`);
+      }
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+        throw new Error(`Link analysis supports HTML pages only. (${contentType || "unknown content-type"})`);
+      }
+
+      const finalUrl = response.url || parsedUrl.toString();
+      const html = await response.text();
+      const $ = load(html);
+      $("script, style, noscript, svg").remove();
+
+      const getMeta = (...names: string[]) => {
+        for (const name of names) {
+          const value =
+            $(`meta[property="${name}"]`).attr("content") ??
+            $(`meta[name="${name}"]`).attr("content") ??
+            $(`meta[itemprop="${name}"]`).attr("content");
+          if (value?.trim()) {
+            return value.trim();
+          }
+        }
+        return "";
+      };
+      const title =
+        getMeta("og:title", "twitter:title") ||
+        $("title").first().text().trim() ||
+        $("h1").first().text().trim() ||
+        parsedUrl.hostname;
+      const description =
+        getMeta("og:description", "twitter:description", "description") ||
+        $("article p").first().text().trim() ||
+        $("p").first().text().trim();
+      const imageUrl = toAbsolutePageUrl(getMeta("og:image", "twitter:image", "image"), finalUrl);
+      const siteName = getMeta("og:site_name", "application-name") || parsedUrl.hostname;
+      const author = getMeta("author", "article:author") || undefined;
+      const publishedAt =
+        getMeta("article:published_time", "pubdate", "date", "datePublished") ||
+        $("time[datetime]").first().attr("datetime") ||
+        undefined;
+
+      const articleText = $("article").text().trim() || $("main").text().trim() || $("body").text().trim();
+      const normalizedText = articleText.replace(/\s+/g, " ").trim();
+      const excerpt = normalizedText.slice(0, 1400);
+      const keywords = extractKeywordsFromText([title, description, excerpt].filter(Boolean).join(" "));
+
+      return {
+        sourceUrl: parsedUrl.toString(),
+        finalUrl,
+        title,
+        description,
+        siteName,
+        imageUrl,
+        author,
+        publishedAt,
+        keywords,
+        excerpt
       };
     }
   );

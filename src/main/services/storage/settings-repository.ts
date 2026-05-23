@@ -11,7 +11,9 @@ const SECRET_KEYS = [
   "secondaryOpenAiApiKey",
   "telegramBotToken",
   "pexelsApiKey",
+  "freesoundApiKey",
   "azureSpeechKey",
+  "manusApiKey",
   "youtubeOAuthClientSecret",
   "instagramAccessToken"
 ] as const;

@@ -13,6 +13,7 @@ import type {
   ScenePlanDocument,
   SceneScriptCategory,
   SceneScriptDocument,
+  SceneScriptEditorDraft,
   SceneScriptItem
 } from "../../../common/types/media-generation";
 import { getMcpRuntimeContract } from "../../../common/contracts/mcp-contract-registry";
@@ -199,6 +200,84 @@ export class ProductionPackageService {
     }
 
     return this.fileService.readJsonFile<SceneScriptDocument>(sceneScriptPath);
+  }
+
+  inspectEditorDraft(packagePath: string): SceneScriptEditorDraft | undefined {
+    const draftPath = path.join(packagePath, "editor-draft.json");
+    if (!fs.existsSync(draftPath)) {
+      return undefined;
+    }
+    return this.fileService.readJsonFile<SceneScriptEditorDraft>(draftPath);
+  }
+
+  saveEditorDraft(
+    packagePath: string,
+    document: SceneScriptDocument,
+    saveReason: SceneScriptEditorDraft["saveReason"] = "manual"
+  ): SceneScriptEditorDraft {
+    if (!fs.existsSync(packagePath)) {
+      throw new Error(`Package path was not found: ${packagePath}`);
+    }
+    const draft: SceneScriptEditorDraft = {
+      schemaVersion: 1,
+      draftVersion: 1,
+      savedAt: new Date().toISOString(),
+      saveReason,
+      accountId: undefined,
+      packagePath,
+      document
+    };
+    this.fileService.writeJsonFile(path.join(packagePath, "editor-draft.json"), draft);
+    return draft;
+  }
+
+  inspectAiWorkspace(packagePath: string): NonNullable<SceneScriptDocument["aiWorkspace"]> | undefined {
+    const workspacePath = path.join(packagePath, "ai-workspace.json");
+    if (fs.existsSync(workspacePath)) {
+      return this.fileService.readJsonFile<NonNullable<SceneScriptDocument["aiWorkspace"]>>(workspacePath);
+    }
+
+    const sceneScriptPath = path.join(packagePath, "scene-script.json");
+    if (fs.existsSync(sceneScriptPath)) {
+      return this.fileService.readJsonFile<SceneScriptDocument>(sceneScriptPath).aiWorkspace;
+    }
+
+    return undefined;
+  }
+
+  updateAiWorkspace(
+    packagePath: string,
+    workspace: NonNullable<SceneScriptDocument["aiWorkspace"]>
+  ): NonNullable<SceneScriptDocument["aiWorkspace"]> {
+    if (!fs.existsSync(packagePath)) {
+      throw new Error(`Package path was not found: ${packagePath}`);
+    }
+
+    const normalizedWorkspace: NonNullable<SceneScriptDocument["aiWorkspace"]> = {
+      ...workspace,
+      materials: [...workspace.materials].map((material, order) => ({ ...material, order })),
+      materialGroups: workspace.materialGroups?.map((group, order) => ({
+        ...group,
+        order,
+        materials: group.materials.map((material, materialOrder) => ({
+          ...material,
+          order: materialOrder
+        }))
+      }))
+    };
+
+    this.fileService.writeJsonFile(path.join(packagePath, "ai-workspace.json"), normalizedWorkspace);
+
+    const sceneScriptPath = path.join(packagePath, "scene-script.json");
+    if (fs.existsSync(sceneScriptPath)) {
+      const document = this.fileService.readJsonFile<SceneScriptDocument>(sceneScriptPath);
+      this.fileService.writeJsonFile(sceneScriptPath, {
+        ...document,
+        aiWorkspace: normalizedWorkspace
+      });
+    }
+
+    return normalizedWorkspace;
   }
 
   private tryInitializeCardNewsSceneScript(packagePath: string): SceneScriptDocument | null {

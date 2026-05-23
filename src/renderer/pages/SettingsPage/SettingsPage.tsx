@@ -22,6 +22,7 @@ export function SettingsPage() {
     claudeInstallation,
     claudeDetectionMessage,
     saveSettings,
+    saveWorkflowConfig,
     detectClaudeInstallation,
     installClaudeCode
   } = useAppStore();
@@ -47,6 +48,7 @@ export function SettingsPage() {
   const [azureSpeechKey, setAzureSpeechKey] = useState("");
   const [azureSpeechRegion, setAzureSpeechRegion] = useState("");
   const [azureSpeechVoice, setAzureSpeechVoice] = useState("ko-KR-SunHiNeural");
+  const [manusApiKey, setManusApiKey] = useState("");
 
   const [showOpenRouterApiKey, setShowOpenRouterApiKey] = useState(false);
   const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
@@ -54,6 +56,7 @@ export function SettingsPage() {
     useState(false);
   const [showSecondaryOpenAiApiKey, setShowSecondaryOpenAiApiKey] = useState(false);
   const [showAzureSpeechKey, setShowAzureSpeechKey] = useState(false);
+  const [showManusApiKey, setShowManusApiKey] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
@@ -87,6 +90,7 @@ export function SettingsPage() {
     setAzureSpeechKey(settings?.azureSpeechKey ?? "");
     setAzureSpeechRegion(settings?.azureSpeechRegion ?? "");
     setAzureSpeechVoice(settings?.azureSpeechVoice ?? "ko-KR-SunHiNeural");
+    setManusApiKey(settings?.manusApiKey ?? "");
   }, [settings]);
 
   const handleSave = async () => {
@@ -110,7 +114,11 @@ export function SettingsPage() {
       secondaryOpenAiModel: secondaryOpenAiModel.trim() || undefined,
       azureSpeechKey: azureSpeechKey.trim() || undefined,
       azureSpeechRegion: azureSpeechRegion.trim() || undefined,
-      azureSpeechVoice: azureSpeechVoice.trim() || undefined
+      azureSpeechVoice: azureSpeechVoice.trim() || undefined,
+      manusApiKey: manusApiKey.trim() || undefined
+    });
+    await saveWorkflowConfig({
+      manusApiKey: manusApiKey.trim() || undefined
     });
 
     setSaving(false);
@@ -455,6 +463,36 @@ export function SettingsPage() {
               ? "지금은 AI 연결 1이 기본 연결로 사용됩니다. AI 연결 2는 다음 단계에서 슬롯별 참조 대상으로 연결할 예정입니다."
               : "Right now, AI Connection 1 is used as the default connection. AI Connection 2 is stored and will be wired into per-slot selection next."}
           </p>
+        </div>
+
+        <div className="manual-install-box">
+          <strong>Manus API</strong>
+          <p className="subtle">
+            {isKorean
+              ? "AI 작업실의 Manus 전송 기능에서 사용합니다. 키는 로컬 보안 저장소에 저장됩니다."
+              : "Used by AI Workspace to submit prompts and attachments to Manus. Stored in the local secure store."}
+          </p>
+          <div className="form-grid">
+            <label className="field">
+              <span>Manus API Key</span>
+              <div className="secret-input-row">
+                <input
+                  className="text-input"
+                  type={showManusApiKey ? "text" : "password"}
+                  value={manusApiKey}
+                  onChange={(event) => setManusApiKey(event.target.value)}
+                  placeholder="manus_..."
+                />
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setShowManusApiKey((value) => !value)}
+                >
+                  {showManusApiKey ? (isKorean ? "숨기기" : "Hide") : isKorean ? "보기" : "Show"}
+                </button>
+              </div>
+            </label>
+          </div>
         </div>
 
         <div className="manual-install-box">

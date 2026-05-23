@@ -70,6 +70,7 @@ export interface SceneScriptVideoMediaLayer {
   previewUrl?: string;
   startSec: number;
   durationSec: number;
+  sourceOffsetSec?: number;
   trackIndex?: number;
   fit?: "cover" | "contain";
   opacity?: number;
@@ -77,16 +78,26 @@ export interface SceneScriptVideoMediaLayer {
   yPct?: number;
   widthPct?: number;
   heightPct?: number;
+  crop?: {
+    topPct?: number;
+    rightPct?: number;
+    bottomPct?: number;
+    leftPct?: number;
+  };
+  volume?: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 
 export interface SceneScriptAudioLayer {
   id: string;
-  source: "tts" | "local" | "manual";
+  source: "tts" | "local" | "manual" | "pixabay";
   label?: string;
   localPath?: string;
   relativePath?: string;
   startSec: number;
   durationSec: number;
+  sourceOffsetSec?: number;
   trackIndex?: number;
   volume?: number;
 }
@@ -100,7 +111,9 @@ export interface SceneScriptItem {
   videoTextOverlay?: SceneScriptVideoTextOverlay;
   videoTextOverlays?: SceneScriptVideoTextOverlay[];
   motion: "none" | "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "wipe-transition" | "shake";
+  startSec?: number;
   durationSec: number;
+  backgroundColor?: string;
   cardDesign?: {
     id?: string;
     text?: string;
@@ -205,6 +218,75 @@ export interface SceneScriptCardNewsOptions {
   templateBackgroundPath?: string;
 }
 
+export type AiWorkspaceMaterialKind = "text" | "image" | "video" | "link" | "file";
+export type AiWorkspaceTargetKind = "card_news" | "video" | "canva";
+export type AiWorkspaceOutputFormat = "shortform" | "longform" | "slides";
+
+export interface AiWorkspaceMaterial {
+  id: string;
+  kind: AiWorkspaceMaterialKind;
+  label: string;
+  text?: string;
+  localPath?: string;
+  sourceUrl?: string;
+  mimeType?: string;
+  order: number;
+}
+
+export interface AiWorkspaceMaterialGroup {
+  id: string;
+  title: string;
+  role?: "intro" | "evidence" | "twist" | "cta" | "visual_reference" | "source" | "custom";
+  order: number;
+  materials: AiWorkspaceMaterial[];
+}
+
+export interface AiWorkspacePlanItem {
+  index: number;
+  title: string;
+  text: string;
+  durationSec?: number;
+  sceneRole?: "hook" | "context" | "evidence" | "turning_point" | "climax" | "cta" | "custom";
+  visualPrompt?: string;
+  layoutIntent?: string;
+  editNote?: string;
+  sourceMaterialIds?: string[];
+}
+
+export interface AiWorkspacePlan {
+  summary: string;
+  targetKind: AiWorkspaceTargetKind;
+  canvaPrompt: string;
+  items: AiWorkspacePlanItem[];
+  generatedAt: string;
+  provider?: "openrouter" | "openai" | "local";
+  model?: string;
+  rawText?: string;
+}
+
+export interface AiWorkspaceGenerateRequest {
+  prompt: string;
+  targetKind: AiWorkspaceTargetKind;
+  fallbackRawText: string;
+}
+
+export interface AiWorkspaceGenerateResult {
+  rawText: string;
+  provider: AiWorkspacePlan["provider"];
+  model?: string;
+}
+
+export interface AiWorkspaceState {
+  targetKind: AiWorkspaceTargetKind;
+  outputFormat?: AiWorkspaceOutputFormat;
+  prompt: string;
+  formatInstructions?: Partial<Record<AiWorkspaceOutputFormat, string>>;
+  manusPrompt?: string;
+  materials: AiWorkspaceMaterial[];
+  materialGroups?: AiWorkspaceMaterialGroup[];
+  plan?: AiWorkspacePlan;
+}
+
 export interface SceneScriptDocument {
   schemaVersion: 1;
   jobId: string;
@@ -212,11 +294,28 @@ export interface SceneScriptDocument {
   category: SceneScriptCategory;
   targetDurationSec: number;
   scenes: SceneScriptItem[];
+  videoCanvas?: {
+    preset: "landscape_16_9" | "reels_9_16" | "shorts_9_16";
+    width: number;
+    height: number;
+  };
+  videoTextOverlays?: SceneScriptVideoTextOverlay[];
   videoMediaLayers?: SceneScriptVideoMediaLayer[];
   audioLayers?: SceneScriptAudioLayer[];
   subtitleStyle: SceneScriptSubtitleStyle;
   voiceProfile: SceneScriptVoiceProfile;
   cardNews?: SceneScriptCardNewsOptions;
+  aiWorkspace?: AiWorkspaceState;
+}
+
+export interface SceneScriptEditorDraft {
+  schemaVersion: 1;
+  draftVersion: 1;
+  savedAt: string;
+  saveReason: "manual" | "autosave";
+  accountId?: string;
+  packagePath?: string;
+  document: SceneScriptDocument;
 }
 
 export interface PixabayAssetSearchRequest {
@@ -253,6 +352,34 @@ export interface PixabayAssetImportResult {
   appliedSceneNo?: number;
 }
 
+export interface FreesoundAudioSearchRequest {
+  apiKey: string;
+  query: string;
+  perPage?: number;
+}
+
+export interface FreesoundAudioResult {
+  id: string;
+  title: string;
+  previewUrl: string;
+  downloadUrl: string;
+  sourceUrl: string;
+  durationSec?: number;
+  tags?: string[];
+  user?: string;
+  license?: string;
+}
+
+export interface FreesoundAudioImportRequest {
+  packagePath: string;
+  asset: FreesoundAudioResult;
+}
+
+export interface FreesoundAudioImportResult {
+  localPath: string;
+  relativePath: string;
+}
+
 export interface LocalAssetImportRequest {
   packagePath: string;
   sceneNo?: number;
@@ -262,8 +389,74 @@ export interface LocalAssetImportRequest {
 export interface LocalAssetImportResult {
   localPath: string;
   relativePath: string;
-  mediaType: "video" | "image";
+  mediaType: "video" | "image" | "audio";
   appliedSceneNo?: number;
+}
+
+export interface UploadedAssetRecord {
+  id: string;
+  label: string;
+  localPath: string;
+  relativePath: string;
+  mediaType: "video" | "image" | "audio";
+  source: "local" | "clipboard" | "source-clip";
+  sizeBytes?: number;
+  updatedAt?: string;
+}
+
+export interface AiWorkspaceClipboardAssetRequest {
+  packagePath: string;
+  dataUrl: string;
+  fileName?: string;
+}
+
+export interface AiWorkspaceClipboardAssetResult {
+  localPath: string;
+  relativePath: string;
+  mediaType: "image";
+  mimeType: string;
+}
+
+export interface AiWorkspaceLinkAnalysisRequest {
+  sourceUrl: string;
+}
+
+export interface AiWorkspaceLinkAnalysisResult {
+  sourceUrl: string;
+  finalUrl: string;
+  title: string;
+  description: string;
+  siteName?: string;
+  imageUrl?: string;
+  author?: string;
+  publishedAt?: string;
+  keywords: string[];
+  excerpt: string;
+}
+
+export interface AiWorkspaceManusSubmitRequest {
+  prompt: string;
+  packagePath?: string;
+  attachments?: Array<{
+    id: string;
+    label: string;
+    kind: AiWorkspaceMaterialKind;
+    localPath?: string;
+    sourceUrl?: string;
+    mimeType?: string;
+  }>;
+}
+
+export interface AiWorkspaceManusSubmitResult {
+  ok: boolean;
+  taskId: string;
+  taskUrl?: string;
+  uploadedFiles: Array<{
+    id: string;
+    label: string;
+    fileId: string;
+  }>;
+  message: string;
 }
 
 export interface VoiceLayerGenerationRequest {

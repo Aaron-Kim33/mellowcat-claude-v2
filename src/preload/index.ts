@@ -135,12 +135,41 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:youtube:uploadPackage", packagePath),
   inspectSceneScript: (packagePath: string): Promise<SceneScriptDocument> =>
     ipcRenderer.invoke("automation:create:inspectSceneScript", packagePath),
+  inspectEditorDraft: (packagePath: string) =>
+    ipcRenderer.invoke("automation:create:inspectEditorDraft", packagePath),
+  saveEditorDraft: (packagePath: string, document: SceneScriptDocument, saveReason) =>
+    ipcRenderer.invoke("automation:create:saveEditorDraft", packagePath, document, saveReason),
+  inspectAiWorkspace: (
+    packagePath: string
+  ): Promise<NonNullable<SceneScriptDocument["aiWorkspace"]> | undefined> =>
+    ipcRenderer.invoke("automation:create:inspectAiWorkspace", packagePath),
+  updateAiWorkspace: (
+    packagePath: string,
+    workspace: NonNullable<SceneScriptDocument["aiWorkspace"]>
+  ): Promise<NonNullable<SceneScriptDocument["aiWorkspace"]>> =>
+    ipcRenderer.invoke("automation:create:updateAiWorkspace", packagePath, workspace),
+  generateAiWorkspacePlan: (request) =>
+    ipcRenderer.invoke("automation:create:generateAiWorkspacePlan", request),
   searchPixabayAssets: (request) =>
     ipcRenderer.invoke("automation:create:searchPixabayAssets", request),
   importPixabayAsset: (request) =>
     ipcRenderer.invoke("automation:create:importPixabayAsset", request),
+  searchFreesoundAudio: (request) =>
+    ipcRenderer.invoke("automation:create:searchFreesoundAudio", request),
+  importFreesoundAudio: (request) =>
+    ipcRenderer.invoke("automation:create:importFreesoundAudio", request),
   importLocalAsset: (request) =>
     ipcRenderer.invoke("automation:create:importLocalAsset", request),
+  listUploadedAssets: (packagePath: string) =>
+    ipcRenderer.invoke("automation:create:listUploadedAssets", packagePath),
+  deleteUploadedAsset: (packagePath: string, asset) =>
+    ipcRenderer.invoke("automation:create:deleteUploadedAsset", packagePath, asset),
+  saveAiWorkspaceClipboardAsset: (request) =>
+    ipcRenderer.invoke("automation:create:saveAiWorkspaceClipboardAsset", request),
+  analyzeAiWorkspaceLink: (request) =>
+    ipcRenderer.invoke("automation:create:analyzeAiWorkspaceLink", request),
+  submitAiWorkspaceToManus: (request) =>
+    ipcRenderer.invoke("automation:create:submitAiWorkspaceToManus", request),
   generateVoiceLayer: (request) =>
     ipcRenderer.invoke("automation:create:generateVoiceLayer", request),
   updateSceneScript: (

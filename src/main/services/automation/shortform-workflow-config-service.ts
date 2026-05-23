@@ -10,7 +10,9 @@ const SECRET_KEYS = [
   "openAiApiKey",
   "telegramBotToken",
   "pexelsApiKey",
+  "freesoundApiKey",
   "fluxApiKey",
+  "manusApiKey",
   "youtubeDataApiKey",
   "youtubeOAuthClientSecret",
   "instagramAccessToken"
@@ -71,6 +73,7 @@ export class ShortformWorkflowConfigService {
     assignIfMissing("youtubeAudience", settings.youtubeAudience);
     assignIfMissing("youtubeOAuthClientId", settings.youtubeOAuthClientId);
     assignIfMissing("youtubeOAuthRedirectPort", settings.youtubeOAuthRedirectPort);
+    assignIfMissing("manusApiKey", settings.manusApiKey);
 
     for (const key of SECRET_KEYS) {
       const workflowKey = `workflow:${key}`;
@@ -286,6 +289,11 @@ export class ShortformWorkflowConfigService {
     if (normalizedModel) {
       normalized.fluxModel = normalizedModel;
     }
+    normalized.openRouterModel = this.normalizeOpenRouterModel(normalized.openRouterModel);
+    normalized.inputAiModel = this.normalizeOpenRouterModel(normalized.inputAiModel);
+    normalized.processAiModel = this.normalizeOpenRouterModel(normalized.processAiModel);
+    normalized.createAiModel = this.normalizeOpenRouterModel(normalized.createAiModel);
+    normalized.outputAiModel = this.normalizeOpenRouterModel(normalized.outputAiModel);
 
     return normalized;
   }
@@ -321,6 +329,20 @@ export class ShortformWorkflowConfigService {
       normalized === "black-forest-labs/flux-1.1-pro"
     ) {
       return "black-forest-labs/flux.2-pro";
+    }
+
+    return model;
+  }
+
+  private normalizeOpenRouterModel(rawModel?: string): string | undefined {
+    const model = rawModel?.trim();
+    if (!model) {
+      return undefined;
+    }
+
+    const normalized = model.toLowerCase();
+    if (normalized.startsWith("anthropic/claude-3")) {
+      return "openai/gpt-5.4-mini";
     }
 
     return model;

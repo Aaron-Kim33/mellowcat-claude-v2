@@ -2,13 +2,27 @@ import type { AppMeta } from "./app";
 import type { ShortformWorkflowConfig, TelegramControlStatus } from "./automation";
 import type {
   CardNewsTemplateRecord,
+  AiWorkspaceGenerateRequest,
+  AiWorkspaceGenerateResult,
+  AiWorkspaceClipboardAssetRequest,
+  AiWorkspaceClipboardAssetResult,
+  AiWorkspaceLinkAnalysisRequest,
+  AiWorkspaceLinkAnalysisResult,
+  AiWorkspaceManusSubmitRequest,
+  AiWorkspaceManusSubmitResult,
+  FreesoundAudioImportRequest,
+  FreesoundAudioImportResult,
+  FreesoundAudioResult,
+  FreesoundAudioSearchRequest,
   LocalAssetImportRequest,
   LocalAssetImportResult,
+  UploadedAssetRecord,
   PixabayAssetImportRequest,
   PixabayAssetImportResult,
   PixabayAssetResult,
   PixabayAssetSearchRequest,
   SceneScriptDocument,
+  SceneScriptEditorDraft,
   VoiceLayerGenerationRequest,
   VoiceLayerGenerationResult
 } from "./media-generation";
@@ -153,9 +167,38 @@ export interface MellowCatAPI {
     pickYouTubeThumbnailFile: () => Promise<string | undefined>;
     uploadYouTubePackage: (packagePath: string) => Promise<YouTubeUploadResult>;
     inspectSceneScript: (packagePath: string) => Promise<SceneScriptDocument>;
+    inspectEditorDraft: (packagePath: string) => Promise<SceneScriptEditorDraft | undefined>;
+    saveEditorDraft: (
+      packagePath: string,
+      document: SceneScriptDocument,
+      saveReason: SceneScriptEditorDraft["saveReason"]
+    ) => Promise<SceneScriptEditorDraft>;
+    inspectAiWorkspace: (
+      packagePath: string
+    ) => Promise<NonNullable<SceneScriptDocument["aiWorkspace"]> | undefined>;
+    updateAiWorkspace: (
+      packagePath: string,
+      workspace: NonNullable<SceneScriptDocument["aiWorkspace"]>
+    ) => Promise<NonNullable<SceneScriptDocument["aiWorkspace"]>>;
+    generateAiWorkspacePlan: (
+      request: AiWorkspaceGenerateRequest
+    ) => Promise<AiWorkspaceGenerateResult>;
     searchPixabayAssets: (request: PixabayAssetSearchRequest) => Promise<PixabayAssetResult[]>;
     importPixabayAsset: (request: PixabayAssetImportRequest) => Promise<PixabayAssetImportResult>;
+    searchFreesoundAudio: (request: FreesoundAudioSearchRequest) => Promise<FreesoundAudioResult[]>;
+    importFreesoundAudio: (request: FreesoundAudioImportRequest) => Promise<FreesoundAudioImportResult>;
     importLocalAsset: (request: LocalAssetImportRequest) => Promise<LocalAssetImportResult | undefined>;
+    listUploadedAssets: (packagePath: string) => Promise<UploadedAssetRecord[]>;
+    deleteUploadedAsset: (packagePath: string, asset: UploadedAssetRecord) => Promise<UploadedAssetRecord[]>;
+    saveAiWorkspaceClipboardAsset: (
+      request: AiWorkspaceClipboardAssetRequest
+    ) => Promise<AiWorkspaceClipboardAssetResult>;
+    analyzeAiWorkspaceLink: (
+      request: AiWorkspaceLinkAnalysisRequest
+    ) => Promise<AiWorkspaceLinkAnalysisResult>;
+    submitAiWorkspaceToManus: (
+      request: AiWorkspaceManusSubmitRequest
+    ) => Promise<AiWorkspaceManusSubmitResult>;
     generateVoiceLayer: (request: VoiceLayerGenerationRequest) => Promise<VoiceLayerGenerationResult>;
     updateSceneScript: (
       packagePath: string,

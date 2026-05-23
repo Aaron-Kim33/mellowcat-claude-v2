@@ -1,6 +1,6 @@
 {
   "name": "mellowcat-claude-v2",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "private": true,
   "description": "MellowCat launcher for Claude Code and MCP packages.",
   "author": "Yuncheol Kim <gakphe@gmail.com>",
@@ -13,6 +13,8 @@
     "server:build": "tsc -p tsconfig.server.json",
     "server:start": "node dist/server/index.js",
     "start": "node dist/server/index.js",
+    "app": "npm run build && electron .",
+    "app:run": "electron .",
     "build": "npm run build:renderer && npm run build:main && npm run server:build",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
