@@ -172,6 +172,8 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:create:submitAiWorkspaceToManus", request),
   generateVoiceLayer: (request) =>
     ipcRenderer.invoke("automation:create:generateVoiceLayer", request),
+  exportVideoEditorProject: (request) =>
+    ipcRenderer.invoke("automation:create:exportVideoEditorProject", request),
   updateSceneScript: (
     packagePath: string,
     document: SceneScriptDocument

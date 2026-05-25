@@ -24,7 +24,9 @@ import type {
   SceneScriptDocument,
   SceneScriptEditorDraft,
   VoiceLayerGenerationRequest,
-  VoiceLayerGenerationResult
+  VoiceLayerGenerationResult,
+  VideoEditorExportRequest,
+  VideoEditorExportResult
 } from "./media-generation";
 import type {
   AuthSession,
@@ -200,6 +202,7 @@ export interface MellowCatAPI {
       request: AiWorkspaceManusSubmitRequest
     ) => Promise<AiWorkspaceManusSubmitResult>;
     generateVoiceLayer: (request: VoiceLayerGenerationRequest) => Promise<VoiceLayerGenerationResult>;
+    exportVideoEditorProject: (request: VideoEditorExportRequest) => Promise<VideoEditorExportResult>;
     updateSceneScript: (
       packagePath: string,
       document: SceneScriptDocument

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { load } from "cheerio";
 import { BrowserWindow, desktopCapturer, dialog, ipcMain, nativeImage, screen, shell } from "electron";
 import type { DesktopCapturerSource, OpenDialogOptions } from "electron";
@@ -29,9 +29,19 @@ import type {
   PixabayAssetSearchRequest,
   SceneScriptDocument,
   SceneScriptEditorDraft,
+  SceneScriptVideoMediaLayer,
+  SceneScriptAudioLayer,
+  SceneScriptVideoTextOverlay,
+  VideoEditorExportRequest,
+  VideoEditorExportResult,
   VoiceLayerGenerationRequest,
   VoiceLayerGenerationResult
 } from "../../common/types/media-generation";
+import {
+  buildVideoMediaLayerExportLayout,
+  hasPercentCrop,
+  resolveLayerSourceCrop
+} from "../../common/video-layer-layout";
 import type { YouTubeUploadRequest } from "../../common/types/settings";
 import type {
   AutoProcessDraftPayload,
@@ -874,6 +884,99 @@ export function registerAutomationIpc(
     }
     return ".png";
   };
+  const parseFfmpegDurationSec = (output: string) => {
+    const match = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+    if (!match) {
+      return undefined;
+    }
+    const duration = (Number(match[1]) || 0) * 3600 + (Number(match[2]) || 0) * 60 + (Number(match[3]) || 0);
+    return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+  };
+  const probeVideoContentCrop = (
+    filePath: string,
+    width?: number,
+    height?: number,
+    durationSec?: number
+  ) => {
+    if (!width || !height) {
+      return undefined;
+    }
+    try {
+      const seekSec = Math.max(0, Math.min((durationSec ?? 1) / 2, Math.max(0, (durationSec ?? 1) - 0.25)));
+      const result = spawnSync(
+        getBundledFfmpegPath(),
+        [
+          "-hide_banner",
+          "-ss",
+          seekSec.toFixed(3),
+          "-i",
+          filePath,
+          "-frames:v",
+          "24",
+          "-vf",
+          "cropdetect=limit=24:round=2:reset=0",
+          "-f",
+          "null",
+          "-"
+        ],
+        { windowsHide: true, encoding: "utf8" }
+      );
+      const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      const matches = [...output.matchAll(/crop=(\d+):(\d+):(\d+):(\d+)/gi)];
+      const last = matches[matches.length - 1];
+      if (!last) {
+        return undefined;
+      }
+      const cropWidth = Number(last[1]) || width;
+      const cropHeight = Number(last[2]) || height;
+      const cropX = Number(last[3]) || 0;
+      const cropY = Number(last[4]) || 0;
+      if (cropWidth >= width * 0.98 && cropHeight >= height * 0.98) {
+        return undefined;
+      }
+      return {
+        leftPct: Number(((cropX / width) * 100).toFixed(3)),
+        rightPct: Number((((width - cropX - cropWidth) / width) * 100).toFixed(3)),
+        topPct: Number(((cropY / height) * 100).toFixed(3)),
+        bottomPct: Number((((height - cropY - cropHeight) / height) * 100).toFixed(3))
+      };
+    } catch {
+      return undefined;
+    }
+  };
+  const probeAssetMetadata = (filePath: string, mediaType: "video" | "image" | "audio") => {
+    if (mediaType === "image") {
+      const image = nativeImage.createFromPath(filePath);
+      const size = image.isEmpty() ? undefined : image.getSize();
+      return {
+        width: size?.width,
+        height: size?.height,
+        hasAudio: false
+      };
+    }
+    try {
+      const result = spawnSync(getBundledFfmpegPath(), ["-hide_banner", "-i", filePath], {
+        windowsHide: true,
+        encoding: "utf8"
+      });
+      const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      const videoMatch = output.match(/Video:\s*.*?(\d{2,5})x(\d{2,5})/i);
+      const width = videoMatch ? Number(videoMatch[1]) || undefined : undefined;
+      const height = videoMatch ? Number(videoMatch[2]) || undefined : undefined;
+      const fpsMatch = output.match(/,\s*(\d+(?:\.\d+)?)\s*fps/i);
+      const durationSec = parseFfmpegDurationSec(output);
+      return {
+        width,
+        height,
+        durationSec,
+        fps: fpsMatch ? Number(fpsMatch[1]) || undefined : undefined,
+        hasAudio: /Stream #\d+:\d+.*Audio:/i.test(output),
+        contentCrop: mediaType === "video" ? probeVideoContentCrop(filePath, width, height, durationSec) : undefined
+      };
+    } catch {
+      return {};
+    }
+  };
   const listPackageAssetDirectory = (
     packagePath: string,
     relativeDir: string,
@@ -895,6 +998,7 @@ export function registerAutomationIpc(
         }
         const stats = fs.statSync(localPath);
         const relativePath = path.relative(packagePath, localPath);
+        const mediaMetadata = probeAssetMetadata(localPath, mediaType);
         records.push({
           id: `${source}:${relativePath.replace(/\\/g, "/")}`,
           label: entry.name,
@@ -903,7 +1007,11 @@ export function registerAutomationIpc(
           mediaType,
           source,
           sizeBytes: stats.size,
-          updatedAt: stats.mtime.toISOString()
+          updatedAt: stats.mtime.toISOString(),
+          durationSec: mediaMetadata.durationSec,
+          width: mediaMetadata.width,
+          height: mediaMetadata.height,
+          mediaMetadata
         });
       });
     return records;
@@ -1821,10 +1929,12 @@ export function registerAutomationIpc(
         writeCaptureLog(`raw complete path=${rawOutputPath} size=${fs.statSync(rawOutputPath).size}`);
 
         await new Promise<void>((resolve, reject) => {
+          const cropX = Math.max(0, screenCaptureRect.x - (screenCaptureRect.x % 2));
+          const cropY = Math.max(0, screenCaptureRect.y - (screenCaptureRect.y % 2));
+          const cropWidth = Math.max(2, screenCaptureRect.width - (screenCaptureRect.width % 2));
+          const cropHeight = Math.max(2, screenCaptureRect.height - (screenCaptureRect.height % 2));
           const cropFilter = [
-            `crop=${screenCaptureRect.width}:${screenCaptureRect.height}:${screenCaptureRect.x}:${screenCaptureRect.y}`,
-            "scale=1080:1920:force_original_aspect_ratio=decrease",
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
+            `crop=${cropWidth}:${cropHeight}:${cropX}:${cropY}`,
             "setsar=1"
           ].join(",");
           const ffmpegArgs = [
@@ -2379,12 +2489,17 @@ export function registerAutomationIpc(
         localPath = scenePath;
         appliedSceneNo = request.sceneNo;
       }
+      const mediaMetadata = probeAssetMetadata(localPath, mediaType);
 
       return {
         localPath,
         relativePath: path.relative(packagePath, localPath),
         mediaType,
-        appliedSceneNo
+        appliedSceneNo,
+        durationSec: mediaMetadata.durationSec,
+        width: mediaMetadata.width,
+        height: mediaMetadata.height,
+        mediaMetadata
       };
     }
   );
@@ -2527,6 +2642,612 @@ export function registerAutomationIpc(
       };
     }
   );
+  const clampNumber = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+  const resolvePackageFilePath = (packagePath: string, localPath?: string, relativePath?: string) => {
+    if (localPath?.trim()) {
+      return localPath.trim();
+    }
+    if (relativePath?.trim()) {
+      return path.isAbsolute(relativePath.trim())
+        ? relativePath.trim()
+        : path.join(packagePath, relativePath.trim());
+    }
+    return "";
+  };
+  const normalizeFfmpegPath = (value: string) => value.replace(/\\/g, "/").replace(/:/, "\\:");
+  const escapeFfmpegFilterPath = (value: string) =>
+    normalizeFfmpegPath(value).replace(/'/g, "\\'");
+  const sanitizeColorForFfmpeg = (value?: string, fallback = "0xFFFFFF") => {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return fallback;
+    }
+    const hex = normalized.match(/^#?([0-9a-f]{6})$/i)?.[1];
+    if (hex) {
+      return `0x${hex.toUpperCase()}`;
+    }
+    return fallback;
+  };
+  const buildEnableBetween = (startSec: number, endSec: number) =>
+    `between(t\\,${startSec.toFixed(3)}\\,${endSec.toFixed(3)})`;
+  const getExportFontScale = (canvasWidth: number, canvasHeight: number) =>
+    Math.max(1, Math.min(5, Math.min(canvasWidth, canvasHeight) / 360));
+  const normalizeExportText = (value?: string) =>
+    (value ?? "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\u2028|\u2029/g, "\n")
+      .replace(/\u200b/g, "");
+  const secondsToAssTime = (value: number) => {
+    const totalCentiseconds = Math.max(0, Math.round(value * 100));
+    const centiseconds = totalCentiseconds % 100;
+    const totalSeconds = Math.floor(totalCentiseconds / 100);
+    const seconds = totalSeconds % 60;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const minutes = totalMinutes % 60;
+    const hours = Math.floor(totalMinutes / 60);
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
+  };
+  const hexToAssColor = (value?: string, fallback = "FFFFFF") => {
+    const hex = value?.trim().match(/^#?([0-9a-f]{6})$/i)?.[1] ?? fallback;
+    const normalized = hex.padStart(6, "0").slice(0, 6).toUpperCase();
+    return `&H00${normalized.slice(4, 6)}${normalized.slice(2, 4)}${normalized.slice(0, 2)}&`;
+  };
+  const escapeAssText = (value: string) =>
+    normalizeExportText(value)
+      .replace(/\\/g, "\\\\")
+      .replace(/\{/g, "\\{")
+      .replace(/\}/g, "\\}")
+      .split("\n")
+      .join("\\N");
+  const measureAssTextUnits = (value: string) =>
+    [...value].reduce((total, char) => {
+      if (/\s/.test(char)) {
+        return total + 0.35;
+      }
+      if (/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u3000-\u9fff\uff00-\uffef]/.test(char)) {
+        return total + 1;
+      }
+      if (/[A-Z0-9]/.test(char)) {
+        return total + 0.64;
+      }
+      if (/[a-z]/.test(char)) {
+        return total + 0.54;
+      }
+      return total + 0.45;
+    }, 0);
+  const splitLongAssToken = (token: string, maxUnits: number) => {
+    const lines: string[] = [];
+    let current = "";
+    [...token].forEach((char) => {
+      const next = `${current}${char}`;
+      if (current && measureAssTextUnits(next) > maxUnits) {
+        lines.push(current);
+        current = char;
+        return;
+      }
+      current = next;
+    });
+    if (current) {
+      lines.push(current);
+    }
+    return lines;
+  };
+  const wrapAssTextToBox = (value: string, boxWidth: number, fontSize: number, outlineWidth: number) => {
+    const normalized = normalizeExportText(value);
+    const maxUnits = Math.max(2, (boxWidth - outlineWidth * 2) / Math.max(1, fontSize));
+    return normalized
+      .split("\n")
+      .map((paragraph) => {
+        const tokens = paragraph.match(/\S+|\s+/g) ?? [paragraph];
+        const lines: string[] = [];
+        let current = "";
+        tokens.forEach((token) => {
+          if (!token.trim()) {
+            if (current && !current.endsWith(" ")) {
+              current += " ";
+            }
+            return;
+          }
+          if (measureAssTextUnits(token) > maxUnits) {
+            splitLongAssToken(token, maxUnits).forEach((part) => {
+              const candidate = current ? `${current}${part}` : part;
+              if (current && measureAssTextUnits(candidate) > maxUnits) {
+                lines.push(current.trimEnd());
+                current = part;
+              } else {
+                current = candidate;
+              }
+            });
+            return;
+          }
+          const candidate = current ? `${current}${token}` : token;
+          if (current && measureAssTextUnits(candidate) > maxUnits) {
+            lines.push(current.trimEnd());
+            current = token;
+            return;
+          }
+          current = candidate;
+        });
+        if (current.trim()) {
+          lines.push(current.trimEnd());
+        }
+        return lines.length > 0 ? lines.join("\n") : "";
+      })
+      .join("\n");
+  };
+  const buildAssDocument = (options: {
+    canvasWidth: number;
+    canvasHeight: number;
+    overlays: Array<{
+      startSec: number;
+      durationSec: number;
+      centerX: number;
+      centerY: number;
+      boxWidth: number;
+      fontSize: number;
+      outlineWidth: number;
+      textColor?: string;
+      outlineColor?: string;
+      text: string;
+    }>;
+  }) => {
+    const lines = [
+      "[Script Info]",
+      "ScriptType: v4.00+",
+      "WrapStyle: 2",
+      "ScaledBorderAndShadow: yes",
+      `PlayResX: ${options.canvasWidth}`,
+      `PlayResY: ${options.canvasHeight}`,
+      "",
+      "[V4+ Styles]",
+      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+      "Style: Default,Malgun Gothic,60,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,0,5,0,0,0,1",
+      "",
+      "[Events]",
+      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+    ];
+    options.overlays.forEach((overlay) => {
+      const start = secondsToAssTime(overlay.startSec);
+      const end = secondsToAssTime(overlay.startSec + overlay.durationSec);
+      const text = escapeAssText(wrapAssTextToBox(overlay.text, overlay.boxWidth, overlay.fontSize, overlay.outlineWidth));
+      if (!text.trim()) {
+        return;
+      }
+      const tags = [
+        "\\an5",
+        "\\q2",
+        `\\pos(${overlay.centerX},${overlay.centerY})`,
+        `\\fs${overlay.fontSize}`,
+        `\\bord${overlay.outlineWidth}`,
+        "\\shad0",
+        `\\c${hexToAssColor(overlay.textColor)}`,
+        `\\3c${hexToAssColor(overlay.outlineColor, "000000")}`
+      ].join("");
+      lines.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,{${tags}}${text}`);
+    });
+    return lines.join("\r\n");
+  };
+  const runFfmpeg = (args: string[]) =>
+    new Promise<void>((resolve, reject) => {
+      const child = spawn(getBundledFfmpegPath(), args, {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`FFmpeg export failed with exit code ${code}.\n${stderr.slice(-4000)}`));
+      });
+    });
+  const probeHasAudioStream = (filePath: string) =>
+    new Promise<boolean>((resolve) => {
+      const child = spawn(getBundledFfmpegPath(), ["-hide_banner", "-i", filePath], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let output = "";
+      child.stderr.on("data", (chunk) => {
+        output += String(chunk);
+      });
+      child.on("error", () => resolve(false));
+      child.on("close", () => resolve(/Stream #\d+:\d+.*Audio:/i.test(output)));
+    });
+  const probeMediaDurationSec = (filePath: string) =>
+    new Promise<number | null>((resolve) => {
+      const child = spawn(getBundledFfmpegPath(), ["-hide_banner", "-i", filePath], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let output = "";
+      child.stderr.on("data", (chunk) => {
+        output += String(chunk);
+      });
+      child.on("error", () => resolve(null));
+      child.on("close", () => {
+        const match = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+        if (!match) {
+          resolve(null);
+          return;
+        }
+        const hours = Number(match[1]) || 0;
+        const minutes = Number(match[2]) || 0;
+        const seconds = Number(match[3]) || 0;
+        const duration = hours * 3600 + minutes * 60 + seconds;
+        resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+      });
+    });
+  const probeVideoFrameBrightness = (
+    filePath: string,
+    seekSec: number
+  ) =>
+    new Promise<number | null>((resolve) => {
+      const child = spawn(
+        getBundledFfmpegPath(),
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-ss",
+          Math.max(0, seekSec).toFixed(3),
+          "-i",
+          filePath,
+          "-frames:v",
+          "1",
+          "-vf",
+          "scale=1:1,format=rgb24",
+          "-f",
+          "rawvideo",
+          "pipe:1"
+        ],
+        {
+          windowsHide: true,
+          stdio: ["ignore", "pipe", "pipe"]
+        }
+      );
+      const chunks: Buffer[] = [];
+      child.stdout.on("data", (chunk) => {
+        chunks.push(Buffer.from(chunk));
+      });
+      child.on("error", () => resolve(null));
+      child.on("close", () => {
+        const bytes = Buffer.concat(chunks);
+        if (bytes.length < 3) {
+          resolve(null);
+          return;
+        }
+        resolve((bytes[0] + bytes[1] + bytes[2]) / 3);
+      });
+    });
+  const normalizeSourceOffsetSec = (offsetSec: number, sourceDurationSec: number | null) => {
+    if (!sourceDurationSec || sourceDurationSec <= 0.05) {
+      return Math.max(0, offsetSec);
+    }
+    if (offsetSec < sourceDurationSec - 0.05) {
+      return Math.max(0, offsetSec);
+    }
+    // Old projects can keep offsets from the original recording even after a shorter transcode.
+    // Wrap into the available media range instead of exporting a black segment.
+    return Math.max(0, offsetSec % sourceDurationSec);
+  };
+  const buildVideoEditorExport = async (
+    request: VideoEditorExportRequest,
+    outputPath: string
+  ): Promise<VideoEditorExportResult> => {
+    const packagePath = request.packagePath?.trim();
+    if (!packagePath || !fs.existsSync(packagePath)) {
+      throw new Error("패키지 경로를 찾지 못했습니다.");
+    }
+    const document = productionPackageService.updateSceneScript(packagePath, request.document);
+    const canvas = document.videoCanvas ?? {
+      preset: "landscape_16_9" as const,
+      width: 1920,
+      height: 1080
+    };
+    const canvasWidth = Math.max(1, Math.round(canvas.width || 1920));
+    const canvasHeight = Math.max(1, Math.round(canvas.height || 1080));
+    const sceneEndSec = document.scenes.reduce((max, scene) => {
+      const startSec = Math.max(0, Number(scene.startSec ?? 0) || 0);
+      const durationSec = Math.max(0.1, Number(scene.durationSec) || 0.1);
+      return Math.max(max, startSec + durationSec);
+    }, 0);
+    const editorLayerEndSec = [
+      ...(document.videoMediaLayers ?? []),
+      ...(document.audioLayers ?? []),
+      ...(document.videoTextOverlays ?? [])
+    ].reduce((max, layer) => {
+      const startSec = Math.max(0, Number(layer.startSec ?? 0) || 0);
+      const durationSec = Math.max(0.1, Number(layer.durationSec ?? 0) || 0.1);
+      return Math.max(max, startSec + durationSec);
+    }, 0);
+    const totalDurationSec = Math.max(0.5, editorLayerEndSec > 0 ? editorLayerEndSec : sceneEndSec, Number(document.targetDurationSec) > 0 && editorLayerEndSec <= 0 ? Number(document.targetDurationSec) : 0);
+
+    const args = [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      `color=c=white:s=${canvasWidth}x${canvasHeight}:r=30:d=${totalDurationSec.toFixed(3)}`,
+      "-f",
+      "lavfi",
+      "-i",
+      `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalDurationSec.toFixed(3)}`
+    ];
+    const mediaInputs: Array<{
+      layer: SceneScriptVideoMediaLayer;
+      inputIndex: number;
+      filePath: string;
+      hasAudio: boolean;
+      sourceDurationSec: number | null;
+      requestedOffsetSec: number;
+      effectiveOffsetSec: number;
+      sourceBrightness: number | null;
+    }> = [];
+    const audioInputs: Array<{ layer: SceneScriptAudioLayer; inputIndex: number; filePath: string }> = [];
+
+    for (const layer of document.videoMediaLayers ?? []) {
+      const filePath = resolvePackageFilePath(packagePath, layer.localPath, layer.relativePath);
+      if (!filePath || !fs.existsSync(filePath)) {
+        continue;
+      }
+      const inputIndex = args.filter((item) => item === "-i").length;
+      const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      let sourceDurationSec: number | null = null;
+      let requestedOffsetSec = 0;
+      let effectiveOffsetSec = 0;
+      let sourceBrightness: number | null = null;
+      if (layer.mediaType === "image" || layer.mediaType === "icon") {
+        args.push("-loop", "1", "-t", durationSec.toFixed(3), "-i", filePath);
+      } else {
+        sourceDurationSec = await probeMediaDurationSec(filePath);
+        requestedOffsetSec = Math.max(0, Number(layer.sourceOffsetSec ?? 0) || 0);
+        effectiveOffsetSec = normalizeSourceOffsetSec(requestedOffsetSec, sourceDurationSec);
+        sourceBrightness = await probeVideoFrameBrightness(filePath, effectiveOffsetSec);
+        args.push(
+          "-stream_loop",
+          "-1",
+          "-ss",
+          effectiveOffsetSec.toFixed(3),
+          "-t",
+          durationSec.toFixed(3),
+          "-i",
+          filePath
+        );
+      }
+      mediaInputs.push({
+        layer,
+        inputIndex,
+        filePath,
+        hasAudio: layer.mediaType === "video" ? await probeHasAudioStream(filePath) : false,
+        sourceDurationSec,
+        requestedOffsetSec,
+        effectiveOffsetSec,
+        sourceBrightness
+      });
+    }
+
+    for (const layer of document.audioLayers ?? []) {
+      const filePath = resolvePackageFilePath(packagePath, layer.localPath, layer.relativePath);
+      if (!filePath || !fs.existsSync(filePath)) {
+        continue;
+      }
+      const inputIndex = args.filter((item) => item === "-i").length;
+      const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      const offsetSec = Math.max(0, Number(layer.sourceOffsetSec ?? 0) || 0);
+      args.push("-ss", offsetSec.toFixed(3), "-t", durationSec.toFixed(3), "-i", filePath);
+      audioInputs.push({ layer, inputIndex, filePath });
+    }
+
+    const renderDir = path.join(packagePath, "render");
+    fs.mkdirSync(renderDir, { recursive: true });
+    const exportDebugEntries: Array<Record<string, unknown>> = [];
+    const filterParts: string[] = [];
+    let currentVideo = "vbase0";
+    filterParts.push(`[0:v]setpts=PTS-STARTPTS[vraw]`);
+    const sortedScenes = [...document.scenes].sort((a, b) => {
+      const aStart = Number(a.startSec ?? 0) || 0;
+      const bStart = Number(b.startSec ?? 0) || 0;
+      return aStart - bStart || a.sceneNo - b.sceneNo;
+    });
+    let sceneVideo = "vraw";
+    sortedScenes.forEach((scene, index) => {
+      const out = `vscene${index}`;
+      const startSec = Math.max(0, Number(scene.startSec ?? 0) || 0);
+      const durationSec = Math.max(0.1, Number(scene.durationSec) || 0.1);
+      filterParts.push(
+        `[${sceneVideo}]drawbox=x=0:y=0:w=iw:h=ih:color=${sanitizeColorForFfmpeg(scene.backgroundColor)}:t=fill:enable='${buildEnableBetween(startSec, startSec + durationSec)}'[${out}]`
+      );
+      sceneVideo = out;
+    });
+    currentVideo = sceneVideo;
+
+    mediaInputs.forEach(({ layer, inputIndex, sourceDurationSec, requestedOffsetSec, effectiveOffsetSec, sourceBrightness }, index) => {
+      const layout = buildVideoMediaLayerExportLayout(layer, canvasWidth, canvasHeight);
+      const startSec = Math.max(0, Number(layer.startSec) || 0);
+      const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      const sourceCrop = resolveLayerSourceCrop(layer);
+      const hasSourceCrop = hasPercentCrop(sourceCrop);
+      const sourceCropFilter = hasSourceCrop
+        ? [
+            `crop=w='max(1\\,iw*${((100 - sourceCrop.leftPct - sourceCrop.rightPct) / 100).toFixed(6)})'`,
+            `h='max(1\\,ih*${((100 - sourceCrop.topPct - sourceCrop.bottomPct) / 100).toFixed(6)})'`,
+            `x='iw*${(sourceCrop.leftPct / 100).toFixed(6)}'`,
+            `y='ih*${(sourceCrop.topPct / 100).toFixed(6)}'`
+          ].join(":")
+        : "";
+      const fitFilter =
+        layer.fit === "contain"
+          ? `scale=${layout.layerWidth}:${layout.layerHeight}:force_original_aspect_ratio=decrease,pad=${layout.layerWidth}:${layout.layerHeight}:(ow-iw)/2:(oh-ih)/2:color=black@0`
+          : `scale=${layout.layerWidth}:${layout.layerHeight}:force_original_aspect_ratio=increase,crop=${layout.layerWidth}:${layout.layerHeight}`;
+      const hasLayerCrop =
+        layout.frameCropPx.left > 0 ||
+        layout.frameCropPx.right > 0 ||
+        layout.frameCropPx.top > 0 ||
+        layout.frameCropPx.bottom > 0;
+      const fittedMediaOut = `mediafit${index}`;
+      const mediaOut = `media${index}`;
+      const overlayOut = `vover${index}`;
+      filterParts.push(
+        `[${inputIndex}:v]trim=start=0:duration=${durationSec.toFixed(3)},fps=30,${hasSourceCrop ? `${sourceCropFilter},` : ""}${fitFilter},format=rgba,colorchannelmixer=aa=${clampNumber(Number(layer.opacity ?? 1), 0, 1).toFixed(3)},setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB[${fittedMediaOut}]`
+      );
+      if (hasLayerCrop) {
+        filterParts.push(
+          `[${fittedMediaOut}]crop=${layout.visibleLayerWidth}:${layout.visibleLayerHeight}:${layout.frameCropPx.left}:${layout.frameCropPx.top}[${mediaOut}]`
+        );
+      }
+      filterParts.push(
+        `[${currentVideo}][${hasLayerCrop ? mediaOut : fittedMediaOut}]overlay=x=${layout.visibleX}:y=${layout.visibleY}:eof_action=pass:repeatlast=0:enable='${buildEnableBetween(startSec, startSec + durationSec)}'[${overlayOut}]`
+      );
+      exportDebugEntries.push({
+        kind: "media",
+        id: layer.id,
+        label: layer.label,
+        mediaType: layer.mediaType,
+        inputIndex,
+        startSec,
+        durationSec,
+        requestedOffsetSec,
+        effectiveOffsetSec,
+        sourceDurationSec,
+        sourceBrightness,
+        blackFrameWarning: layer.mediaType === "video" && sourceBrightness !== null && sourceBrightness < 12,
+        center: { x: layout.centerX, y: layout.centerY },
+        box: { x: layout.x, y: layout.y, width: layout.layerWidth, height: layout.layerHeight },
+        visibleBox: { x: layout.visibleX, y: layout.visibleY, width: layout.visibleLayerWidth, height: layout.visibleLayerHeight },
+        sourceCrop: {
+          pct: sourceCrop,
+          enabled: hasSourceCrop
+        },
+        frameCrop: {
+          pct: layout.frameCrop,
+          px: layout.frameCropPx
+        },
+        pct: { xPct: layer.xPct, yPct: layer.yPct, widthPct: layer.widthPct, heightPct: layer.heightPct }
+      });
+      currentVideo = overlayOut;
+    });
+
+    const fontScale = getExportFontScale(canvasWidth, canvasHeight);
+    const assOverlays: Parameters<typeof buildAssDocument>[0]["overlays"] = [];
+    (document.videoTextOverlays ?? []).forEach((overlay: SceneScriptVideoTextOverlay, index) => {
+      const startSec = Math.max(0, Number(overlay.startSec ?? 0) || 0);
+      const durationSec = Math.max(0.1, Number(overlay.durationSec ?? totalDurationSec) || totalDurationSec);
+      const boxX = Math.round((canvasWidth * (Number(overlay.xPct ?? 0) || 0)) / 100);
+      const boxY = Math.round((canvasHeight * (Number(overlay.yPct ?? 0) || 0)) / 100);
+      const boxWidth = Math.max(1, Math.round((canvasWidth * clampNumber(Number(overlay.widthPct ?? 100), 0.1, 500)) / 100));
+      const boxHeight = Math.max(1, Math.round((canvasHeight * clampNumber(Number(overlay.heightPct ?? 100), 0.1, 500)) / 100));
+      const centerX = Math.round(boxX + boxWidth / 2);
+      const centerY = Math.round(boxY + boxHeight / 2);
+      const fontSize = Math.max(8, Math.round((Number(overlay.fontSize) || 21) * fontScale));
+      const outlineWidth = Math.max(0, Math.round((Number(overlay.outlineThickness ?? 0) || 0) * fontScale));
+      assOverlays.push({
+        startSec,
+        durationSec,
+        centerX,
+        centerY,
+        boxWidth,
+        fontSize,
+        outlineWidth,
+        textColor: overlay.textColor,
+        outlineColor: overlay.outlineColor,
+        text: overlay.text ?? ""
+      });
+      exportDebugEntries.push({
+        kind: "text",
+        index,
+        startSec,
+        durationSec,
+        box: { x: boxX, y: boxY, width: boxWidth, height: boxHeight, centerX, centerY },
+        fontSize,
+        fontScale,
+        outlineWidth,
+        renderer: "ass-subtitles"
+      });
+    });
+    if (assOverlays.length > 0) {
+      const assPath = path.join(renderDir, "video-editor-text-overlays.ass");
+      fs.writeFileSync(
+        assPath,
+        `\uFEFF${buildAssDocument({ canvasWidth, canvasHeight, overlays: assOverlays })}`,
+        "utf8"
+      );
+      const out = "vsubtitles";
+      filterParts.push(`[${currentVideo}]subtitles='${escapeFfmpegFilterPath(assPath)}'[${out}]`);
+      currentVideo = out;
+    }
+
+    const audioLabels = ["abase"];
+    filterParts.push(`[1:a]atrim=duration=${totalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS[abase]`);
+    let audioIndex = 0;
+    for (const { layer, inputIndex } of audioInputs) {
+      const label = `aud${audioIndex++}`;
+      const startMs = Math.max(0, Math.round((Number(layer.startSec) || 0) * 1000));
+      const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      filterParts.push(
+        `[${inputIndex}:a]atrim=start=0:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume=${clampNumber(Number(layer.volume ?? 1), 0, 4).toFixed(3)},adelay=${startMs}:all=1[${label}]`
+      );
+      audioLabels.push(label);
+    }
+    for (const { layer, inputIndex, hasAudio } of mediaInputs) {
+      if (!hasAudio) {
+        continue;
+      }
+      const label = `maud${audioIndex++}`;
+      const startMs = Math.max(0, Math.round((Number(layer.startSec) || 0) * 1000));
+      const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      filterParts.push(
+        `[${inputIndex}:a]atrim=start=0:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume=${clampNumber(Number(layer.volume ?? 1), 0, 4).toFixed(3)},adelay=${startMs}:all=1[${label}]`
+      );
+      audioLabels.push(label);
+    }
+    filterParts.push(`${audioLabels.map((label) => `[${label}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0[aout]`);
+
+    const filterComplex = filterParts.join(";");
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    const debugPath = path.join(packagePath, "video-editor-export.log");
+    fs.writeFileSync(debugPath, [
+      "[summary]",
+      JSON.stringify({ outputPath, canvasWidth, canvasHeight, totalDurationSec, sceneEndSec, editorLayerEndSec, fontScale }, null, 2),
+      "[layers]",
+      JSON.stringify(exportDebugEntries, null, 2),
+      "[ffmpeg]",
+      [getBundledFfmpegPath(), ...args, "-filter_complex", filterComplex, outputPath].join("\n")
+    ].join("\n"), "utf8");
+    await runFfmpeg([
+      ...args,
+      "-filter_complex",
+      filterComplex,
+      "-map",
+      `[${currentVideo}]`,
+      "-map",
+      "[aout]",
+      "-t",
+      totalDurationSec.toFixed(3),
+      "-c:v",
+      "libx264",
+      "-crf",
+      "18",
+      "-preset",
+      "medium",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-movflags",
+      "+faststart",
+      outputPath
+    ]);
+    return { outputPath, durationSec: totalDurationSec };
+  };
   ipcMain.handle(
     "automation:create:generateVoiceLayer",
     async (_event, request: VoiceLayerGenerationRequest): Promise<VoiceLayerGenerationResult> => {
@@ -2553,6 +3274,32 @@ export function registerAutomationIpc(
         durationSec: result.durationSec,
         source: result.source
       };
+    }
+  );
+  ipcMain.handle(
+    "automation:create:exportVideoEditorProject",
+    async (event, request: VideoEditorExportRequest): Promise<VideoEditorExportResult> => {
+      const packagePath = request.packagePath?.trim();
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        throw new Error("패키지 경로를 찾지 못했습니다.");
+      }
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      const defaultPath = path.join(packagePath, "video-editor-export.mp4");
+      const saveResult = ownerWindow
+        ? await dialog.showSaveDialog(ownerWindow, {
+            title: "Export Video",
+            defaultPath,
+            filters: [{ name: "MP4 Video", extensions: ["mp4"] }]
+          })
+        : await dialog.showSaveDialog({
+            title: "Export Video",
+            defaultPath,
+            filters: [{ name: "MP4 Video", extensions: ["mp4"] }]
+          });
+      if (saveResult.canceled || !saveResult.filePath) {
+        throw new Error("영상 내보내기가 취소되었습니다.");
+      }
+      return buildVideoEditorExport(request, saveResult.filePath);
     }
   );
   ipcMain.handle(

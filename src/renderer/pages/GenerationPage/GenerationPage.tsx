@@ -26,6 +26,13 @@ import type {
   SceneScriptVideoTextOverlay,
   SceneScriptVoiceProfile
 } from "@common/types/media-generation";
+import {
+  buildLayerFrameClipInsets,
+  buildLayerSourceCropTransform,
+  hasPercentCrop,
+  resolveLayerBox,
+  resolveLayerFrameCrop
+} from "@common/video-layer-layout";
 import { getMcpRuntimeContract } from "../../../common/contracts/mcp-contract-registry";
 import { getLauncherCopy } from "../../lib/launcher-copy";
 import { useAppStore } from "../../store/app-store";
@@ -2373,39 +2380,50 @@ export function GenerationPage() {
   };
 
   const getVideoMediaLayerBox = (layer: SceneScriptVideoMediaLayer) => ({
-    xPct: Number(layer.xPct ?? 50),
-    yPct: Number(layer.yPct ?? 50),
-    widthPct: Number(layer.widthPct ?? 100),
-    heightPct: Number(layer.heightPct ?? 100)
+    ...resolveLayerBox(layer)
   });
 
-  const getVideoMediaLayerCrop = (layer: SceneScriptVideoMediaLayer) => ({
-    topPct: Math.max(0, Math.min(90, Number(layer.crop?.topPct ?? 0) || 0)),
-    rightPct: Math.max(0, Math.min(90, Number(layer.crop?.rightPct ?? 0) || 0)),
-    bottomPct: Math.max(0, Math.min(90, Number(layer.crop?.bottomPct ?? 0) || 0)),
-    leftPct: Math.max(0, Math.min(90, Number(layer.crop?.leftPct ?? 0) || 0))
-  });
+  const getVideoMediaLayerCrop = (layer: SceneScriptVideoMediaLayer) => resolveLayerFrameCrop(layer);
 
-  const buildVideoMediaLayerClipStyle = (layer: SceneScriptVideoMediaLayer): CSSProperties => {
-    const box = getVideoMediaLayerBox(layer);
-    const crop = getVideoMediaLayerCrop(layer);
-    const leftEdgePct = box.xPct - box.widthPct / 2;
-    const rightEdgePct = box.xPct + box.widthPct / 2;
-    const topEdgePct = box.yPct - box.heightPct / 2;
-    const bottomEdgePct = box.yPct + box.heightPct / 2;
-    const leftInsetPct = Math.max(crop.leftPct, box.widthPct > 0 ? Math.max(0, (-leftEdgePct / box.widthPct) * 100) : 0);
-    const rightInsetPct = Math.max(crop.rightPct, box.widthPct > 0 ? Math.max(0, ((rightEdgePct - 100) / box.widthPct) * 100) : 0);
-    const topInsetPct = Math.max(crop.topPct, box.heightPct > 0 ? Math.max(0, (-topEdgePct / box.heightPct) * 100) : 0);
-    const bottomInsetPct = Math.max(crop.bottomPct, box.heightPct > 0 ? Math.max(0, ((bottomEdgePct - 100) / box.heightPct) * 100) : 0);
-    if (!leftInsetPct && !rightInsetPct && !topInsetPct && !bottomInsetPct) {
+  const buildVideoMediaLayerFrameClipStyle = (layer: SceneScriptVideoMediaLayer): CSSProperties => {
+    const crop = buildLayerFrameClipInsets(layer);
+    if (!crop.leftPct && !crop.rightPct && !crop.topPct && !crop.bottomPct) {
       return {};
     }
     return {
-      clipPath: `inset(${Math.min(100, topInsetPct).toFixed(3)}% ${Math.min(100, rightInsetPct).toFixed(3)}% ${Math.min(100, bottomInsetPct).toFixed(3)}% ${Math.min(100, leftInsetPct).toFixed(3)}%)`
+      clipPath: `inset(${Math.min(100, crop.topPct).toFixed(3)}% ${Math.min(100, crop.rightPct).toFixed(3)}% ${Math.min(100, crop.bottomPct).toFixed(3)}% ${Math.min(100, crop.leftPct).toFixed(3)}%)`
     };
   };
 
-  const updateVideoMediaLayerNaturalSize = (layer: SceneScriptVideoMediaLayer, width: number, height: number) => {
+  const buildVideoMediaLayerSourceStyle = (layer: SceneScriptVideoMediaLayer): CSSProperties => {
+    if (!hasPercentCrop(layer.sourceCrop)) {
+      return {};
+    }
+    const transform = buildLayerSourceCropTransform(layer);
+    const sourceCrop = transform.sourceCrop;
+    const supportsObjectViewBox =
+      typeof CSS !== "undefined" &&
+      typeof CSS.supports === "function" &&
+      CSS.supports("object-view-box", "inset(0% 0% 0% 0%)");
+    if (supportsObjectViewBox) {
+      return {
+        objectViewBox: `inset(${sourceCrop.topPct}% ${sourceCrop.rightPct}% ${sourceCrop.bottomPct}% ${sourceCrop.leftPct}%)`
+      } as CSSProperties;
+    }
+    return {
+      width: `${transform.widthPct}%`,
+      height: `${transform.heightPct}%`,
+      transform: `translate(${transform.translateXPct}%, ${transform.translateYPct}%)`,
+      transformOrigin: "top left"
+    };
+  };
+
+  const updateVideoMediaLayerNaturalSize = (
+    layer: SceneScriptVideoMediaLayer,
+    width: number,
+    height: number,
+    metadata?: { durationSec?: number }
+  ) => {
     if (!width || !height || width <= 0 || height <= 0) {
       return;
     }
@@ -2424,7 +2442,13 @@ export function GenerationPage() {
     }
     const patch: Partial<SceneScriptVideoMediaLayer> = {
       naturalWidth: width,
-      naturalHeight: height
+      naturalHeight: height,
+      mediaMetadata: {
+        ...layer.mediaMetadata,
+        width,
+        height,
+        durationSec: metadata?.durationSec ?? layer.mediaMetadata?.durationSec
+      }
     };
     if (shouldNormalizeInitialBox) {
       patch.widthPct = desiredBox.widthPct;
@@ -4971,7 +4995,8 @@ export function GenerationPage() {
         }
       }
       updateVideoMediaLayer(videoMediaCropDrag.layerId, {
-        crop: { topPct, rightPct, bottomPct, leftPct }
+        frameCrop: { topPct, rightPct, bottomPct, leftPct },
+        crop: undefined
       }, { recordHistory: false });
     };
     const onMouseUp = () => {
@@ -6066,6 +6091,12 @@ export function GenerationPage() {
         heightPct: initialBox.heightPct,
         naturalWidth: asset.width,
         naturalHeight: asset.height,
+        mediaMetadata: {
+          width: asset.width,
+          height: asset.height,
+          durationSec: asset.durationSec,
+          hasAudio: asset.mediaType === "video" ? undefined : false
+        },
         volume: asset.mediaType === "video" ? 1 : undefined
       };
       applyDocumentUpdate((current) => ({
@@ -6140,7 +6171,12 @@ export function GenerationPage() {
         widthPct: initialBox.widthPct,
         heightPct: initialBox.heightPct,
         naturalWidth: dimensions.width || undefined,
-        naturalHeight: dimensions.height || undefined
+        naturalHeight: dimensions.height || undefined,
+        mediaMetadata: {
+          width: dimensions.width || undefined,
+          height: dimensions.height || undefined,
+          hasAudio: false
+        }
       };
       applyDocumentUpdate((current) => ({
         ...current,
@@ -6446,7 +6482,7 @@ export function GenerationPage() {
       if (applyToScene) {
         const layerStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
         const layerDurationSec = Math.min(
-          Math.max(0.5, 5),
+          Math.max(0.5, Number(result.durationSec ?? 5) || 5),
           Math.max(0.5, totalDurationSec - layerStartSec)
         );
         if (result.mediaType === "audio") {
@@ -6485,6 +6521,15 @@ export function GenerationPage() {
           yPct: 50,
           widthPct: 100,
           heightPct: 100,
+          naturalWidth: result.width,
+          naturalHeight: result.height,
+          sourceCrop: result.mediaMetadata?.contentCrop,
+          mediaMetadata: result.mediaMetadata ?? {
+            width: result.width,
+            height: result.height,
+            durationSec: result.durationSec,
+            hasAudio: result.mediaType === "video" ? undefined : false
+          },
           volume: result.mediaType === "video" ? 1 : undefined
         };
         applyDocumentUpdate((current) => ({
@@ -6521,7 +6566,10 @@ export function GenerationPage() {
       return;
     }
     const layerStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
-    const layerDurationSec = Math.min(5, Math.max(0.5, totalDurationSec - layerStartSec));
+    const layerDurationSec = Math.min(
+      Math.max(0.5, Number(asset.durationSec ?? 5) || 5),
+      Math.max(0.5, totalDurationSec - layerStartSec)
+    );
     if (asset.mediaType === "audio") {
       const nextLayer: SceneScriptAudioLayer = {
         id: buildLayerId("audio"),
@@ -6559,6 +6607,15 @@ export function GenerationPage() {
       yPct: 50,
       widthPct: 100,
       heightPct: 100,
+      naturalWidth: asset.width,
+      naturalHeight: asset.height,
+      sourceCrop: asset.mediaMetadata?.contentCrop,
+      mediaMetadata: asset.mediaMetadata ?? {
+        width: asset.width,
+        height: asset.height,
+        durationSec: asset.durationSec,
+        hasAudio: asset.mediaType === "video" ? undefined : false
+      },
       volume: asset.mediaType === "video" ? 1 : undefined
     };
     applyDocumentUpdate((current) => ({
@@ -6702,6 +6759,89 @@ export function GenerationPage() {
     }
   };
 
+  const handleExportVideoProject = async () => {
+    const latestDocument = editableDocumentRef.current ?? editableDocument;
+    if (!latestDocument || !resolvedPackagePath) {
+      return;
+    }
+    setBusy(true);
+    setMessage(isKorean ? "영상 MP4를 합성하는 중입니다..." : "Exporting MP4 video...");
+    try {
+      await flushActivePreviewTextEdit();
+      const savedDocument = await window.mellowcat.automation.updateSceneScript(
+        resolvedPackagePath,
+        latestDocument
+      );
+      setEditableDocument(savedDocument);
+      const result = await window.mellowcat.automation.exportVideoEditorProject({
+        packagePath: resolvedPackagePath,
+        document: savedDocument
+      });
+      setMessage(
+        isKorean
+          ? `영상 내보내기가 완료되었습니다: ${result.outputPath}`
+          : `Video export finished: ${result.outputPath}`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : isKorean ? "영상 내보내기에 실패했습니다." : "Video export failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRepairLegacyVideoLayers = async () => {
+    const latestDocument = editableDocumentRef.current ?? editableDocument;
+    if (!latestDocument || !resolvedPackagePath) {
+      return;
+    }
+    const migratedLayers = (latestDocument.videoMediaLayers ?? []).map((layer) => {
+      if (!hasPercentCrop(layer.crop)) {
+        return layer;
+      }
+      return {
+        ...layer,
+        sourceCrop: layer.sourceCrop ?? layer.crop,
+        frameCrop: layer.frameCrop,
+        crop: undefined
+      };
+    });
+    const migratedCount = migratedLayers.filter((layer, index) => layer !== (latestDocument.videoMediaLayers ?? [])[index]).length;
+    if (migratedCount === 0) {
+      setMessage(isKorean ? "복구할 레거시 영상 crop이 없습니다." : "No legacy video crop data to repair.");
+      return;
+    }
+    const confirmed = window.confirm(
+      isKorean
+        ? `레거시 영상 요소 ${migratedCount}개를 sourceCrop 구조로 변환할까요?`
+        : `Convert ${migratedCount} legacy media layer(s) to sourceCrop?`
+    );
+    if (!confirmed) {
+      return;
+    }
+    const nextDocument: SceneScriptDocument = {
+      ...latestDocument,
+      videoMediaLayers: migratedLayers
+    };
+    setBusy(true);
+    setMessage(isKorean ? "레거시 영상 요소를 복구하는 중입니다..." : "Repairing legacy video layers...");
+    try {
+      const savedDocument = await window.mellowcat.automation.updateSceneScript(
+        resolvedPackagePath,
+        nextDocument
+      );
+      setEditableDocument(savedDocument);
+      setMessage(
+        isKorean
+          ? `레거시 영상 요소 ${migratedCount}개를 복구했습니다.`
+          : `Repaired ${migratedCount} legacy media layer(s).`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : isKorean ? "레거시 영상 요소 복구에 실패했습니다." : "Legacy media repair failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <GenerationErrorBoundary>
     <section className="page generation-page">
@@ -6731,6 +6871,26 @@ export function GenerationPage() {
           >
             {busy ? copy.saving : copy.save}
           </button>
+          {!isCardNewsModule ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!editableDocument || busy}
+              onClick={() => void handleRepairLegacyVideoLayers()}
+            >
+              {isKorean ? "레거시 영상 복구" : "Repair Legacy Video"}
+            </button>
+          ) : null}
+          {!isCardNewsModule ? (
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!editableDocument || busy}
+              onClick={() => void handleExportVideoProject()}
+            >
+              {isKorean ? "영상 다운로드" : "Download Video"}
+            </button>
+          ) : null}
           <button
             type="button"
             className="secondary-button"
@@ -9341,7 +9501,8 @@ export function GenerationPage() {
                             pointerEvents: "auto",
                             cursor: timelinePlaying ? "default" : "grab"
                           };
-                          const mediaClipStyle = buildVideoMediaLayerClipStyle(layer);
+                          const frameClipStyle = buildVideoMediaLayerFrameClipStyle(layer);
+                          const sourceCropStyle = buildVideoMediaLayerSourceStyle(layer);
                           const isActive = selectedTimelineTarget === "media" && layer.id === selectedVideoMediaLayerId;
                           const outlineStyle: CSSProperties = {
                             position: "absolute",
@@ -9358,7 +9519,7 @@ export function GenerationPage() {
                                 key={layer.id}
                                 className="video-media-layer-shell"
                                 onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
-                                style={style}
+                                style={{ ...style, ...frameClipStyle, overflow: "hidden" }}
                               >
                                 {layer.mediaType === "video" ? (
                                   <video
@@ -9366,7 +9527,7 @@ export function GenerationPage() {
                                       mediaLayerVideoRefs.current[layer.id] = element;
                                     }}
                                     className="video-media-layer"
-                                    style={{ ...mediaClipStyle, objectFit: "cover" }}
+                                    style={{ ...sourceCropStyle, objectFit: "cover" }}
                                     src={src}
                                     playsInline
                                     loop
@@ -9375,7 +9536,12 @@ export function GenerationPage() {
                                       updateVideoMediaLayerNaturalSize(
                                         layer,
                                         event.currentTarget.videoWidth,
-                                        event.currentTarget.videoHeight
+                                        event.currentTarget.videoHeight,
+                                        {
+                                          durationSec: Number.isFinite(event.currentTarget.duration)
+                                            ? event.currentTarget.duration
+                                            : undefined
+                                        }
                                       );
                                       syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true });
                                     }}
@@ -9386,7 +9552,7 @@ export function GenerationPage() {
                                 ) : (
                                   <img
                                     className="video-media-layer"
-                                    style={{ ...mediaClipStyle, objectFit: "cover" }}
+                                    style={{ ...sourceCropStyle, objectFit: "cover" }}
                                     src={src}
                                     alt={layer.label ?? "media layer"}
                                     onLoad={(event) =>
@@ -9575,7 +9741,8 @@ export function GenerationPage() {
                           pointerEvents: "auto",
                           cursor: timelinePlaying ? "default" : "grab"
                         };
-                        const mediaClipStyle = buildVideoMediaLayerClipStyle(layer);
+                        const frameClipStyle = buildVideoMediaLayerFrameClipStyle(layer);
+                        const sourceCropStyle = buildVideoMediaLayerSourceStyle(layer);
                         const isActive = selectedTimelineTarget === "media" && layer.id === selectedVideoMediaLayerId;
                         const outlineStyle: CSSProperties = {
                           position: "absolute",
@@ -9592,7 +9759,7 @@ export function GenerationPage() {
                               key={layer.id}
                               className="video-media-layer-shell"
                               onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
-                              style={style}
+                              style={{ ...style, ...frameClipStyle, overflow: "hidden" }}
                             >
                               {layer.mediaType === "video" ? (
                                 <video
@@ -9600,7 +9767,7 @@ export function GenerationPage() {
                                     mediaLayerVideoRefs.current[layer.id] = element;
                                   }}
                                   className="video-media-layer"
-                                  style={{ ...mediaClipStyle, objectFit: "cover" }}
+                                  style={{ ...sourceCropStyle, objectFit: "cover" }}
                                   src={src}
                                   playsInline
                                   loop
@@ -9609,7 +9776,12 @@ export function GenerationPage() {
                                     updateVideoMediaLayerNaturalSize(
                                       layer,
                                       event.currentTarget.videoWidth,
-                                      event.currentTarget.videoHeight
+                                      event.currentTarget.videoHeight,
+                                      {
+                                        durationSec: Number.isFinite(event.currentTarget.duration)
+                                          ? event.currentTarget.duration
+                                          : undefined
+                                      }
                                     );
                                     syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true });
                                   }}
@@ -9620,7 +9792,7 @@ export function GenerationPage() {
                               ) : (
                                 <img
                                   className="video-media-layer"
-                                  style={{ ...mediaClipStyle, objectFit: "cover" }}
+                                  style={{ ...sourceCropStyle, objectFit: "cover" }}
                                   src={src}
                                   alt={layer.label ?? "media layer"}
                                   onLoad={(event) =>

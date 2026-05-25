@@ -59,6 +59,22 @@ export interface SceneScriptVideoTextOverlay {
   backgroundColor?: string;
 }
 
+export interface SceneScriptPercentCrop {
+  topPct?: number;
+  rightPct?: number;
+  bottomPct?: number;
+  leftPct?: number;
+}
+
+export interface SceneScriptVideoMediaMetadata {
+  width?: number;
+  height?: number;
+  durationSec?: number;
+  fps?: number;
+  hasAudio?: boolean;
+  contentCrop?: SceneScriptPercentCrop;
+}
+
 export interface SceneScriptVideoMediaLayer {
   id: string;
   mediaType: "video" | "image" | "icon";
@@ -78,15 +94,13 @@ export interface SceneScriptVideoMediaLayer {
   yPct?: number;
   widthPct?: number;
   heightPct?: number;
-  crop?: {
-    topPct?: number;
-    rightPct?: number;
-    bottomPct?: number;
-    leftPct?: number;
-  };
+  crop?: SceneScriptPercentCrop;
+  sourceCrop?: SceneScriptPercentCrop;
+  frameCrop?: SceneScriptPercentCrop;
   volume?: number;
   naturalWidth?: number;
   naturalHeight?: number;
+  mediaMetadata?: SceneScriptVideoMediaMetadata;
 }
 
 export interface SceneScriptAudioLayer {
@@ -391,6 +405,10 @@ export interface LocalAssetImportResult {
   relativePath: string;
   mediaType: "video" | "image" | "audio";
   appliedSceneNo?: number;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  mediaMetadata?: SceneScriptVideoMediaMetadata;
 }
 
 export interface UploadedAssetRecord {
@@ -402,6 +420,10 @@ export interface UploadedAssetRecord {
   source: "local" | "clipboard" | "source-clip";
   sizeBytes?: number;
   updatedAt?: string;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  mediaMetadata?: SceneScriptVideoMediaMetadata;
 }
 
 export interface AiWorkspaceClipboardAssetRequest {
@@ -470,6 +492,16 @@ export interface VoiceLayerGenerationResult {
   relativePath: string;
   durationSec?: number;
   source: "azure" | "openai";
+}
+
+export interface VideoEditorExportRequest {
+  packagePath: string;
+  document: SceneScriptDocument;
+}
+
+export interface VideoEditorExportResult {
+  outputPath: string;
+  durationSec: number;
 }
 
 export interface ScenePlanScene {
