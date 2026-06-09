@@ -16,6 +16,9 @@ import type {
   FreesoundAudioSearchRequest,
   LocalAssetImportRequest,
   LocalAssetImportResult,
+  DerivedShortformPackageSummary,
+  LongformToShortformRequest,
+  LongformToShortformResult,
   UploadedAssetRecord,
   PixabayAssetImportRequest,
   PixabayAssetImportResult,
@@ -203,6 +206,12 @@ export interface MellowCatAPI {
     ) => Promise<AiWorkspaceManusSubmitResult>;
     generateVoiceLayer: (request: VoiceLayerGenerationRequest) => Promise<VoiceLayerGenerationResult>;
     exportVideoEditorProject: (request: VideoEditorExportRequest) => Promise<VideoEditorExportResult>;
+    deriveShortformFromLongform: (
+      request: LongformToShortformRequest
+    ) => Promise<LongformToShortformResult>;
+    listDerivedShortformPackages: (
+      packagePath: string
+    ) => Promise<DerivedShortformPackageSummary[]>;
     updateSceneScript: (
       packagePath: string,
       document: SceneScriptDocument

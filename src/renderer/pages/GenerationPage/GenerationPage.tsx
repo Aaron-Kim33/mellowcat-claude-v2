@@ -21,7 +21,12 @@ import type {
   SceneScriptDocument,
   SceneScriptItem,
   SceneScriptAudioLayer,
+  SceneScriptElementTransition,
+  SceneScriptElementTransitionPlacement,
+  SceneScriptElementTransitionStyle,
   SceneScriptSubtitleStyle,
+  SceneScriptVideoMediaMotion,
+  SceneScriptVideoMediaMotionStyle,
   SceneScriptVideoMediaLayer,
   SceneScriptVideoTextOverlay,
   SceneScriptVoiceProfile
@@ -131,10 +136,78 @@ const VIDEO_MEDIA_OVERFLOW_MIN_PCT = -300;
 const VIDEO_MEDIA_OVERFLOW_MAX_PCT = 400;
 const CANVAS_RESIZE_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
 const VIDEO_MEDIA_CROP_HANDLES = ["top", "right", "bottom", "left"] as const;
+const DEFAULT_ELEMENT_TRANSITION: SceneScriptElementTransition = {
+  style: "none",
+  placement: "both",
+  durationSec: 0.55
+};
+const DEFAULT_MEDIA_MOTION: SceneScriptVideoMediaMotion = {
+  style: "none",
+  amountPct: 6,
+  focusXPct: 50,
+  focusYPct: 50
+};
+const VIDEO_ELEMENT_TRANSITION_STYLES: Array<{
+  value: SceneScriptElementTransitionStyle;
+  labelKo: string;
+  labelEn: string;
+}> = [
+  { value: "none", labelKo: "없음", labelEn: "None" },
+  { value: "fade", labelKo: "페이드", labelEn: "Fade" },
+  { value: "slide-left", labelKo: "왼쪽 슬라이드", labelEn: "Slide Left" },
+  { value: "slide-right", labelKo: "오른쪽 슬라이드", labelEn: "Slide Right" },
+  { value: "slide-up", labelKo: "위 슬라이드", labelEn: "Slide Up" },
+  { value: "slide-down", labelKo: "아래 슬라이드", labelEn: "Slide Down" }
+];
+const VIDEO_ELEMENT_TRANSITION_PLACEMENTS: Array<{
+  value: SceneScriptElementTransitionPlacement;
+  labelKo: string;
+  labelEn: string;
+}> = [
+  { value: "in", labelKo: "첫부분", labelEn: "Start" },
+  { value: "out", labelKo: "마지막", labelEn: "End" },
+  { value: "both", labelKo: "양쪽", labelEn: "Both" }
+];
+const VIDEO_MEDIA_MOTION_STYLES: Array<{
+  value: SceneScriptVideoMediaMotionStyle;
+  labelKo: string;
+  labelEn: string;
+}> = [
+  { value: "none", labelKo: "없음", labelEn: "None" },
+  { value: "slow-zoom-in", labelKo: "천천히 줌인", labelEn: "Slow Zoom In" },
+  { value: "slow-zoom-out", labelKo: "천천히 줌아웃", labelEn: "Slow Zoom Out" }
+];
+const MOBILE_SAFE_AREA_GUIDES: Record<
+  VideoCanvasPresetId,
+  { topPct: number; rightPct: number; bottomPct: number; leftPct: number }
+> = {
+  landscape_16_9: {
+    topPct: 7,
+    rightPct: 5,
+    bottomPct: 10,
+    leftPct: 5
+  },
+  reels_9_16: {
+    topPct: 7,
+    rightPct: 16,
+    bottomPct: 18,
+    leftPct: 6
+  },
+  shorts_9_16: {
+    topPct: 7,
+    rightPct: 16,
+    bottomPct: 18,
+    leftPct: 6
+  }
+};
 const clampLayerVolume = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 const formatLayerVolume = (value?: number) => `${Math.round(clampLayerVolume(Number(value ?? 1)) * 100)}%`;
+const clampPlaybackRate = (value: number) => Math.max(1, Math.min(2, Number.isFinite(value) ? value : 1));
+const formatPlaybackRate = (value?: number) => `${clampPlaybackRate(Number(value ?? 1)).toFixed(2)}x`;
 type CanvasResizeHandle = (typeof CANVAS_RESIZE_HANDLES)[number];
 type VideoMediaCropHandle = (typeof VIDEO_MEDIA_CROP_HANDLES)[number];
+type CanvasPositionField = "x" | "y" | "width" | "height";
+const CANVAS_POSITION_FIELDS: CanvasPositionField[] = ["x", "y", "width", "height"];
 const TIMELINE_SNAP_THRESHOLD_SEC = 0.18;
 const roundTimelineSeconds = (value: number, min = 0) =>
   Math.max(min, Math.round((Number(value) || 0) * 20) / 20);
@@ -146,6 +219,23 @@ const parseLooseNumberInput = (value: string, fallback: number) => {
 };
 const clampNumber = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+const normalizeElementTransition = (transition?: SceneScriptElementTransition): SceneScriptElementTransition => ({
+  style: transition?.style ?? DEFAULT_ELEMENT_TRANSITION.style,
+  placement: transition?.placement ?? DEFAULT_ELEMENT_TRANSITION.placement,
+  durationSec: clampNumber(Number(transition?.durationSec ?? DEFAULT_ELEMENT_TRANSITION.durationSec), 0.05, 3)
+});
+const normalizeMediaMotion = (motion?: SceneScriptVideoMediaMotion): SceneScriptVideoMediaMotion => ({
+  style: motion?.style ?? DEFAULT_MEDIA_MOTION.style,
+  amountPct: clampNumber(Number(motion?.amountPct ?? DEFAULT_MEDIA_MOTION.amountPct), 1, 20),
+  focusXPct: clampNumber(Number(motion?.focusXPct ?? DEFAULT_MEDIA_MOTION.focusXPct), 0, 100),
+  focusYPct: clampNumber(Number(motion?.focusYPct ?? DEFAULT_MEDIA_MOTION.focusYPct), 0, 100)
+});
+const easeOutCubic = (value: number) => 1 - Math.pow(1 - clampNumber(value, 0, 1), 3);
+const easeInCubic = (value: number) => Math.pow(clampNumber(value, 0, 1), 3);
+const shouldRunTransitionPhase = (
+  transition: SceneScriptElementTransition,
+  phase: "in" | "out"
+) => transition.style !== "none" && (transition.placement === phase || transition.placement === "both");
 const formatTimelineSeconds = (value: number) => `${roundTimelineSeconds(value).toFixed(2)}s`;
 const formatTimelineTooltipSeconds = (value: number) => `${Math.max(0, Number(value) || 0).toFixed(1)}s`;
 const getSceneStartSec = (scene: SceneScriptItem, fallbackStartSec: number) => {
@@ -1029,6 +1119,86 @@ function migrateSceneTextOverlaysToTimeline(document: SceneScriptDocument): Scen
   };
 }
 
+function migrateLegacyPlaybackRateDurations(document: SceneScriptDocument): SceneScriptDocument {
+  let nextDocument = cloneSceneScriptDocument(document);
+  const layersToMigrate = [...(nextDocument.videoMediaLayers ?? [])]
+    .filter((layer) => {
+      const playbackRate = clampPlaybackRate(Number(layer.playbackRate ?? 1));
+      return layer.mediaType === "video" && playbackRate > 1.0001 && !Number(layer.sourceDurationSec);
+    })
+    .sort((a, b) => (Number(a.startSec ?? 0) || 0) - (Number(b.startSec ?? 0) || 0));
+
+  layersToMigrate.forEach((targetLayer) => {
+    const targetId = targetLayer.id;
+    const currentLayer = (nextDocument.videoMediaLayers ?? []).find((layer) => layer.id === targetId);
+    if (!currentLayer) {
+      return;
+    }
+    const playbackRate = clampPlaybackRate(Number(currentLayer.playbackRate ?? 1));
+    const oldDurationSec = Math.max(0.1, Number(currentLayer.durationSec || 0.1));
+    const oldStartSec = Math.max(0, Number(currentLayer.startSec || 0));
+    const oldEndSec = oldStartSec + oldDurationSec;
+    const sourceDurationSec = oldDurationSec;
+    const nextDurationSec = Number((sourceDurationSec / playbackRate).toFixed(3));
+    const deltaSec = nextDurationSec - oldDurationSec;
+    const isSameStart = (value?: number) => Math.abs((Number(value ?? 0) || 0) - oldStartSec) <= 0.05;
+    const isAfterTarget = (value?: number) => (Number(value ?? 0) || 0) >= oldEndSec - 0.05;
+    const shiftStart = (value?: number) => Number(((Number(value ?? 0) || 0) + deltaSec).toFixed(3));
+
+    const nextVideoMediaLayers = (nextDocument.videoMediaLayers ?? []).map((layer) => {
+      if (layer.id === targetId) {
+        return {
+          ...layer,
+          playbackRate,
+          sourceDurationSec,
+          durationSec: nextDurationSec
+        };
+      }
+      if (isAfterTarget(layer.startSec)) {
+        return { ...layer, startSec: shiftStart(layer.startSec) };
+      }
+      return layer;
+    });
+    const nextAudioLayers = (nextDocument.audioLayers ?? []).map((layer) =>
+      isAfterTarget(layer.startSec) ? { ...layer, startSec: shiftStart(layer.startSec) } : layer
+    );
+    const nextTextOverlays = (nextDocument.videoTextOverlays ?? []).map((overlay) => {
+      if (isSameStart(overlay.startSec) && Math.abs(Number(overlay.durationSec ?? 0) - oldDurationSec) <= 0.1) {
+        return { ...overlay, durationSec: nextDurationSec };
+      }
+      if (isAfterTarget(overlay.startSec)) {
+        return { ...overlay, startSec: shiftStart(overlay.startSec) };
+      }
+      return overlay;
+    });
+    const nextScenes = nextDocument.scenes.map((scene) => {
+      if (isSameStart(scene.startSec) && Math.abs(Number(scene.durationSec ?? 0) - oldDurationSec) <= 0.1) {
+        return { ...scene, durationSec: Math.max(1, nextDurationSec) };
+      }
+      if (isAfterTarget(scene.startSec)) {
+        return { ...scene, startSec: shiftStart(scene.startSec) };
+      }
+      return scene;
+    });
+    const nextEndSec = [
+      ...nextScenes.map((scene) => (Number(scene.startSec ?? 0) || 0) + Math.max(0.1, Number(scene.durationSec) || 0.1)),
+      ...nextVideoMediaLayers.map((layer) => (Number(layer.startSec ?? 0) || 0) + Math.max(0.1, Number(layer.durationSec) || 0.1)),
+      ...nextAudioLayers.map((layer) => (Number(layer.startSec ?? 0) || 0) + Math.max(0.1, Number(layer.durationSec) || 0.1)),
+      ...nextTextOverlays.map((overlay) => (Number(overlay.startSec ?? 0) || 0) + Math.max(0.1, Number(overlay.durationSec) || 0.1))
+    ].reduce((max, value) => Math.max(max, value), 0);
+    nextDocument = {
+      ...nextDocument,
+      scenes: nextScenes,
+      videoMediaLayers: nextVideoMediaLayers,
+      audioLayers: nextAudioLayers,
+      videoTextOverlays: nextTextOverlays,
+      targetDurationSec: Math.max(1, Math.ceil(nextEndSec))
+    };
+  });
+
+  return nextDocument;
+}
+
 export function GenerationPage() {
   const {
     settings,
@@ -1076,6 +1246,9 @@ export function GenerationPage() {
   const [hasGeneratedAssets, setHasGeneratedAssets] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [positionDraft, setPositionDraft] = useState<Partial<Record<CanvasPositionField, string>>>({});
+  const [editingPositionField, setEditingPositionField] = useState<CanvasPositionField | null>(null);
+  const [positionDraftKey, setPositionDraftKey] = useState("");
   const [cardDesignDrag, setCardDesignDrag] = useState<CardDesignDragState | null>(null);
   const [videoTextDrag, setVideoTextDrag] = useState<{
     sceneNo: number;
@@ -1089,6 +1262,11 @@ export function GenerationPage() {
     startWidthPct: number;
     startHeightPct: number;
   } | null>(null);
+  const [videoTextDragPreview, setVideoTextDragPreview] = useState<{
+    sceneNo: number;
+    overlayIndex: number;
+    patch: Partial<Pick<SceneScriptVideoTextOverlay, "xPct" | "yPct" | "widthPct" | "heightPct">>;
+  } | null>(null);
   const [videoMediaDrag, setVideoMediaDrag] = useState<{
     layerId: string;
     mode: "move" | "resize";
@@ -1099,6 +1277,10 @@ export function GenerationPage() {
     startYPct: number;
     startWidthPct: number;
     startHeightPct: number;
+  } | null>(null);
+  const [videoMediaDragPreview, setVideoMediaDragPreview] = useState<{
+    layerId: string;
+    box: Pick<SceneScriptVideoMediaLayer, "xPct" | "yPct" | "widthPct" | "heightPct">;
   } | null>(null);
   const [croppingVideoMediaLayerId, setCroppingVideoMediaLayerId] = useState<string | null>(null);
   const [videoMediaCropDrag, setVideoMediaCropDrag] = useState<{
@@ -1150,6 +1332,8 @@ export function GenerationPage() {
   const [selectedAudioLayerId, setSelectedAudioLayerId] = useState<string | null>(null);
   const [selectedTimelineTarget, setSelectedTimelineTarget] = useState<"scene" | "text" | "media" | "audio" | null>(null);
   const [selectedTimelineItems, setSelectedTimelineItems] = useState<TimelineSelectionItem[]>([]);
+  const [pickingMotionFocusLayerId, setPickingMotionFocusLayerId] = useState<string | null>(null);
+  const [pausedMotionPreviewLayerId, setPausedMotionPreviewLayerId] = useState<string | null>(null);
   const [timelineSelectionBox, setTimelineSelectionBox] = useState<TimelineSelectionBox | null>(null);
   const [timelineMultiMoveDrag, setTimelineMultiMoveDrag] = useState<TimelineMultiMoveDrag | null>(null);
   const [editingVideoText, setEditingVideoText] = useState<{
@@ -1161,6 +1345,18 @@ export function GenerationPage() {
     boxIndex: number;
   } | null>(null);
   const [snapGuides, setSnapGuides] = useState<{ verticalPct?: number; horizontalPct?: number }>({});
+  const snapGuidesRef = useRef<{ verticalPct?: number; horizontalPct?: number }>({});
+  useEffect(() => {
+    snapGuidesRef.current = snapGuides;
+  }, [snapGuides]);
+  const setCanvasSnapGuides = (nextGuides: { verticalPct?: number; horizontalPct?: number }) => {
+    const current = snapGuidesRef.current;
+    if (current.verticalPct === nextGuides.verticalPct && current.horizontalPct === nextGuides.horizontalPct) {
+      return;
+    }
+    snapGuidesRef.current = nextGuides;
+    setSnapGuides(nextGuides);
+  };
   const [draggingLayerIndex, setDraggingLayerIndex] = useState<number | null>(null);
   const [dragOverLayerIndex, setDragOverLayerIndex] = useState<number | null>(null);
   const [draggingSceneIndex, setDraggingSceneIndex] = useState<number | null>(null);
@@ -1229,6 +1425,12 @@ export function GenerationPage() {
     start: number;
     end: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (timelinePlaying) {
+      setPausedMotionPreviewLayerId(null);
+    }
+  }, [timelinePlaying]);
   const previewStageRef = useRef<HTMLDivElement | null>(null);
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const [cardStageFitScale, setCardStageFitScale] = useState(1);
@@ -1423,6 +1625,82 @@ export function GenerationPage() {
     }, options);
   };
 
+  const updateVideoMediaLayerPlaybackRate = (
+    layerId: string,
+    playbackRate: number,
+    options?: { recordHistory?: boolean }
+  ) => {
+    const nextPlaybackRate = Number(clampPlaybackRate(playbackRate).toFixed(2));
+    applyDocumentUpdate((current) => {
+      const targetLayer = (current.videoMediaLayers ?? []).find((layer) => layer.id === layerId);
+      if (!targetLayer) {
+        return current;
+      }
+      const oldPlaybackRate = clampPlaybackRate(Number(targetLayer.playbackRate ?? 1));
+      const oldDurationSec = Math.max(0.1, Number(targetLayer.durationSec || 0.1));
+      const oldStartSec = Math.max(0, Number(targetLayer.startSec || 0));
+      const oldEndSec = oldStartSec + oldDurationSec;
+      const sourceDurationSec = Math.max(
+        0.1,
+        Number(targetLayer.sourceDurationSec ?? oldDurationSec * oldPlaybackRate) || oldDurationSec
+      );
+      const nextDurationSec = Number((sourceDurationSec / nextPlaybackRate).toFixed(3));
+      const deltaSec = nextDurationSec - oldDurationSec;
+      const isSameStart = (value?: number) => Math.abs((Number(value ?? 0) || 0) - oldStartSec) <= 0.05;
+      const isAfterTarget = (value?: number) => (Number(value ?? 0) || 0) >= oldEndSec - 0.05;
+      const shiftStart = (value?: number) => Number(((Number(value ?? 0) || 0) + deltaSec).toFixed(3));
+      const nextVideoMediaLayers = (current.videoMediaLayers ?? []).map((layer) => {
+        if (layer.id === layerId) {
+          return {
+            ...layer,
+            playbackRate: nextPlaybackRate,
+            sourceDurationSec,
+            durationSec: nextDurationSec
+          };
+        }
+        if (isAfterTarget(layer.startSec)) {
+          return { ...layer, startSec: shiftStart(layer.startSec) };
+        }
+        return layer;
+      });
+      const nextAudioLayers = (current.audioLayers ?? []).map((layer) =>
+        isAfterTarget(layer.startSec) ? { ...layer, startSec: shiftStart(layer.startSec) } : layer
+      );
+      const nextTextOverlays = (current.videoTextOverlays ?? []).map((overlay) => {
+        if (isSameStart(overlay.startSec) && Math.abs(Number(overlay.durationSec ?? 0) - oldDurationSec) <= 0.1) {
+          return { ...overlay, durationSec: nextDurationSec };
+        }
+        if (isAfterTarget(overlay.startSec)) {
+          return { ...overlay, startSec: shiftStart(overlay.startSec) };
+        }
+        return overlay;
+      });
+      const nextScenes = current.scenes.map((scene) => {
+        if (isSameStart(scene.startSec) && Math.abs(Number(scene.durationSec ?? 0) - oldDurationSec) <= 0.1) {
+          return { ...scene, durationSec: Math.max(1, nextDurationSec) };
+        }
+        if (isAfterTarget(scene.startSec)) {
+          return { ...scene, startSec: shiftStart(scene.startSec) };
+        }
+        return scene;
+      });
+      const nextEndSec = [
+        ...nextScenes.map((scene) => (Number(scene.startSec ?? 0) || 0) + Math.max(0.1, Number(scene.durationSec) || 0.1)),
+        ...nextVideoMediaLayers.map((layer) => (Number(layer.startSec ?? 0) || 0) + Math.max(0.1, Number(layer.durationSec) || 0.1)),
+        ...nextAudioLayers.map((layer) => (Number(layer.startSec ?? 0) || 0) + Math.max(0.1, Number(layer.durationSec) || 0.1)),
+        ...nextTextOverlays.map((overlay) => (Number(overlay.startSec ?? 0) || 0) + Math.max(0.1, Number(overlay.durationSec) || 0.1))
+      ].reduce((max, value) => Math.max(max, value), 0);
+      return {
+        ...current,
+        scenes: nextScenes,
+        videoMediaLayers: nextVideoMediaLayers,
+        audioLayers: nextAudioLayers,
+        videoTextOverlays: nextTextOverlays,
+        targetDurationSec: Math.max(1, Math.ceil(nextEndSec))
+      };
+    }, options);
+  };
+
   const beginGroupedDocumentChange = () => {
     if (!groupedHistorySnapshotRef.current && editableDocumentRef.current) {
       groupedHistorySnapshotRef.current = cloneSceneScriptDocument(editableDocumentRef.current);
@@ -1567,7 +1845,7 @@ export function GenerationPage() {
     };
     const loadedDocument = isCardNewsModule
       ? normalizedDocument
-      : migrateSceneTextOverlaysToTimeline(normalizedDocument);
+      : migrateLegacyPlaybackRateDurations(migrateSceneTextOverlaysToTimeline(normalizedDocument));
     setEditableDocument(loadedDocument);
     editableDocumentRef.current = loadedDocument;
     lastAutosavedDocumentRef.current = JSON.stringify(loadedDocument);
@@ -1814,6 +2092,46 @@ export function GenerationPage() {
     }
   };
 
+  const getTimelineItemTiming = (item: TimelineSelectionItem) => {
+    if (item.kind === "media") {
+      const layer = videoMediaLayers.find((candidate) => candidate.id === item.id);
+      if (!layer) {
+        return null;
+      }
+      return {
+        startSec: Math.max(0, Number(layer.startSec || 0)),
+        durationSec: Math.max(0.5, Number(layer.durationSec || 0.5))
+      };
+    }
+    if (item.kind === "audio") {
+      const layer = audioLayers.find((candidate) => candidate.id === item.id);
+      if (!layer) {
+        return null;
+      }
+      return {
+        startSec: Math.max(0, Number(layer.startSec || 0)),
+        durationSec: Math.max(0.5, Number(layer.durationSec || 0.5))
+      };
+    }
+    const overlay = videoTextLayers[item.index];
+    if (!overlay) {
+      return null;
+    }
+    return {
+      startSec: Math.max(0, Number(overlay.startSec ?? 0) || 0),
+      durationSec: Math.max(0.5, Number(overlay.durationSec ?? 0.5) || 0.5)
+    };
+  };
+
+  const seekTimelineItemCenter = (item: TimelineSelectionItem) => {
+    const timing = getTimelineItemTiming(item);
+    if (!timing) {
+      return;
+    }
+    setTimelinePlaying(false);
+    seekTimeline(timing.startSec + timing.durationSec / 2);
+  };
+
   const seekSceneStart = (sceneNo: number) => {
     setSelectedSceneNo(sceneNo);
     setSelectedVideoTextIndex(0);
@@ -1953,12 +2271,31 @@ export function GenerationPage() {
   const getTimelineSelectionKey = (item: TimelineSelectionItem) =>
     item.kind === "text" ? `text:${item.index}` : `${item.kind}:${item.id}`;
 
+  const applyTimelineClipPreviewToDom = (
+    key: string,
+    placement: { startSec: number; durationSec: number; trackIndex: number }
+  ) => {
+    const displayDurationSec = Math.max(0.5, timelineDisplayDurationSec);
+    document.querySelectorAll<HTMLElement>("[data-timeline-key]").forEach((element) => {
+      if (element.dataset.timelineKey !== key) {
+        return;
+      }
+      element.style.left = `${(placement.startSec / displayDurationSec) * 100}%`;
+      element.style.width = `${(placement.durationSec / displayDurationSec) * 100}%`;
+      element.style.top = `${6 + placement.trackIndex * TIMELINE_ELEMENT_TRACK_ROW_HEIGHT}px`;
+    });
+  };
+
   const isTimelineItemSelected = (item: TimelineSelectionItem) => {
     const key = getTimelineSelectionKey(item);
     return selectedTimelineItems.some((selectedItem) => getTimelineSelectionKey(selectedItem) === key);
   };
 
-  const selectTimelineItem = (item: TimelineSelectionItem, event?: Pick<ReactMouseEvent, "shiftKey" | "ctrlKey" | "metaKey">) => {
+  const selectTimelineItem = (
+    item: TimelineSelectionItem,
+    event?: Pick<ReactMouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
+    options?: { focusTime?: boolean }
+  ) => {
     const additive = Boolean(event?.shiftKey || event?.ctrlKey || event?.metaKey);
     if (!additive && suppressTimelineClickSelectionRef.current) {
       suppressTimelineClickSelectionRef.current = false;
@@ -1972,6 +2309,9 @@ export function GenerationPage() {
       }
       return [item];
     });
+    if (options?.focusTime ?? !additive) {
+      seekTimelineItemCenter(item);
+    }
     if (item.kind === "media") {
       setSelectedVideoMediaLayerId(item.id);
       setSelectedAudioLayerId(null);
@@ -2012,6 +2352,145 @@ export function GenerationPage() {
       trackIndex: Math.max(0, Number(overlay.trackIndex ?? 0) || 0)
     }))
   ];
+
+  const getCurrentTimelineSelectionItems = () => {
+    const items = selectedTimelineItemsRef.current;
+    if (items.length > 0) {
+      return items;
+    }
+    if (selectedTimelineTarget === "media" && selectedVideoMediaLayerId) {
+      return [{ kind: "media" as const, id: selectedVideoMediaLayerId }];
+    }
+    if (selectedTimelineTarget === "audio" && selectedAudioLayerId) {
+      return [{ kind: "audio" as const, id: selectedAudioLayerId }];
+    }
+    if (selectedTimelineTarget === "text" && selectedVideoTextOverlay) {
+      return [{ kind: "text" as const, index: selectedVideoTextIndex }];
+    }
+    return [];
+  };
+
+  const nudgeSelectedTimelineTracks = (direction: -1 | 1) => {
+    const selections = getCurrentTimelineSelectionItems();
+    if (selections.length === 0) {
+      return false;
+    }
+    const selectedKeys = new Set(selections.map(getTimelineSelectionKey));
+    applyDocumentUpdate((current) => ({
+      ...current,
+      videoMediaLayers: (current.videoMediaLayers ?? []).map((layer) =>
+        selectedKeys.has(`media:${layer.id}`)
+          ? {
+              ...layer,
+              trackIndex: Math.max(0, Math.max(0, Number(layer.trackIndex ?? 0) || 0) + direction)
+            }
+          : layer
+      ),
+      audioLayers: (current.audioLayers ?? []).map((layer) =>
+        selectedKeys.has(`audio:${layer.id}`)
+          ? {
+              ...layer,
+              trackIndex: Math.max(0, Math.max(0, Number(layer.trackIndex ?? 0) || 0) + direction)
+            }
+          : layer
+      ),
+      videoTextOverlays: (current.videoTextOverlays ?? []).map((overlay, index) =>
+        selectedKeys.has(`text:${index}`)
+          ? {
+              ...overlay,
+              trackIndex: Math.max(0, Math.max(0, Number(overlay.trackIndex ?? 0) || 0) + direction)
+            }
+          : overlay
+      )
+    }));
+    return true;
+  };
+
+  const snapSelectedTimelineItemsToNeighbor = (direction: -1 | 1) => {
+    const selections = getCurrentTimelineSelectionItems();
+    if (selections.length === 0) {
+      return false;
+    }
+    const selectedKeys = new Set(selections.map(getTimelineSelectionKey));
+    const allItems = buildTimelineSelectionItems();
+    const selectedPlacements = allItems.filter((item) => selectedKeys.has(getTimelineSelectionKey(item.selection)));
+    if (selectedPlacements.length === 0) {
+      return false;
+    }
+    const groupStartSec = Math.min(...selectedPlacements.map((item) => item.startSec));
+    const groupEndSec = Math.max(...selectedPlacements.map((item) => item.startSec + item.durationSec));
+    const groupDurationSec = Math.max(0.5, groupEndSec - groupStartSec);
+    const otherItems = allItems.filter((item) => !selectedKeys.has(getTimelineSelectionKey(item.selection)));
+    const candidateDeltas = selectedPlacements.flatMap((placement) => {
+      const placementEndSec = placement.startSec + placement.durationSec;
+      return otherItems
+        .filter(
+          (item) =>
+            item.selection.kind === placement.selection.kind &&
+            item.trackIndex === placement.trackIndex
+        )
+        .map((item) =>
+          direction < 0
+            ? item.startSec + item.durationSec - placement.startSec
+            : item.startSec - placementEndSec
+        )
+        .filter((deltaSec) => (direction < 0 ? deltaSec < -0.001 : deltaSec > 0.001));
+    });
+    const fallbackDeltaSec =
+      direction < 0
+        ? -groupStartSec
+        : Math.max(0, totalDurationSec - groupDurationSec) - groupStartSec;
+    const deltaSec =
+      candidateDeltas.length > 0
+        ? candidateDeltas.reduce((winner, candidate) =>
+            Math.abs(candidate) < Math.abs(winner) ? candidate : winner
+          )
+        : fallbackDeltaSec;
+    if (Math.abs(deltaSec) < 0.001) {
+      return false;
+    }
+    const clampStartForDuration = (startSec: number, durationSec: number) =>
+      Number(Math.max(0, Math.min(Math.max(0, totalDurationSec - durationSec), startSec)).toFixed(3));
+    const nextGroupStartSec = clampStartForDuration(groupStartSec + deltaSec, groupDurationSec);
+    applyDocumentUpdate((current) => ({
+      ...current,
+      videoMediaLayers: (current.videoMediaLayers ?? []).map((layer) =>
+        selectedKeys.has(`media:${layer.id}`)
+          ? {
+              ...layer,
+              startSec: clampStartForDuration(
+                Math.max(0, Number(layer.startSec || 0)) + deltaSec,
+                Math.max(0.5, Number(layer.durationSec || 0.5))
+              )
+            }
+          : layer
+      ),
+      audioLayers: (current.audioLayers ?? []).map((layer) =>
+        selectedKeys.has(`audio:${layer.id}`)
+          ? {
+              ...layer,
+              startSec: clampStartForDuration(
+                Math.max(0, Number(layer.startSec || 0)) + deltaSec,
+                Math.max(0.5, Number(layer.durationSec || 0.5))
+              )
+            }
+          : layer
+      ),
+      videoTextOverlays: (current.videoTextOverlays ?? []).map((overlay, index) =>
+        selectedKeys.has(`text:${index}`)
+          ? {
+              ...overlay,
+              startSec: clampStartForDuration(
+                Math.max(0, Number(overlay.startSec ?? 0) || 0) + deltaSec,
+                Math.max(0.5, Number(overlay.durationSec ?? 0.5) || 0.5)
+              )
+            }
+          : overlay
+      )
+    }));
+    seekTimeline(nextGroupStartSec);
+    return true;
+  };
 
   const timelineRangesOverlap = (
     aStartSec: number,
@@ -2383,6 +2862,68 @@ export function GenerationPage() {
     ...resolveLayerBox(layer)
   });
 
+  const getVideoMediaLayerDisplayBox = (layer: SceneScriptVideoMediaLayer) =>
+    videoMediaDragPreview?.layerId === layer.id
+      ? {
+          ...getVideoMediaLayerBox(layer),
+          ...videoMediaDragPreview.box
+        }
+      : getVideoMediaLayerBox(layer);
+
+  const getVideoTextOverlayDisplay = (
+    sceneNo: number,
+    overlay: SceneScriptVideoTextOverlay,
+    overlayIndex: number
+  ) =>
+    videoTextDragPreview?.sceneNo === sceneNo && videoTextDragPreview.overlayIndex === overlayIndex
+      ? {
+          ...overlay,
+          ...videoTextDragPreview.patch
+        }
+      : overlay;
+
+  const applyVideoTextDragPreviewToDom = (
+    sceneNo: number,
+    overlayIndex: number,
+    patch: Partial<Pick<SceneScriptVideoTextOverlay, "xPct" | "yPct" | "widthPct" | "heightPct">>
+  ) => {
+    document.querySelectorAll<HTMLElement>("[data-video-text-overlay-index]").forEach((element) => {
+      if (
+        element.dataset.videoTextSceneNo !== String(sceneNo) ||
+        element.dataset.videoTextOverlayIndex !== String(overlayIndex)
+      ) {
+        return;
+      }
+      if (patch.xPct !== undefined) {
+        element.style.left = `${patch.xPct}%`;
+      }
+      if (patch.yPct !== undefined) {
+        element.style.top = `${patch.yPct}%`;
+      }
+      if (patch.widthPct !== undefined) {
+        element.style.width = `${patch.widthPct}%`;
+      }
+      if (patch.heightPct !== undefined) {
+        element.style.height = `${patch.heightPct}%`;
+      }
+    });
+  };
+
+  const applyVideoMediaDragPreviewToDom = (
+    layerId: string,
+    box: Pick<SceneScriptVideoMediaLayer, "xPct" | "yPct" | "widthPct" | "heightPct">
+  ) => {
+    document.querySelectorAll<HTMLElement>("[data-video-media-layer-id]").forEach((element) => {
+      if (element.dataset.videoMediaLayerId !== layerId) {
+        return;
+      }
+      element.style.left = `${box.xPct}%`;
+      element.style.top = `${box.yPct}%`;
+      element.style.width = `${box.widthPct}%`;
+      element.style.height = `${box.heightPct}%`;
+    });
+  };
+
   const getVideoMediaLayerCrop = (layer: SceneScriptVideoMediaLayer) => resolveLayerFrameCrop(layer);
 
   const buildVideoMediaLayerFrameClipStyle = (layer: SceneScriptVideoMediaLayer): CSSProperties => {
@@ -2473,6 +3014,7 @@ export function GenerationPage() {
     setSelectedVideoMediaLayerId(layer.id);
     setSelectedAudioLayerId(null);
     setSelectedTimelineTarget("media");
+    seekTimelineItemCenter({ kind: "media", id: layer.id });
     beginGroupedDocumentChange();
     setVideoMediaDrag({
       layerId: layer.id,
@@ -2525,10 +3067,15 @@ export function GenerationPage() {
     }
     event.preventDefault();
     event.stopPropagation();
+    if (pickingMotionFocusLayerId === layer.id) {
+      setMediaMotionFocusFromPoint(layer, event);
+      return;
+    }
     const box = getVideoMediaLayerBox(layer);
     setSelectedVideoMediaLayerId(layer.id);
     setSelectedAudioLayerId(null);
     setSelectedTimelineTarget("media");
+    seekTimelineItemCenter({ kind: "media", id: layer.id });
     beginGroupedDocumentChange();
     setVideoMediaDrag({
       layerId: layer.id,
@@ -2910,15 +3457,18 @@ export function GenerationPage() {
     if (!video || layer.mediaType !== "video") {
       return;
     }
+    const playbackRate = clampPlaybackRate(Number(layer.playbackRate ?? 1));
     const sourceOffsetSec = Math.max(0, Number(layer.sourceOffsetSec ?? 0) || 0);
     const rawLocalTime =
-      sourceOffsetSec + Math.max(0, timelineTimeSecRef.current - Math.max(0, Number(layer.startSec || 0)));
+      sourceOffsetSec +
+      Math.max(0, timelineTimeSecRef.current - Math.max(0, Number(layer.startSec || 0))) * playbackRate;
     const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
     const localTime = mediaDuration > 0 ? rawLocalTime % mediaDuration : rawLocalTime;
     const drift = Math.abs(video.currentTime - localTime);
     const seekThreshold = options?.forceSeek ? 0.05 : timelinePlaying ? 1.2 : 0.15;
     video.volume = Math.max(0, Math.min(1, Number(layer.volume ?? 1)));
     video.muted = video.volume <= 0;
+    video.playbackRate = playbackRate;
     if (Number.isFinite(localTime) && drift > seekThreshold) {
       try {
         video.currentTime = localTime;
@@ -3100,9 +3650,12 @@ export function GenerationPage() {
     if (!timelineResizeDrag) {
       return;
     }
-    const handlePointerMove = (event: PointerEvent) => {
+    let animationFrameId = 0;
+    let pendingPoint: { clientX: number; clientY: number } | null = null;
+    let latestCommit: (() => void) | null = null;
+    const applyPointerMove = (point: { clientX: number; clientY: number }) => {
       const deltaSec =
-        (event.clientX - timelineResizeDrag.startClientX) *
+        (point.clientX - timelineResizeDrag.startClientX) *
         timelineResizeDrag.secondsPerPixel *
         TIMELINE_RESIZE_SENSITIVITY;
       const scene = editableDocumentRef.current?.scenes.find((item) => item.sceneNo === timelineResizeDrag.sceneNo);
@@ -3119,24 +3672,31 @@ export function GenerationPage() {
         if (!layerId) {
           return;
         }
-        const laneDelta = Math.round((event.clientY - timelineResizeDrag.startClientY) / 26);
+        const laneDelta = Math.round((point.clientY - timelineResizeDrag.startClientY) / 26);
         const nextTrackIndex = Math.max(0, (timelineResizeDrag.startTrackIndex ?? 0) + laneDelta);
         const rawStartSec = (timelineResizeDrag.startLayerStartSec ?? 0) + deltaSec;
         const snappedStartSec = snapTimelineValue(rawStartSec, { audioLayerId: layerId });
         const nextStartSec = clampTimelineStart(snappedStartSec, timelineResizeDrag.startDurationSec);
-        const nextResolvedTrackIndex = editableDocumentRef.current
-          ? resolveSingleTimelineTrackIndex(
-              editableDocumentRef.current,
-              { kind: "audio", id: layerId },
-              nextStartSec,
-              timelineResizeDrag.startDurationSec,
-              nextTrackIndex
-            )
-          : nextTrackIndex;
-        updateAudioLayer(layerId, {
-          trackIndex: nextResolvedTrackIndex,
-          startSec: nextStartSec
-        }, { recordHistory: false });
+        applyTimelineClipPreviewToDom(`audio:${layerId}`, {
+          startSec: nextStartSec,
+          durationSec: timelineResizeDrag.startDurationSec,
+          trackIndex: nextTrackIndex
+        });
+        latestCommit = () => {
+          const nextResolvedTrackIndex = editableDocumentRef.current
+            ? resolveSingleTimelineTrackIndex(
+                editableDocumentRef.current,
+                { kind: "audio", id: layerId },
+                nextStartSec,
+                timelineResizeDrag.startDurationSec,
+                nextTrackIndex
+              )
+            : nextTrackIndex;
+          updateAudioLayer(layerId, {
+            trackIndex: nextResolvedTrackIndex,
+            startSec: nextStartSec
+          }, { recordHistory: false });
+        };
         return;
       }
       if (timelineResizeDrag.kind === "audio-duration") {
@@ -3148,9 +3708,16 @@ export function GenerationPage() {
         const maxDuration = Math.max(0.5, totalDurationSec - startSec);
         const rawEndSec = startSec + timelineResizeDrag.startDurationSec + deltaSec;
         const snappedEndSec = snapTimelineValue(rawEndSec, { audioLayerId: layerId });
-        updateAudioLayer(layerId, {
-          durationSec: Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - startSec, 0.5))
-        }, { recordHistory: false });
+        const nextDurationSec = Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - startSec, 0.5));
+        applyTimelineClipPreviewToDom(`audio:${layerId}`, {
+          startSec,
+          durationSec: nextDurationSec,
+          trackIndex: Math.max(0, Number(timelineResizeDrag.startTrackIndex ?? 0) || 0)
+        });
+        latestCommit = () =>
+          updateAudioLayer(layerId, {
+            durationSec: nextDurationSec
+          }, { recordHistory: false });
         return;
       }
       if (timelineResizeDrag.kind === "media-track") {
@@ -3158,24 +3725,31 @@ export function GenerationPage() {
         if (!layerId) {
           return;
         }
-        const laneDelta = Math.round((event.clientY - timelineResizeDrag.startClientY) / 26);
+        const laneDelta = Math.round((point.clientY - timelineResizeDrag.startClientY) / 26);
         const nextTrackIndex = Math.max(0, (timelineResizeDrag.startTrackIndex ?? 0) + laneDelta);
         const rawStartSec = (timelineResizeDrag.startLayerStartSec ?? 0) + deltaSec;
         const snappedStartSec = snapTimelineValue(rawStartSec, { mediaLayerId: layerId });
         const nextStartSec = clampTimelineStart(snappedStartSec, timelineResizeDrag.startDurationSec);
-        const nextResolvedTrackIndex = editableDocumentRef.current
-          ? resolveSingleTimelineTrackIndex(
-              editableDocumentRef.current,
-              { kind: "media", id: layerId },
-              nextStartSec,
-              timelineResizeDrag.startDurationSec,
-              nextTrackIndex
-            )
-          : nextTrackIndex;
-        updateVideoMediaLayer(layerId, {
-          trackIndex: nextResolvedTrackIndex,
-          startSec: nextStartSec
-        }, { recordHistory: false });
+        applyTimelineClipPreviewToDom(`media:${layerId}`, {
+          startSec: nextStartSec,
+          durationSec: timelineResizeDrag.startDurationSec,
+          trackIndex: nextTrackIndex
+        });
+        latestCommit = () => {
+          const nextResolvedTrackIndex = editableDocumentRef.current
+            ? resolveSingleTimelineTrackIndex(
+                editableDocumentRef.current,
+                { kind: "media", id: layerId },
+                nextStartSec,
+                timelineResizeDrag.startDurationSec,
+                nextTrackIndex
+              )
+            : nextTrackIndex;
+          updateVideoMediaLayer(layerId, {
+            trackIndex: nextResolvedTrackIndex,
+            startSec: nextStartSec
+          }, { recordHistory: false });
+        };
         return;
       }
       if (timelineResizeDrag.kind === "media-duration") {
@@ -3187,13 +3761,20 @@ export function GenerationPage() {
         const maxDuration = Math.max(0.5, totalDurationSec - startSec);
         const rawEndSec = startSec + timelineResizeDrag.startDurationSec + deltaSec;
         const snappedEndSec = snapTimelineValue(rawEndSec, { mediaLayerId: layerId });
-        updateVideoMediaLayer(layerId, {
-          durationSec: Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - startSec, 0.5))
-        }, { recordHistory: false });
+        const nextDurationSec = Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - startSec, 0.5));
+        applyTimelineClipPreviewToDom(`media:${layerId}`, {
+          startSec,
+          durationSec: nextDurationSec,
+          trackIndex: Math.max(0, Number(timelineResizeDrag.startTrackIndex ?? 0) || 0)
+        });
+        latestCommit = () =>
+          updateVideoMediaLayer(layerId, {
+            durationSec: nextDurationSec
+          }, { recordHistory: false });
         return;
       }
       if (timelineResizeDrag.kind === "text-track") {
-        const laneDelta = Math.round((event.clientY - timelineResizeDrag.startClientY) / 26);
+        const laneDelta = Math.round((point.clientY - timelineResizeDrag.startClientY) / 26);
         const nextTrackIndex = Math.max(0, (timelineResizeDrag.startTrackIndex ?? 0) + laneDelta);
         if (!isCardNewsModule) {
           const rawStartSec = (timelineResizeDrag.startTextStartSec ?? 0) + deltaSec;
@@ -3201,24 +3782,32 @@ export function GenerationPage() {
             textOverlayIndex: timelineResizeDrag.overlayIndex ?? 0
           });
           const nextStartSec = clampTimelineStart(snappedStartSec, timelineResizeDrag.startDurationSec);
-          const nextResolvedTrackIndex = editableDocumentRef.current
-            ? resolveSingleTimelineTrackIndex(
-                editableDocumentRef.current,
-                { kind: "text", index: timelineResizeDrag.overlayIndex ?? 0 },
-                nextStartSec,
-                timelineResizeDrag.startDurationSec,
-                nextTrackIndex
-              )
-            : nextTrackIndex;
-          updateVideoTextOverlay(
-            0,
-            {
-              trackIndex: nextResolvedTrackIndex,
-              startSec: nextStartSec
-            },
-            timelineResizeDrag.overlayIndex ?? 0,
-            { recordHistory: false }
-          );
+          const overlayIndex = timelineResizeDrag.overlayIndex ?? 0;
+          applyTimelineClipPreviewToDom(`text:${overlayIndex}`, {
+            startSec: nextStartSec,
+            durationSec: timelineResizeDrag.startDurationSec,
+            trackIndex: nextTrackIndex
+          });
+          latestCommit = () => {
+            const nextResolvedTrackIndex = editableDocumentRef.current
+              ? resolveSingleTimelineTrackIndex(
+                  editableDocumentRef.current,
+                  { kind: "text", index: overlayIndex },
+                  nextStartSec,
+                  timelineResizeDrag.startDurationSec,
+                  nextTrackIndex
+                )
+              : nextTrackIndex;
+            updateVideoTextOverlay(
+              0,
+              {
+                trackIndex: nextResolvedTrackIndex,
+                startSec: nextStartSec
+              },
+              overlayIndex,
+              { recordHistory: false }
+            );
+          };
           return;
         }
         const segment = timelineSegmentsRef.current.find((item) => item.scene.sceneNo === scene.sceneNo);
@@ -3237,15 +3826,22 @@ export function GenerationPage() {
             )
           )
         );
-        updateVideoTextOverlay(
-          scene.sceneNo,
-          {
-            trackIndex: nextTrackIndex,
-            startSec: nextStartSec
-          },
-          timelineResizeDrag.overlayIndex ?? 0,
-          { recordHistory: false }
-        );
+        const overlayIndex = timelineResizeDrag.overlayIndex ?? 0;
+        applyTimelineClipPreviewToDom(`text:${overlayIndex}`, {
+          startSec: sceneGlobalStartSec + nextStartSec,
+          durationSec: timelineResizeDrag.startDurationSec,
+          trackIndex: nextTrackIndex
+        });
+        latestCommit = () =>
+          updateVideoTextOverlay(
+            scene.sceneNo,
+            {
+              trackIndex: nextTrackIndex,
+              startSec: nextStartSec
+            },
+            overlayIndex,
+            { recordHistory: false }
+          );
         return;
       }
       if (timelineResizeDrag.kind === "scene-duration") {
@@ -3267,14 +3863,22 @@ export function GenerationPage() {
           textOverlayIndex: timelineResizeDrag.overlayIndex ?? 0
         });
         const maxDuration = Math.max(0.5, totalDurationSec - textStartSec);
-        updateVideoTextOverlay(
-          0,
-          {
-            durationSec: Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - textStartSec, 0.5))
-          },
-          timelineResizeDrag.overlayIndex ?? 0,
-          { recordHistory: false }
-        );
+        const overlayIndex = timelineResizeDrag.overlayIndex ?? 0;
+        const nextDurationSec = Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - textStartSec, 0.5));
+        applyTimelineClipPreviewToDom(`text:${overlayIndex}`, {
+          startSec: textStartSec,
+          durationSec: nextDurationSec,
+          trackIndex: Math.max(0, Number(timelineResizeDrag.startTrackIndex ?? 0) || 0)
+        });
+        latestCommit = () =>
+          updateVideoTextOverlay(
+            0,
+            {
+              durationSec: nextDurationSec
+            },
+            overlayIndex,
+            { recordHistory: false }
+          );
         return;
       }
       const segment = timelineSegmentsRef.current.find((item) => item.scene.sceneNo === scene.sceneNo);
@@ -3285,20 +3889,52 @@ export function GenerationPage() {
         textOverlayIndex: timelineResizeDrag.overlayIndex ?? 0
       });
       const maxDuration = Math.max(0.5, Number(scene.durationSec || 1) - textStartSec);
-      updateVideoTextTiming(
-        scene,
-        {
-          durationSec: Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - sceneGlobalStartSec - textStartSec, 0.5))
-        },
-        timelineResizeDrag.overlayIndex ?? 0,
-        { recordHistory: false }
-      );
+      const overlayIndex = timelineResizeDrag.overlayIndex ?? 0;
+      const nextDurationSec = Math.min(maxDuration, roundTimelineSeconds(snappedEndSec - sceneGlobalStartSec - textStartSec, 0.5));
+      applyTimelineClipPreviewToDom(`text:${overlayIndex}`, {
+        startSec: sceneGlobalStartSec + textStartSec,
+        durationSec: nextDurationSec,
+        trackIndex: Math.max(0, Number(timelineResizeDrag.startTrackIndex ?? 0) || 0)
+      });
+      latestCommit = () =>
+        updateVideoTextTiming(
+          scene,
+          {
+            durationSec: nextDurationSec
+          },
+          overlayIndex,
+          { recordHistory: false }
+        );
+    };
+    const flushPointerMove = () => {
+      animationFrameId = 0;
+      if (!pendingPoint) {
+        return;
+      }
+      const point = pendingPoint;
+      pendingPoint = null;
+      applyPointerMove(point);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      pendingPoint = { clientX: event.clientX, clientY: event.clientY };
+      if (!animationFrameId) {
+        animationFrameId = window.requestAnimationFrame(flushPointerMove);
+      }
     };
     const handlePointerUp = () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+      if (pendingPoint) {
+        applyPointerMove(pendingPoint);
+        pendingPoint = null;
+      }
       setTimelineResizeDrag((current) => {
         if (current?.kind === "scene-duration") {
           updateSceneDuration(current.sceneNo, current.previewDurationSec ?? current.startDurationSec);
         } else {
+          latestCommit?.();
           commitGroupedDocumentChange();
         }
         return null;
@@ -3307,6 +3943,9 @@ export function GenerationPage() {
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp, { once: true });
     return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
@@ -3316,56 +3955,101 @@ export function GenerationPage() {
     if (!timelineMultiMoveDrag) {
       return;
     }
-    const handlePointerMove = (event: PointerEvent) => {
+    let animationFrameId = 0;
+    let pendingPoint: { clientX: number; clientY: number } | null = null;
+    let latestDeltaSec: number | null = null;
+    let latestLaneDelta = 0;
+    const applyPointerMove = (point: { clientX: number; clientY: number }) => {
       const deltaSec =
-        (event.clientX - timelineMultiMoveDrag.startClientX) *
+        (point.clientX - timelineMultiMoveDrag.startClientX) *
         timelineMultiMoveDrag.secondsPerPixel *
         TIMELINE_RESIZE_SENSITIVITY;
-      const laneDelta = Math.round((event.clientY - timelineMultiMoveDrag.startClientY) / TIMELINE_ELEMENT_TRACK_ROW_HEIGHT);
-      applyDocumentUpdate((current) => {
-        const resolvedPlacements = resolveTimelineMultiMovePlacements(current, deltaSec, laneDelta);
-        return {
-          ...current,
-          videoMediaLayers: (current.videoMediaLayers ?? []).map((layer) => {
-            const resolved = resolvedPlacements.get(`media:${layer.id}`);
-            return resolved
-              ? {
-                  ...layer,
-                  startSec: resolved.startSec,
-                  trackIndex: resolved.trackIndex
-                }
-              : layer;
-          }),
-          audioLayers: (current.audioLayers ?? []).map((layer) => {
-            const resolved = resolvedPlacements.get(`audio:${layer.id}`);
-            return resolved
-              ? {
-                  ...layer,
-                  startSec: resolved.startSec,
-                  trackIndex: resolved.trackIndex
-                }
-              : layer;
-          }),
-          videoTextOverlays: (current.videoTextOverlays ?? []).map((overlay, index) => {
-            const resolved = resolvedPlacements.get(`text:${index}`);
-            return resolved
-              ? {
-                  ...overlay,
-                  startSec: resolved.startSec,
-                  trackIndex: resolved.trackIndex
-                }
-              : overlay;
-          })
-        };
-      }, { recordHistory: false });
+      const laneDelta = Math.round((point.clientY - timelineMultiMoveDrag.startClientY) / TIMELINE_ELEMENT_TRACK_ROW_HEIGHT);
+      latestDeltaSec = deltaSec;
+      latestLaneDelta = laneDelta;
+      timelineMultiMoveDrag.items.forEach((item) => {
+        applyTimelineClipPreviewToDom(getTimelineSelectionKey(item.selection), {
+          startSec: clampTimelineStart(item.startSec + deltaSec, item.durationSec),
+          durationSec: item.durationSec,
+          trackIndex: Math.max(0, item.trackIndex + laneDelta)
+        });
+      });
+    };
+    const flushPointerMove = () => {
+      animationFrameId = 0;
+      if (!pendingPoint) {
+        return;
+      }
+      const point = pendingPoint;
+      pendingPoint = null;
+      applyPointerMove(point);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      pendingPoint = { clientX: event.clientX, clientY: event.clientY };
+      if (!animationFrameId) {
+        animationFrameId = window.requestAnimationFrame(flushPointerMove);
+      }
     };
     const handlePointerUp = () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+      if (pendingPoint) {
+        applyPointerMove(pendingPoint);
+        pendingPoint = null;
+      }
+      if (latestDeltaSec !== null) {
+        applyDocumentUpdate((current) => {
+          const resolvedPlacements = resolveTimelineMultiMovePlacements(
+            current,
+            latestDeltaSec ?? 0,
+            latestLaneDelta
+          );
+          return {
+            ...current,
+            videoMediaLayers: (current.videoMediaLayers ?? []).map((layer) => {
+              const resolved = resolvedPlacements.get(`media:${layer.id}`);
+              return resolved
+                ? {
+                    ...layer,
+                    startSec: resolved.startSec,
+                    trackIndex: resolved.trackIndex
+                  }
+                : layer;
+            }),
+            audioLayers: (current.audioLayers ?? []).map((layer) => {
+              const resolved = resolvedPlacements.get(`audio:${layer.id}`);
+              return resolved
+                ? {
+                    ...layer,
+                    startSec: resolved.startSec,
+                    trackIndex: resolved.trackIndex
+                  }
+                : layer;
+            }),
+            videoTextOverlays: (current.videoTextOverlays ?? []).map((overlay, index) => {
+              const resolved = resolvedPlacements.get(`text:${index}`);
+              return resolved
+                ? {
+                    ...overlay,
+                    startSec: resolved.startSec,
+                    trackIndex: resolved.trackIndex
+                  }
+                : overlay;
+            })
+          };
+        }, { recordHistory: false });
+      }
       commitGroupedDocumentChange();
       setTimelineMultiMoveDrag(null);
     };
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp, { once: true });
     return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
@@ -3375,18 +4059,43 @@ export function GenerationPage() {
     if (!timelineSelectionBox) {
       return;
     }
-    const handlePointerMove = (event: PointerEvent) => {
+    let animationFrameId = 0;
+    let pendingPoint: { clientX: number; clientY: number } | null = null;
+    const applyPointerMove = (point: { clientX: number; clientY: number }) => {
       setTimelineSelectionBox((current) =>
         current
           ? {
               ...current,
-              currentX: event.clientX,
-              currentY: event.clientY
+              currentX: point.clientX,
+              currentY: point.clientY
             }
           : current
       );
     };
+    const flushPointerMove = () => {
+      animationFrameId = 0;
+      if (!pendingPoint) {
+        return;
+      }
+      const point = pendingPoint;
+      pendingPoint = null;
+      applyPointerMove(point);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      pendingPoint = { clientX: event.clientX, clientY: event.clientY };
+      if (!animationFrameId) {
+        animationFrameId = window.requestAnimationFrame(flushPointerMove);
+      }
+    };
     const handlePointerUp = () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+      if (pendingPoint) {
+        applyPointerMove(pendingPoint);
+        pendingPoint = null;
+      }
       setTimelineSelectionBox((current) => {
         if (!current) {
           return null;
@@ -3445,6 +4154,9 @@ export function GenerationPage() {
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp, { once: true });
     return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
@@ -3500,6 +4212,15 @@ export function GenerationPage() {
     let cancelled = false;
     if (!resolvedPackagePath || !editableDocument || editableDocument.scenes.length === 0) {
       setHasGeneratedAssets(false);
+      return;
+    }
+    if (
+      !isCardNewsModule &&
+      ((editableDocument.videoMediaLayers?.length ?? 0) > 0 ||
+        (editableDocument.audioLayers?.length ?? 0) > 0 ||
+        (editableDocument.videoTextOverlays?.length ?? 0) > 0)
+    ) {
+      setHasGeneratedAssets(true);
       return;
     }
 
@@ -4573,7 +5294,16 @@ export function GenerationPage() {
     if (!videoTextDrag) {
       return;
     }
-    const onMouseMove = (event: MouseEvent) => {
+    let animationFrameId = 0;
+    let pendingPoint: { clientX: number; clientY: number } | null = null;
+    let latestPatch: Partial<Pick<SceneScriptVideoTextOverlay, "xPct" | "yPct" | "widthPct" | "heightPct">> | null = null;
+    const previewTextPatch = (
+      patch: Partial<Pick<SceneScriptVideoTextOverlay, "xPct" | "yPct" | "widthPct" | "heightPct">>
+    ) => {
+      latestPatch = patch;
+      applyVideoTextDragPreviewToDom(videoTextDrag.sceneNo, videoTextDrag.overlayIndex, patch);
+    };
+    const applyMouseMove = (point: { clientX: number; clientY: number }) => {
       const stage = document.querySelector<HTMLElement>(".video-canvas-frame");
       const bounds = stage?.getBoundingClientRect();
       if (!bounds) {
@@ -4584,8 +5314,8 @@ export function GenerationPage() {
         !isCardNewsModule && editableDocumentRef.current?.videoTextOverlays
           ? editableDocumentRef.current.videoTextOverlays[videoTextDrag.overlayIndex] ?? DEFAULT_VIDEO_TEXT_OVERLAY
           : getSceneVideoTextOverlays(scene)[videoTextDrag.overlayIndex] ?? DEFAULT_VIDEO_TEXT_OVERLAY;
-      const deltaXPct = ((event.clientX - videoTextDrag.startClientX) / Math.max(1, bounds.width)) * 100;
-      const deltaYPct = ((event.clientY - videoTextDrag.startClientY) / Math.max(1, bounds.height)) * 100;
+      const deltaXPct = ((point.clientX - videoTextDrag.startClientX) / Math.max(1, bounds.width)) * 100;
+      const deltaYPct = ((point.clientY - videoTextDrag.startClientY) / Math.max(1, bounds.height)) * 100;
       if (videoTextDrag.mode === "resize") {
         const handle = videoTextDrag.handle ?? "se";
         const minWidthPct = 3;
@@ -4630,18 +5360,13 @@ export function GenerationPage() {
         top = Math.max(0, Math.min(100 - minHeightPct, top));
         right = Math.max(left + minWidthPct, Math.min(100, right));
         bottom = Math.max(top + minHeightPct, Math.min(100, bottom));
-        setSnapGuides({});
-        updateVideoTextOverlay(
-          videoTextDrag.sceneNo,
-          {
-            xPct: Number(left.toFixed(2)),
-            yPct: Number(top.toFixed(2)),
-            widthPct: Number((right - left).toFixed(2)),
-            heightPct: Number((bottom - top).toFixed(2))
-          },
-          videoTextDrag.overlayIndex,
-          { recordHistory: false }
-        );
+        setCanvasSnapGuides({});
+        previewTextPatch({
+          xPct: Number(left.toFixed(2)),
+          yPct: Number(top.toFixed(2)),
+          widthPct: Number((right - left).toFixed(2)),
+          heightPct: Number((bottom - top).toFixed(2))
+        });
         return;
       }
       let nextXPct = Math.max(0, Math.min(100 - overlay.widthPct, videoTextDrag.startXPct + deltaXPct));
@@ -4697,25 +5422,56 @@ export function GenerationPage() {
           break;
         }
       }
-      setSnapGuides(nextGuides);
-      updateVideoTextOverlay(
-        videoTextDrag.sceneNo,
-        {
-          xPct: Number(nextXPct.toFixed(2)),
-          yPct: Number(nextYPct.toFixed(2))
-        },
-        videoTextDrag.overlayIndex,
-        { recordHistory: false }
-      );
+      setCanvasSnapGuides(nextGuides);
+      previewTextPatch({
+        xPct: Number(nextXPct.toFixed(2)),
+        yPct: Number(nextYPct.toFixed(2))
+      });
+    };
+    const flushMouseMove = () => {
+      animationFrameId = 0;
+      if (!pendingPoint) {
+        return;
+      }
+      const point = pendingPoint;
+      pendingPoint = null;
+      applyMouseMove(point);
+    };
+    const onMouseMove = (event: MouseEvent) => {
+      pendingPoint = { clientX: event.clientX, clientY: event.clientY };
+      if (!animationFrameId) {
+        animationFrameId = window.requestAnimationFrame(flushMouseMove);
+      }
     };
     const onMouseUp = () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+      if (pendingPoint) {
+        applyMouseMove(pendingPoint);
+        pendingPoint = null;
+      }
+      if (latestPatch) {
+        updateVideoTextOverlay(
+          videoTextDrag.sceneNo,
+          latestPatch,
+          videoTextDrag.overlayIndex,
+          { recordHistory: false }
+        );
+      }
       commitGroupedDocumentChange();
       setVideoTextDrag(null);
+      setVideoTextDragPreview(null);
       setSnapGuides({});
     };
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      setVideoTextDragPreview(null);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
@@ -4725,7 +5481,16 @@ export function GenerationPage() {
     if (!videoMediaDrag) {
       return;
     }
-    const onMouseMove = (event: MouseEvent) => {
+    let animationFrameId = 0;
+    let pendingPoint: { clientX: number; clientY: number } | null = null;
+    let latestBox: Pick<SceneScriptVideoMediaLayer, "xPct" | "yPct" | "widthPct" | "heightPct"> | null = null;
+    const previewMediaBox = (
+      box: Pick<SceneScriptVideoMediaLayer, "xPct" | "yPct" | "widthPct" | "heightPct">
+    ) => {
+      latestBox = box;
+      applyVideoMediaDragPreviewToDom(videoMediaDrag.layerId, box);
+    };
+    const applyMouseMove = (point: { clientX: number; clientY: number }) => {
       const stage = document.querySelector<HTMLElement>(".video-canvas-frame");
       const bounds = stage?.getBoundingClientRect();
       const layer = editableDocumentRef.current?.videoMediaLayers?.find(
@@ -4735,8 +5500,8 @@ export function GenerationPage() {
         return;
       }
       const box = getVideoMediaLayerBox(layer);
-      const deltaXPct = ((event.clientX - videoMediaDrag.startClientX) / Math.max(1, bounds.width)) * 100;
-      const deltaYPct = ((event.clientY - videoMediaDrag.startClientY) / Math.max(1, bounds.height)) * 100;
+      const deltaXPct = ((point.clientX - videoMediaDrag.startClientX) / Math.max(1, bounds.width)) * 100;
+      const deltaYPct = ((point.clientY - videoMediaDrag.startClientY) / Math.max(1, bounds.height)) * 100;
 
       if (videoMediaDrag.mode === "resize") {
         const handle = videoMediaDrag.handle ?? "se";
@@ -4756,8 +5521,8 @@ export function GenerationPage() {
           const startRightPx = startCenterXPx + startWidthPx / 2;
           const startTopPx = startCenterYPx - startHeightPx / 2;
           const startBottomPx = startCenterYPx + startHeightPx / 2;
-          const horizontalDeltaPx = event.clientX - videoMediaDrag.startClientX;
-          const verticalDeltaPx = event.clientY - videoMediaDrag.startClientY;
+          const horizontalDeltaPx = point.clientX - videoMediaDrag.startClientX;
+          const verticalDeltaPx = point.clientY - videoMediaDrag.startClientY;
           const signedWidthDeltaPx =
             handle.includes("e") ? horizontalDeltaPx : handle.includes("w") ? -horizontalDeltaPx : 0;
           const signedHeightDeltaPx =
@@ -4804,13 +5569,13 @@ export function GenerationPage() {
             nextCenterYPx = startTopPx + nextHeightPx / 2;
           }
 
-          setSnapGuides({});
-          updateVideoMediaLayer(videoMediaDrag.layerId, {
+          setCanvasSnapGuides({});
+          previewMediaBox({
             xPct: Number(clampVideoMediaCanvasPct((nextCenterXPx / bounds.width) * 100).toFixed(2)),
             yPct: Number(clampVideoMediaCanvasPct((nextCenterYPx / bounds.height) * 100).toFixed(2)),
             widthPct: Number(((nextWidthPx / bounds.width) * 100).toFixed(2)),
             heightPct: Number(((nextHeightPx / bounds.height) * 100).toFixed(2))
-          }, { recordHistory: false });
+          });
           return;
         }
         let left = videoMediaDrag.startXPct - videoMediaDrag.startWidthPct / 2;
@@ -4863,13 +5628,13 @@ export function GenerationPage() {
         let nextHeightPct = bottom - top;
         let nextXPct = left + nextWidthPct / 2;
         let nextYPct = top + nextHeightPct / 2;
-        setSnapGuides({});
-        updateVideoMediaLayer(videoMediaDrag.layerId, {
+        setCanvasSnapGuides({});
+        previewMediaBox({
           xPct: Number(clampVideoMediaCanvasPct(nextXPct).toFixed(2)),
           yPct: Number(clampVideoMediaCanvasPct(nextYPct).toFixed(2)),
           widthPct: Number(nextWidthPct.toFixed(2)),
           heightPct: Number(nextHeightPct.toFixed(2))
-        }, { recordHistory: false });
+        });
         return;
       }
 
@@ -4933,20 +5698,53 @@ export function GenerationPage() {
           break;
         }
       }
-      setSnapGuides(nextGuides);
-      updateVideoMediaLayer(videoMediaDrag.layerId, {
+      setCanvasSnapGuides(nextGuides);
+      previewMediaBox({
         xPct: Number(nextXPct.toFixed(2)),
-        yPct: Number(nextYPct.toFixed(2))
-      }, { recordHistory: false });
+        yPct: Number(nextYPct.toFixed(2)),
+        widthPct: videoMediaDrag.startWidthPct,
+        heightPct: videoMediaDrag.startHeightPct
+      });
+    };
+    const flushMouseMove = () => {
+      animationFrameId = 0;
+      if (!pendingPoint) {
+        return;
+      }
+      const point = pendingPoint;
+      pendingPoint = null;
+      applyMouseMove(point);
+    };
+    const onMouseMove = (event: MouseEvent) => {
+      pendingPoint = { clientX: event.clientX, clientY: event.clientY };
+      if (!animationFrameId) {
+        animationFrameId = window.requestAnimationFrame(flushMouseMove);
+      }
     };
     const onMouseUp = () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+      if (pendingPoint) {
+        applyMouseMove(pendingPoint);
+        pendingPoint = null;
+      }
+      if (latestBox) {
+        updateVideoMediaLayer(videoMediaDrag.layerId, latestBox, { recordHistory: false });
+      }
       commitGroupedDocumentChange();
       setVideoMediaDrag(null);
+      setVideoMediaDragPreview(null);
       setSnapGuides({});
     };
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      setVideoMediaDragPreview(null);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
@@ -5115,6 +5913,119 @@ export function GenerationPage() {
     transformOrigin: "center center"
   });
 
+  const buildElementTransitionPreviewStyle = (
+    transition: SceneScriptElementTransition | undefined,
+    startSec: number,
+    durationSec: number
+  ) => {
+    const normalized = normalizeElementTransition(transition);
+    if (normalized.style === "none") {
+      return { opacityMultiplier: 1, transform: "" };
+    }
+    const localSec = Math.max(0, Math.min(durationSec, timelineTimeSec - startSec));
+    const transitionDurationSec = Math.min(normalized.durationSec, Math.max(0.05, durationSec / 2));
+    let progress = 1;
+    let phase: "in" | "out" | null = null;
+    if (
+      shouldRunTransitionPhase(normalized, "in") &&
+      localSec < transitionDurationSec
+    ) {
+      progress = localSec / transitionDurationSec;
+      phase = "in";
+    } else if (
+      shouldRunTransitionPhase(normalized, "out") &&
+      localSec > durationSec - transitionDurationSec
+    ) {
+      progress = Math.max(0, (durationSec - localSec) / transitionDurationSec);
+      phase = "out";
+    }
+    if (!phase) {
+      return { opacityMultiplier: 1, transform: "" };
+    }
+    if (normalized.style === "fade") {
+      const eased = phase === "in" ? easeOutCubic(progress) : 1 - easeInCubic(1 - progress);
+      return { opacityMultiplier: clampNumber(eased, 0, 1), transform: "" };
+    }
+    const eased = phase === "in" ? easeOutCubic(progress) : 1 - easeInCubic(1 - progress);
+    const offsetPx = 26 * (1 - clampNumber(eased, 0, 1));
+    const opacityMultiplier = 0.88 + 0.12 * clampNumber(eased, 0, 1);
+    const directionMultiplier = phase === "in" ? 1 : -1;
+    const transform =
+      normalized.style === "slide-left"
+        ? `translateX(${offsetPx * directionMultiplier}px)`
+        : normalized.style === "slide-right"
+          ? `translateX(${-offsetPx * directionMultiplier}px)`
+          : normalized.style === "slide-up"
+            ? `translateY(${offsetPx * directionMultiplier}px)`
+            : normalized.style === "slide-down"
+              ? `translateY(${-offsetPx * directionMultiplier}px)`
+              : "";
+    return { opacityMultiplier, transform };
+  };
+
+  const buildMediaMotionPreviewStyle = (
+    motion: SceneScriptVideoMediaMotion | undefined,
+    startSec: number,
+    durationSec: number
+  ): CSSProperties => {
+    const normalized = normalizeMediaMotion(motion);
+    if (normalized.style === "none") {
+      return {};
+    }
+    const localSec = Math.max(0, Math.min(durationSec, timelineTimeSec - startSec));
+    const progress = clampNumber(localSec / Math.max(0.1, durationSec), 0, 1);
+    const amount = normalized.amountPct / 100;
+    const scale =
+      normalized.style === "slow-zoom-out"
+        ? 1 + amount * (1 - progress)
+        : 1 + amount * progress;
+    return {
+      transform: `scale(${scale.toFixed(4)})`,
+      transformOrigin: `${normalized.focusXPct ?? 50}% ${normalized.focusYPct ?? 50}%`
+    };
+  };
+
+  const renderMobileSafeAreaGuides = () => {
+    if (isCardNewsModule) {
+      return null;
+    }
+    const guide = MOBILE_SAFE_AREA_GUIDES[selectedVideoCanvasPreset.id];
+    const isVertical = selectedVideoCanvasPreset.width < selectedVideoCanvasPreset.height;
+    return (
+      <>
+        <div
+          className={[
+            "mobile-safe-area-guide",
+            isVertical ? "mobile-safe-area-guide--vertical" : "mobile-safe-area-guide--landscape"
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={{
+            top: `${guide.topPct}%`,
+            right: `${guide.rightPct}%`,
+            bottom: `${guide.bottomPct}%`,
+            left: `${guide.leftPct}%`
+          }}
+          aria-hidden="true"
+        />
+        {isVertical ? (
+          <>
+            <div
+              className="mobile-safe-area-ui-zone mobile-safe-area-ui-zone--right"
+              style={{ width: `${guide.rightPct}%` }}
+              aria-hidden="true"
+            />
+            <div
+              className="mobile-safe-area-ui-zone mobile-safe-area-ui-zone--bottom"
+              style={{ height: `${guide.bottomPct}%` }}
+              aria-hidden="true"
+            />
+          </>
+        ) : null}
+      </>
+    );
+  };
+
   const handleCardPreviewMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (!isCardNewsModule || event.button !== 2) {
       return;
@@ -5170,14 +6081,29 @@ export function GenerationPage() {
     const overlays = isCardNewsModule ? getSceneVideoTextOverlays(scene) : videoTextLayers;
     const nextIndex = overlays.length;
     const globalStartSec = Math.max(0, Math.min(totalDurationSec - 0.5, timelineTimeSecRef.current));
+    const nextDurationSec = Math.min(
+      5,
+      Math.max(1, isCardNewsModule ? Number(scene.durationSec || 1) : totalDurationSec - globalStartSec)
+    );
+    const nextTrackIndex = findAvailableTimelineTrackIndex(
+      overlays.map((overlay, index) => ({
+        key: `text:${index}`,
+        startSec: Math.max(0, Number(overlay.startSec ?? 0) || 0),
+        durationSec: Math.max(0.5, Number(overlay.durationSec ?? 0.5) || 0.5),
+        trackIndex: Math.max(0, Number(overlay.trackIndex ?? 0) || 0)
+      })),
+      isCardNewsModule ? 0 : globalStartSec,
+      nextDurationSec,
+      0
+    );
     const nextOverlay: SceneScriptVideoTextOverlay = {
       ...DEFAULT_VIDEO_TEXT_OVERLAY,
       startSec: isCardNewsModule ? 0 : globalStartSec,
-      durationSec: Math.min(5, Math.max(1, isCardNewsModule ? Number(scene.durationSec || 1) : totalDurationSec - globalStartSec)),
+      durationSec: nextDurationSec,
       text: DEFAULT_VIDEO_TEXT_OVERLAY.text,
-      xPct: Math.min(70, DEFAULT_VIDEO_TEXT_OVERLAY.xPct + nextIndex * 5),
-      yPct: Math.min(75, DEFAULT_VIDEO_TEXT_OVERLAY.yPct + nextIndex * 7),
-      trackIndex: nextIndex
+      xPct: Math.min(65, DEFAULT_VIDEO_TEXT_OVERLAY.xPct + nextTrackIndex * 3),
+      yPct: Math.min(68, DEFAULT_VIDEO_TEXT_OVERLAY.yPct + nextTrackIndex * 4),
+      trackIndex: nextTrackIndex
     };
     const nextOverlays = [...overlays, nextOverlay];
     if (isCardNewsModule) {
@@ -5196,7 +6122,6 @@ export function GenerationPage() {
     setSelectedAudioLayerId(null);
     setSelectedVideoMediaLayerId(null);
     setSelectedTimelineItems([{ kind: "text", index: nextIndex }]);
-    setEditingVideoText({ sceneNo: scene.sceneNo, overlayIndex: nextIndex });
     setEditorTab("text");
   };
 
@@ -5716,6 +6641,21 @@ export function GenerationPage() {
         return;
       }
 
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+          if (nudgeSelectedTimelineTracks(event.key === "ArrowUp" ? -1 : 1)) {
+            event.preventDefault();
+          }
+          return;
+        }
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          if (snapSelectedTimelineItemsToNeighbor(event.key === "ArrowLeft" ? -1 : 1)) {
+            event.preventDefault();
+          }
+          return;
+        }
+      }
+
       if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "c") {
         if (copySelectedTimelineElement()) {
           event.preventDefault();
@@ -5807,6 +6747,7 @@ export function GenerationPage() {
     setSelectedVideoMediaLayerId(null);
     setSelectedAudioLayerId(null);
     setSelectedTimelineTarget("text");
+    seekTimelineItemCenter({ kind: "text", index: overlayIndex });
     beginGroupedDocumentChange();
     setVideoTextDrag({
       sceneNo: scene.sceneNo,
@@ -5903,7 +6844,9 @@ export function GenerationPage() {
         setMessage(isKorean ? "저장된 작업 초안이 없습니다." : "No saved editor draft was found.");
         return;
       }
-      const nextDocument = cloneSceneScriptDocument(draft.document);
+      const nextDocument = isCardNewsModule
+        ? cloneSceneScriptDocument(draft.document)
+        : migrateLegacyPlaybackRateDurations(migrateSceneTextOverlaysToTimeline(draft.document));
       editableDocumentRef.current = nextDocument;
       setEditableDocument(nextDocument);
       setUndoStack([]);
@@ -5948,7 +6891,7 @@ export function GenerationPage() {
       void handleSaveDraft("autosave", false);
     }, 3500);
     return () => window.clearTimeout(autosaveTimer);
-  }, [editableDocument, resolvedPackagePath]);
+  }, [editableDocument, isCardNewsModule, resolvedPackagePath]);
 
   const handleChooseCardNewsCoverImage = async () => {
     const selectedPath = await pickCreateBackgroundFile();
@@ -6768,9 +7711,12 @@ export function GenerationPage() {
     setMessage(isKorean ? "영상 MP4를 합성하는 중입니다..." : "Exporting MP4 video...");
     try {
       await flushActivePreviewTextEdit();
+      const documentForExport = isCardNewsModule
+        ? latestDocument
+        : migrateLegacyPlaybackRateDurations(latestDocument);
       const savedDocument = await window.mellowcat.automation.updateSceneScript(
         resolvedPackagePath,
-        latestDocument
+        documentForExport
       );
       setEditableDocument(savedDocument);
       const result = await window.mellowcat.automation.exportVideoEditorProject({
@@ -6784,6 +7730,102 @@ export function GenerationPage() {
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : isKorean ? "영상 내보내기에 실패했습니다." : "Video export failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeriveShortformFromLongform = async () => {
+    const latestDocument = editableDocumentRef.current ?? editableDocument;
+    if (!latestDocument || !resolvedPackagePath) {
+      return;
+    }
+    setBusy(true);
+    setMessage(isKorean ? "롱폼에서 9:16 숏폼 초안을 추출하는 중입니다..." : "Deriving a 9:16 short from the longform...");
+    try {
+      await flushActivePreviewTextEdit();
+      const savedDocument = await window.mellowcat.automation.updateSceneScript(
+        resolvedPackagePath,
+        latestDocument
+      );
+      setEditableDocument(savedDocument);
+      const result = await window.mellowcat.automation.deriveShortformFromLongform({
+        packagePath: resolvedPackagePath,
+        document: savedDocument,
+        maxDurationSec: 89
+      });
+      await inspectSceneScript(result.packagePath);
+      setSelectedSceneNo(result.document.scenes[0]?.sceneNo ?? 1);
+      setMessage(
+        isKorean
+          ? `숏폼 초안 패키지를 만들었습니다: ${result.packagePath}`
+          : `Shortform draft package created: ${result.packagePath}`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : isKorean ? "숏폼 추출에 실패했습니다." : "Shortform extraction failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLoadLatestShortformDraft = async () => {
+    if (!resolvedPackagePath) {
+      return;
+    }
+    setBusy(true);
+    setMessage(isKorean ? "저장된 숏폼 초안을 찾는 중입니다..." : "Finding saved shortform drafts...");
+    try {
+      const drafts = await window.mellowcat.automation.listDerivedShortformPackages(resolvedPackagePath);
+      const latestDraft = drafts[0];
+      if (!latestDraft) {
+        setMessage(
+          isKorean
+            ? "저장된 숏폼 초안이 없습니다. 처음 한 번은 숏폼 추출을 실행해야 합니다."
+            : "No saved shortform draft was found. Run Extract Short once first."
+        );
+        return;
+      }
+
+      setSelectedPackagePath(latestDraft.packagePath);
+      const editorDraft = await inspectEditorDraft(latestDraft.packagePath);
+      const rawDocument =
+        editorDraft?.document ??
+        (await window.mellowcat.automation.inspectSceneScript(latestDraft.packagePath));
+      const nextDocument = migrateLegacyPlaybackRateDurations(
+        migrateSceneTextOverlaysToTimeline(rawDocument)
+      );
+      editableDocumentRef.current = nextDocument;
+      setEditableDocument(nextDocument);
+      setSelectedSceneNo(nextDocument.scenes[0]?.sceneNo ?? 1);
+      setSelectedTimelineTarget(null);
+      setSelectedVideoMediaLayerId(null);
+      setSelectedAudioLayerId(null);
+      setSelectedVideoTextIndex(null);
+      setUndoStack([]);
+      setRedoStack([]);
+      lastAutosavedDocumentRef.current = JSON.stringify(nextDocument);
+      if (editorDraft) {
+        setDraftStatus({
+          state: "saved",
+          savedAt: editorDraft.savedAt,
+          saveReason: editorDraft.saveReason
+        });
+      } else {
+        setDraftStatus({ state: "idle" });
+      }
+      setMessage(
+        isKorean
+          ? `저장된 숏폼 초안을 불러왔습니다: ${latestDraft.packagePath}`
+          : `Loaded saved shortform draft: ${latestDraft.packagePath}`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : isKorean
+            ? "숏폼 초안을 불러오지 못했습니다."
+            : "Failed to load the shortform draft."
+      );
     } finally {
       setBusy(false);
     }
@@ -6842,6 +7884,235 @@ export function GenerationPage() {
     }
   };
 
+  const selectedCanvasPosition = (() => {
+    const canvasWidth = selectedVideoCanvasPreset.width;
+    const canvasHeight = selectedVideoCanvasPreset.height;
+    if (!isCardNewsModule && selectedTimelineTarget === "media" && selectedVideoMediaLayer) {
+      const box = resolveLayerBox(selectedVideoMediaLayer);
+      const width = (canvasWidth * Number(box.widthPct || 0)) / 100;
+      const height = (canvasHeight * Number(box.heightPct || 0)) / 100;
+      const centerX = (canvasWidth * Number(box.xPct || 0)) / 100;
+      const centerY = (canvasHeight * Number(box.yPct || 0)) / 100;
+      return {
+        kind: "media" as const,
+        key: `media:${selectedVideoMediaLayer.id}`,
+        label: selectedVideoMediaLayer.label || (selectedVideoMediaLayer.mediaType === "video" ? "Video" : "Media"),
+        x: centerX - width / 2,
+        y: centerY - height / 2,
+        width,
+        height
+      };
+    }
+    if (!isCardNewsModule && selectedTimelineTarget === "text" && selectedVideoTextOverlay) {
+      return {
+        kind: "text" as const,
+        key: `text:${selectedVideoTextIndex}`,
+        label: isKorean ? "텍스트" : "Text",
+        x: (canvasWidth * Number(selectedVideoTextOverlay.xPct || 0)) / 100,
+        y: (canvasHeight * Number(selectedVideoTextOverlay.yPct || 0)) / 100,
+        width: (canvasWidth * Number(selectedVideoTextOverlay.widthPct || 0)) / 100,
+        height: (canvasHeight * Number(selectedVideoTextOverlay.heightPct || 0)) / 100
+      };
+    }
+    return null;
+  })();
+
+  const selectedElementTransition =
+    selectedCanvasPosition?.kind === "media" && selectedVideoMediaLayer
+      ? normalizeElementTransition(selectedVideoMediaLayer.transition)
+      : selectedCanvasPosition?.kind === "text" && selectedVideoTextOverlay
+        ? normalizeElementTransition(selectedVideoTextOverlay.transition)
+        : null;
+  const selectedMediaMotion =
+    selectedCanvasPosition?.kind === "media" && selectedVideoMediaLayer
+      ? normalizeMediaMotion(selectedVideoMediaLayer.motion)
+      : null;
+
+  const updateSelectedElementTransition = (patch: Partial<SceneScriptElementTransition>) => {
+    if (!selectedCanvasPosition || !selectedElementTransition) {
+      return;
+    }
+    const nextTransition = normalizeElementTransition({
+      ...selectedElementTransition,
+      ...patch
+    });
+    if (selectedCanvasPosition.kind === "media" && selectedVideoMediaLayer) {
+      updateVideoMediaLayer(selectedVideoMediaLayer.id, { transition: nextTransition });
+      return;
+    }
+    if (selectedCanvasPosition.kind === "text" && selectedScene) {
+      updateVideoTextOverlay(0, { transition: nextTransition });
+    }
+  };
+
+  const updateSelectedMediaMotion = (patch: Partial<SceneScriptVideoMediaMotion>) => {
+    if (!selectedVideoMediaLayer || !selectedMediaMotion) {
+      return;
+    }
+    updateVideoMediaLayer(selectedVideoMediaLayer.id, {
+      motion: normalizeMediaMotion({
+        ...selectedMediaMotion,
+        ...patch
+      })
+    });
+  };
+
+  const setMediaMotionFocusFromPoint = (
+    layer: SceneScriptVideoMediaLayer,
+    event: ReactMouseEvent<HTMLElement>
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const focusXPct = clampNumber(((event.clientX - rect.left) / Math.max(1, rect.width)) * 100, 0, 100);
+    const focusYPct = clampNumber(((event.clientY - rect.top) / Math.max(1, rect.height)) * 100, 0, 100);
+    updateVideoMediaLayer(layer.id, {
+      motion: normalizeMediaMotion({
+        ...layer.motion,
+        focusXPct: Number(focusXPct.toFixed(1)),
+        focusYPct: Number(focusYPct.toFixed(1))
+      })
+    });
+    setPickingMotionFocusLayerId(null);
+    setPausedMotionPreviewLayerId(layer.id);
+  };
+
+  const updateSelectedCanvasPosition = (
+    patch: Partial<Pick<NonNullable<typeof selectedCanvasPosition>, "x" | "y" | "width" | "height">>
+  ) => {
+    if (!selectedCanvasPosition) {
+      return;
+    }
+    const canvasWidth = selectedVideoCanvasPreset.width;
+    const canvasHeight = selectedVideoCanvasPreset.height;
+    const next = {
+      ...selectedCanvasPosition,
+      ...patch
+    };
+    const width = Math.max(1, Number(next.width) || 1);
+    const height = Math.max(1, Number(next.height) || 1);
+    const x = Number.isFinite(Number(next.x)) ? Number(next.x) : selectedCanvasPosition.x;
+    const y = Number.isFinite(Number(next.y)) ? Number(next.y) : selectedCanvasPosition.y;
+    if (selectedCanvasPosition.kind === "media" && selectedVideoMediaLayer) {
+      updateVideoMediaLayer(selectedVideoMediaLayer.id, {
+        xPct: Number(clampVideoMediaCanvasPct(((x + width / 2) / canvasWidth) * 100).toFixed(2)),
+        yPct: Number(clampVideoMediaCanvasPct(((y + height / 2) / canvasHeight) * 100).toFixed(2)),
+        widthPct: Number(clampNumber((width / canvasWidth) * 100, 0.1, 500).toFixed(2)),
+        heightPct: Number(clampNumber((height / canvasHeight) * 100, 0.1, 500).toFixed(2))
+      });
+      return;
+    }
+    if (selectedCanvasPosition.kind === "text" && selectedScene) {
+      const widthPct = clampNumber((width / canvasWidth) * 100, 3, 100);
+      const heightPct = clampNumber((height / canvasHeight) * 100, 3, 100);
+      updateVideoTextOverlay(0, {
+        xPct: Number(clampNumber((x / canvasWidth) * 100, 0, 100 - widthPct).toFixed(2)),
+        yPct: Number(clampNumber((y / canvasHeight) * 100, 0, 100 - heightPct).toFixed(2)),
+        widthPct: Number(widthPct.toFixed(2)),
+        heightPct: Number(heightPct.toFixed(2))
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedCanvasPosition) {
+      setPositionDraft({});
+      setPositionDraftKey("");
+      setEditingPositionField(null);
+      return;
+    }
+    if (editingPositionField && positionDraftKey === selectedCanvasPosition.key) {
+      return;
+    }
+    setPositionDraftKey(selectedCanvasPosition.key);
+    setPositionDraft({
+      x: selectedCanvasPosition.x.toFixed(1),
+      y: selectedCanvasPosition.y.toFixed(1),
+      width: selectedCanvasPosition.width.toFixed(1),
+      height: selectedCanvasPosition.height.toFixed(1)
+    });
+  }, [
+    editingPositionField,
+    positionDraftKey,
+    selectedCanvasPosition?.height,
+    selectedCanvasPosition?.key,
+    selectedCanvasPosition?.width,
+    selectedCanvasPosition?.x,
+    selectedCanvasPosition?.y
+  ]);
+
+  const commitPositionDraftField = (field: CanvasPositionField) => {
+    if (!selectedCanvasPosition) {
+      return;
+    }
+    const parsed = Number(positionDraft[field]);
+    setEditingPositionField(null);
+    if (!Number.isFinite(parsed)) {
+      setPositionDraft((current) => ({
+        ...current,
+        [field]: selectedCanvasPosition[field].toFixed(1)
+      }));
+      return;
+    }
+    updateSelectedCanvasPosition({ [field]: parsed });
+  };
+
+  const applySelectedTextPropertyToAllTextBoxes = (field: CanvasPositionField | "fontSize") => {
+    if (
+      !selectedCanvasPosition ||
+      selectedCanvasPosition.kind !== "text" ||
+      !selectedVideoTextOverlay ||
+      isCardNewsModule
+    ) {
+      return;
+    }
+    const canvasWidth = selectedVideoCanvasPreset.width;
+    const canvasHeight = selectedVideoCanvasPreset.height;
+    const targetXPct = (selectedCanvasPosition.x / canvasWidth) * 100;
+    const targetYPct = (selectedCanvasPosition.y / canvasHeight) * 100;
+    const targetWidthPct = clampNumber((selectedCanvasPosition.width / canvasWidth) * 100, 3, 100);
+    const targetHeightPct = clampNumber((selectedCanvasPosition.height / canvasHeight) * 100, 3, 100);
+    const targetFontSize = clampNumber(Number(selectedVideoTextOverlay.fontSize ?? DEFAULT_VIDEO_TEXT_OVERLAY.fontSize), 8, 180);
+    applyDocumentUpdate((current) => ({
+      ...current,
+      videoTextOverlays: (current.videoTextOverlays ?? []).map((overlay) => {
+        const currentWidthPct = clampNumber(Number(overlay.widthPct ?? DEFAULT_VIDEO_TEXT_OVERLAY.widthPct), 3, 100);
+        const currentHeightPct = clampNumber(Number(overlay.heightPct ?? DEFAULT_VIDEO_TEXT_OVERLAY.heightPct), 3, 100);
+        const nextWidthPct = field === "width" ? targetWidthPct : currentWidthPct;
+        const nextHeightPct = field === "height" ? targetHeightPct : currentHeightPct;
+        const nextXPct =
+          field === "x" || field === "width"
+            ? clampNumber(field === "x" ? targetXPct : Number(overlay.xPct ?? DEFAULT_VIDEO_TEXT_OVERLAY.xPct), 0, 100 - nextWidthPct)
+            : clampNumber(Number(overlay.xPct ?? DEFAULT_VIDEO_TEXT_OVERLAY.xPct), 0, 100 - nextWidthPct);
+        const nextYPct =
+          field === "y" || field === "height"
+            ? clampNumber(field === "y" ? targetYPct : Number(overlay.yPct ?? DEFAULT_VIDEO_TEXT_OVERLAY.yPct), 0, 100 - nextHeightPct)
+            : clampNumber(Number(overlay.yPct ?? DEFAULT_VIDEO_TEXT_OVERLAY.yPct), 0, 100 - nextHeightPct);
+        return {
+          ...overlay,
+          ...(field === "x" || field === "width" ? { xPct: Number(nextXPct.toFixed(2)) } : {}),
+          ...(field === "y" || field === "height" ? { yPct: Number(nextYPct.toFixed(2)) } : {}),
+          ...(field === "width" ? { widthPct: Number(nextWidthPct.toFixed(2)) } : {}),
+          ...(field === "height" ? { heightPct: Number(nextHeightPct.toFixed(2)) } : {}),
+          ...(field === "fontSize" ? { fontSize: targetFontSize } : {})
+        };
+      })
+    }));
+    const label =
+      field === "x"
+        ? "X"
+        : field === "y"
+          ? "Y"
+          : field === "width"
+            ? isKorean ? "너비" : "Width"
+            : field === "height"
+              ? isKorean ? "높이" : "Height"
+              : isKorean ? "폰트 크기" : "Font size";
+    setMessage(
+      isKorean
+        ? `모든 텍스트 박스에 ${label} 값을 적용했습니다.`
+        : `Applied ${label} to all text boxes.`
+    );
+  };
+
   return (
     <GenerationErrorBoundary>
     <section className="page generation-page">
@@ -6889,6 +8160,26 @@ export function GenerationPage() {
               onClick={() => void handleExportVideoProject()}
             >
               {isKorean ? "영상 다운로드" : "Download Video"}
+            </button>
+          ) : null}
+          {!isCardNewsModule ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!editableDocument || busy}
+              onClick={() => void handleDeriveShortformFromLongform()}
+            >
+              {isKorean ? "숏폼 추출" : "Extract Short"}
+            </button>
+          ) : null}
+          {!isCardNewsModule ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!resolvedPackagePath || busy}
+              onClick={() => void handleLoadLatestShortformDraft()}
+            >
+              {isKorean ? "숏폼 초안 불러오기" : "Load Short Draft"}
             </button>
           ) : null}
           <button
@@ -8891,50 +10182,327 @@ export function GenerationPage() {
                   </p>
                 </div>
                 {!isCardNewsModule &&
-                ((selectedTimelineTarget === "media" && selectedVideoMediaLayer?.mediaType === "video") ||
+                (selectedCanvasPosition ||
+                  (selectedTimelineTarget === "media" && selectedVideoMediaLayer?.mediaType === "video") ||
                   (selectedTimelineTarget === "audio" && selectedAudioLayer)) ? (
-                  <div className="video-sound-control-panel">
-                    {selectedTimelineTarget === "media" && selectedVideoMediaLayer?.mediaType === "video" ? (
-                      <label className="video-sound-control">
-                        <span>{isKorean ? "영상 음량" : "Video Volume"}</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={Math.round(clampLayerVolume(Number(selectedVideoMediaLayer.volume ?? 1)) * 100)}
-                          onPointerDown={beginGroupedDocumentChange}
-                          onPointerUp={commitGroupedDocumentChange}
-                          onBlur={commitGroupedDocumentChange}
-                          onChange={(event) =>
-                            updateSoundLayerVolume("media", selectedVideoMediaLayer.id, Number(event.target.value) / 100, {
-                              recordHistory: false
-                            })
-                          }
-                        />
-                        <strong>{formatLayerVolume(selectedVideoMediaLayer.volume)}</strong>
-                      </label>
+                  <div className="video-floating-control-panel">
+                    {(selectedTimelineTarget === "media" && selectedVideoMediaLayer?.mediaType === "video") ||
+                    (selectedTimelineTarget === "audio" && selectedAudioLayer) ? (
+                      <div className="video-sound-control-panel">
+                        {selectedTimelineTarget === "media" && selectedVideoMediaLayer?.mediaType === "video" ? (
+                          <label className="video-sound-control">
+                            <span>{isKorean ? "영상 음량" : "Video Volume"}</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={Math.round(clampLayerVolume(Number(selectedVideoMediaLayer.volume ?? 1)) * 100)}
+                              onPointerDown={beginGroupedDocumentChange}
+                              onPointerUp={commitGroupedDocumentChange}
+                              onBlur={commitGroupedDocumentChange}
+                              onChange={(event) =>
+                                updateSoundLayerVolume("media", selectedVideoMediaLayer.id, Number(event.target.value) / 100, {
+                                  recordHistory: false
+                                })
+                              }
+                            />
+                            <strong>{formatLayerVolume(selectedVideoMediaLayer.volume)}</strong>
+                          </label>
+                        ) : null}
+                        {selectedTimelineTarget === "media" && selectedVideoMediaLayer?.mediaType === "video" ? (
+                          <label className="video-sound-control">
+                            <span>{isKorean ? "배속" : "Speed"}</span>
+                            <input
+                              type="range"
+                              min={1}
+                              max={2}
+                              step={0.01}
+                              value={clampPlaybackRate(Number(selectedVideoMediaLayer.playbackRate ?? 1))}
+                              onPointerDown={beginGroupedDocumentChange}
+                              onPointerUp={commitGroupedDocumentChange}
+                              onBlur={commitGroupedDocumentChange}
+                              onChange={(event) =>
+                                updateVideoMediaLayerPlaybackRate(
+                                  selectedVideoMediaLayer.id,
+                                  Number(event.target.value),
+                                  { recordHistory: false }
+                                )
+                              }
+                            />
+                            <input
+                              className="video-speed-input"
+                              type="number"
+                              min={1}
+                              max={2}
+                              step={0.01}
+                              value={clampPlaybackRate(Number(selectedVideoMediaLayer.playbackRate ?? 1)).toFixed(2)}
+                              onPointerDown={beginGroupedDocumentChange}
+                              onBlur={(event) => {
+                                updateVideoMediaLayerPlaybackRate(
+                                  selectedVideoMediaLayer.id,
+                                  parseLooseNumberInput(event.target.value, selectedVideoMediaLayer.playbackRate ?? 1),
+                                  { recordHistory: false }
+                                );
+                                commitGroupedDocumentChange();
+                              }}
+                              onChange={(event) =>
+                                updateVideoMediaLayerPlaybackRate(
+                                  selectedVideoMediaLayer.id,
+                                  parseLooseNumberInput(event.target.value, selectedVideoMediaLayer.playbackRate ?? 1),
+                                  { recordHistory: false }
+                                )
+                              }
+                            />
+                            <strong>{formatPlaybackRate(selectedVideoMediaLayer.playbackRate)}</strong>
+                          </label>
+                        ) : null}
+                        {selectedTimelineTarget === "audio" && selectedAudioLayer ? (
+                          <label className="video-sound-control">
+                            <span>{isKorean ? "오디오 음량" : "Audio Volume"}</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={Math.round(clampLayerVolume(Number(selectedAudioLayer.volume ?? 1)) * 100)}
+                              onPointerDown={beginGroupedDocumentChange}
+                              onPointerUp={commitGroupedDocumentChange}
+                              onBlur={commitGroupedDocumentChange}
+                              onChange={(event) =>
+                                updateSoundLayerVolume("audio", selectedAudioLayer.id, Number(event.target.value) / 100, {
+                                  recordHistory: false
+                                })
+                              }
+                            />
+                            <strong>{formatLayerVolume(selectedAudioLayer.volume)}</strong>
+                          </label>
+                        ) : null}
+                      </div>
                     ) : null}
-                    {selectedTimelineTarget === "audio" && selectedAudioLayer ? (
-                      <label className="video-sound-control">
-                        <span>{isKorean ? "오디오 음량" : "Audio Volume"}</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={Math.round(clampLayerVolume(Number(selectedAudioLayer.volume ?? 1)) * 100)}
-                          onPointerDown={beginGroupedDocumentChange}
-                          onPointerUp={commitGroupedDocumentChange}
-                          onBlur={commitGroupedDocumentChange}
-                          onChange={(event) =>
-                            updateSoundLayerVolume("audio", selectedAudioLayer.id, Number(event.target.value) / 100, {
-                              recordHistory: false
-                            })
-                          }
-                        />
-                        <strong>{formatLayerVolume(selectedAudioLayer.volume)}</strong>
-                      </label>
+                    {selectedCanvasPosition ? (
+                      <div className="video-position-panel">
+                        <strong>{isKorean ? "Position" : "Position"}</strong>
+                        {CANVAS_POSITION_FIELDS.map((field) => (
+                          <label key={field} className="video-position-field">
+                            <span>
+                              {field === "x"
+                                ? "X"
+                                : field === "y"
+                                  ? "Y"
+                                  : field === "width"
+                                    ? isKorean ? "너비" : "W"
+                                    : isKorean ? "높이" : "H"}
+                            </span>
+                            <input
+                              type="number"
+                              step={1}
+                              value={positionDraft[field] ?? selectedCanvasPosition[field].toFixed(1)}
+                              onFocus={() => {
+                                setEditingPositionField(field);
+                                setPositionDraftKey(selectedCanvasPosition.key);
+                                setPositionDraft((current) => ({
+                                  ...current,
+                                  [field]: current[field] ?? selectedCanvasPosition[field].toFixed(1)
+                                }));
+                              }}
+                              onPointerDown={beginGroupedDocumentChange}
+                              onBlur={() => {
+                                commitPositionDraftField(field);
+                                commitGroupedDocumentChange();
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.currentTarget.blur();
+                                }
+                                if (event.key === "Escape") {
+                                  setPositionDraft((current) => ({
+                                    ...current,
+                                    [field]: selectedCanvasPosition[field].toFixed(1)
+                                  }));
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              onChange={(event) =>
+                                setPositionDraft((current) => ({
+                                  ...current,
+                                  [field]: event.target.value
+                                }))
+                              }
+                            />
+                            <small>px</small>
+                          </label>
+                        ))}
+                        {selectedCanvasPosition.kind === "text" ? (
+                          <div className="video-position-actions">
+                            {CANVAS_POSITION_FIELDS.map((field) => (
+                              <button
+                                key={`apply-all-${field}`}
+                                type="button"
+                                className="video-position-action"
+                                onClick={() => applySelectedTextPropertyToAllTextBoxes(field)}
+                              >
+                                {field === "x"
+                                  ? isKorean ? "X 전체" : "All X"
+                                  : field === "y"
+                                    ? isKorean ? "Y 전체" : "All Y"
+                                    : field === "width"
+                                      ? isKorean ? "너비 전체" : "All W"
+                                      : isKorean ? "높이 전체" : "All H"}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              className="video-position-action"
+                              onClick={() => applySelectedTextPropertyToAllTextBoxes("fontSize")}
+                            >
+                              {isKorean ? "폰트 전체" : "All Font"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {selectedElementTransition ? (
+                      <div className="video-transition-panel">
+                        <strong>{isKorean ? "전환" : "Transition"}</strong>
+                        <label className="video-transition-field">
+                          <span>{isKorean ? "스타일" : "Style"}</span>
+                          <select
+                            value={selectedElementTransition.style}
+                            onChange={(event) =>
+                              updateSelectedElementTransition({
+                                style: event.target.value as SceneScriptElementTransitionStyle
+                              })
+                            }
+                          >
+                            {VIDEO_ELEMENT_TRANSITION_STYLES.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {isKorean ? item.labelKo : item.labelEn}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="video-transition-field">
+                          <span>{isKorean ? "구간" : "Part"}</span>
+                          <select
+                            value={selectedElementTransition.placement}
+                            onChange={(event) =>
+                              updateSelectedElementTransition({
+                                placement: event.target.value as SceneScriptElementTransitionPlacement
+                              })
+                            }
+                            disabled={selectedElementTransition.style === "none"}
+                          >
+                            {VIDEO_ELEMENT_TRANSITION_PLACEMENTS.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {isKorean ? item.labelKo : item.labelEn}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="video-transition-field video-transition-field--duration">
+                          <span>{isKorean ? "초" : "Sec"}</span>
+                          <input
+                            type="number"
+                            min={0.05}
+                            max={3}
+                            step={0.05}
+                            value={selectedElementTransition.durationSec}
+                            disabled={selectedElementTransition.style === "none"}
+                            onChange={(event) =>
+                              updateSelectedElementTransition({
+                                durationSec: parseLooseNumberInput(
+                                  event.target.value,
+                                  selectedElementTransition.durationSec
+                                )
+                              })
+                            }
+                            onBlur={(event) =>
+                              updateSelectedElementTransition({
+                                durationSec: clampNumber(
+                                  parseLooseNumberInput(
+                                    event.target.value,
+                                    selectedElementTransition.durationSec
+                                  ),
+                                  0.05,
+                                  3
+                                )
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                    {selectedMediaMotion ? (
+                      <div className="video-motion-panel">
+                        <strong>{isKorean ? "모션" : "Motion"}</strong>
+                        <label className="video-transition-field">
+                          <span>{isKorean ? "스타일" : "Style"}</span>
+                          <select
+                            value={selectedMediaMotion.style}
+                            onChange={(event) =>
+                              updateSelectedMediaMotion({
+                                style: event.target.value as SceneScriptVideoMediaMotionStyle
+                              })
+                            }
+                          >
+                            {VIDEO_MEDIA_MOTION_STYLES.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {isKorean ? item.labelKo : item.labelEn}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="video-transition-field video-transition-field--duration">
+                          <span>{isKorean ? "강도" : "Amt"}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            step={0.5}
+                            value={selectedMediaMotion.amountPct}
+                            disabled={selectedMediaMotion.style === "none"}
+                            onChange={(event) =>
+                              updateSelectedMediaMotion({
+                                amountPct: parseLooseNumberInput(event.target.value, selectedMediaMotion.amountPct)
+                              })
+                            }
+                            onBlur={(event) =>
+                              updateSelectedMediaMotion({
+                                amountPct: clampNumber(
+                                  parseLooseNumberInput(event.target.value, selectedMediaMotion.amountPct),
+                                  1,
+                                  20
+                                )
+                              })
+                            }
+                          />
+                        </label>
+                        <span className="video-motion-unit">%</span>
+                        <div className="video-motion-focus-row">
+                          <span>{isKorean ? "중심" : "Focus"}</span>
+                          <strong>
+                            {Math.round(selectedMediaMotion.focusXPct ?? 50)}%, {Math.round(selectedMediaMotion.focusYPct ?? 50)}%
+                          </strong>
+                          <button
+                            type="button"
+                            className={[
+                              "video-position-action",
+                              pickingMotionFocusLayerId === selectedVideoMediaLayerId ? "active" : ""
+                            ].filter(Boolean).join(" ")}
+                            disabled={selectedMediaMotion.style === "none" || !selectedVideoMediaLayerId}
+                            onClick={() =>
+                              setPickingMotionFocusLayerId((current) =>
+                                current === selectedVideoMediaLayerId ? null : selectedVideoMediaLayerId
+                              )
+                            }
+                          >
+                            {pickingMotionFocusLayerId === selectedVideoMediaLayerId
+                              ? isKorean ? "캔버스 클릭" : "Click Canvas"
+                              : isKorean ? "중심 찍기" : "Pick Focus"}
+                          </button>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
@@ -9082,12 +10650,27 @@ export function GenerationPage() {
                                 if (!isVisible) {
                                   return null;
                                 }
+                                const displayOverlay = getVideoTextOverlayDisplay(
+                                  selectedScene.sceneNo,
+                                  overlay,
+                                  overlayIndex
+                                );
                                 const isEditing =
                                   editingVideoText?.sceneNo === selectedScene.sceneNo &&
                                   editingVideoText.overlayIndex === overlayIndex;
-                                const isActive =
-                                  selectedTimelineTarget === "text" && overlayIndex === selectedVideoTextIndex;
-                                return (
+                        const isActive =
+                          selectedTimelineTarget === "text" && overlayIndex === selectedVideoTextIndex;
+                        const overlayStartSec = Math.max(0, Number(overlay.startSec ?? 0) || 0);
+                        const overlayDurationSec = Math.max(
+                          0.5,
+                          Number(overlay.durationSec ?? totalDurationSec) || totalDurationSec
+                        );
+                        const transitionPreview = buildElementTransitionPreviewStyle(
+                          overlay.transition,
+                          overlayStartSec,
+                          overlayDurationSec
+                        );
+                        return (
                                   <div
                                     key={`video-text-${selectedScene.sceneNo}-${overlayIndex}-${isEditing ? "edit" : "view"}`}
                                     className={[
@@ -9104,6 +10687,8 @@ export function GenerationPage() {
                                     autoCapitalize="off"
                                     data-gramm="false"
                                     data-gramm_editor="false"
+                                    data-video-text-scene-no={selectedScene.sceneNo}
+                                    data-video-text-overlay-index={overlayIndex}
                                     onDoubleClick={(event) => {
                                       event.stopPropagation();
                                       setSelectedVideoTextIndex(overlayIndex);
@@ -9137,18 +10722,20 @@ export function GenerationPage() {
                                       }
                                     }}
                                     style={{
-                                      left: `${overlay.xPct}%`,
-                                      top: `${overlay.yPct}%`,
-                                      width: `${overlay.widthPct}%`,
-                                      height: `${overlay.heightPct}%`,
+                                      left: `${displayOverlay.xPct}%`,
+                                      top: `${displayOverlay.yPct}%`,
+                                      width: `${displayOverlay.widthPct}%`,
+                                      height: `${displayOverlay.heightPct}%`,
                                       color: overlay.textColor,
                                       fontSize: overlay.fontSize,
                                       fontWeight: overlay.fontWeight,
                                       WebkitTextStroke: `${overlay.outlineThickness}px ${overlay.outlineColor}`,
-                                      textShadow: `0 4px 18px ${overlay.outlineColor}`,
-                                      background: overlay.backgroundColor ?? "transparent"
-                                    }}
-                                  >
+                              textShadow: `0 4px 18px ${overlay.outlineColor}`,
+                              background: overlay.backgroundColor ?? "transparent",
+                              opacity: transitionPreview.opacityMultiplier,
+                              transform: transitionPreview.transform
+                            }}
+                          >
                                     {overlay.text}
                                     {isActive && !isEditing
                                       ? CANVAS_RESIZE_HANDLES.map((handle) => (
@@ -9482,12 +11069,20 @@ export function GenerationPage() {
                             }
                           />
                         )}
+                        {renderMobileSafeAreaGuides()}
                         {activeVideoMediaLayers.map((layer) => {
                           const src = getVideoMediaLayerSrc(layer);
                           if (!src) {
                             return null;
                           }
-                          const box = getVideoMediaLayerBox(layer);
+                          const box = getVideoMediaLayerDisplayBox(layer);
+                          const layerStartSec = Math.max(0, Number(layer.startSec || 0));
+                          const layerDurationSec = Math.max(0.5, Number(layer.durationSec || 0.5));
+                          const transitionPreview = buildElementTransitionPreviewStyle(
+                            layer.transition,
+                            layerStartSec,
+                            layerDurationSec
+                          );
                           const style: CSSProperties = {
                             position: "absolute",
                             left: `${box.xPct}%`,
@@ -9495,14 +11090,22 @@ export function GenerationPage() {
                             zIndex: 2,
                             width: `${box.widthPct}%`,
                             height: `${box.heightPct}%`,
-                            transform: "translate(-50%, -50%)",
+                            transform: `translate(-50%, -50%)${transitionPreview.transform ? ` ${transitionPreview.transform}` : ""}`,
                             objectFit: "cover",
-                            opacity: layer.opacity ?? 1,
+                            opacity: (layer.opacity ?? 1) * transitionPreview.opacityMultiplier,
                             pointerEvents: "auto",
                             cursor: timelinePlaying ? "default" : "grab"
                           };
                           const frameClipStyle = buildVideoMediaLayerFrameClipStyle(layer);
                           const sourceCropStyle = buildVideoMediaLayerSourceStyle(layer);
+                          const mediaMotionStyle =
+                            pickingMotionFocusLayerId === layer.id || pausedMotionPreviewLayerId === layer.id
+                              ? {}
+                              : buildMediaMotionPreviewStyle(
+                                  layer.motion,
+                                  layerStartSec,
+                                  layerDurationSec
+                                );
                           const isActive = selectedTimelineTarget === "media" && layer.id === selectedVideoMediaLayerId;
                           const outlineStyle: CSSProperties = {
                             position: "absolute",
@@ -9517,53 +11120,68 @@ export function GenerationPage() {
                             <>
                               <div
                                 key={layer.id}
-                                className="video-media-layer-shell"
+                                className={[
+                                  "video-media-layer-shell",
+                                  pickingMotionFocusLayerId === layer.id ? "is-picking-motion-focus" : ""
+                                ].filter(Boolean).join(" ")}
+                                data-video-media-layer-id={layer.id}
                                 onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
                                 style={{ ...style, ...frameClipStyle, overflow: "hidden" }}
                               >
-                                {layer.mediaType === "video" ? (
-                                  <video
-                                    ref={(element) => {
-                                      mediaLayerVideoRefs.current[layer.id] = element;
+                                <div className="video-media-motion-frame" style={mediaMotionStyle}>
+                                  {layer.mediaType === "video" ? (
+                                    <video
+                                      ref={(element) => {
+                                        mediaLayerVideoRefs.current[layer.id] = element;
+                                      }}
+                                      className="video-media-layer"
+                                      style={{ ...sourceCropStyle, objectFit: "cover" }}
+                                      src={src}
+                                      playsInline
+                                      loop
+                                      preload="metadata"
+                                      onLoadedMetadata={(event) => {
+                                        updateVideoMediaLayerNaturalSize(
+                                          layer,
+                                          event.currentTarget.videoWidth,
+                                          event.currentTarget.videoHeight,
+                                          {
+                                            durationSec: Number.isFinite(event.currentTarget.duration)
+                                              ? event.currentTarget.duration
+                                              : undefined
+                                          }
+                                        );
+                                        syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true });
+                                      }}
+                                      onCanPlay={(event) =>
+                                        syncMediaLayerVideo(layer, event.currentTarget, { controlPlayback: false })
+                                      }
+                                    />
+                                  ) : (
+                                    <img
+                                      className="video-media-layer"
+                                      style={{ ...sourceCropStyle, objectFit: "cover" }}
+                                      src={src}
+                                      alt={layer.label ?? "media layer"}
+                                      onLoad={(event) =>
+                                        updateVideoMediaLayerNaturalSize(
+                                          layer,
+                                          event.currentTarget.naturalWidth,
+                                          event.currentTarget.naturalHeight
+                                        )
+                                      }
+                                    />
+                                  )}
+                                </div>
+                                {isActive && normalizeMediaMotion(layer.motion).style !== "none" ? (
+                                  <span
+                                    className="video-motion-focus-marker"
+                                    style={{
+                                      left: `${normalizeMediaMotion(layer.motion).focusXPct}%`,
+                                      top: `${normalizeMediaMotion(layer.motion).focusYPct}%`
                                     }}
-                                    className="video-media-layer"
-                                    style={{ ...sourceCropStyle, objectFit: "cover" }}
-                                    src={src}
-                                    playsInline
-                                    loop
-                                    preload="metadata"
-                                    onLoadedMetadata={(event) => {
-                                      updateVideoMediaLayerNaturalSize(
-                                        layer,
-                                        event.currentTarget.videoWidth,
-                                        event.currentTarget.videoHeight,
-                                        {
-                                          durationSec: Number.isFinite(event.currentTarget.duration)
-                                            ? event.currentTarget.duration
-                                            : undefined
-                                        }
-                                      );
-                                      syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true });
-                                    }}
-                                    onCanPlay={(event) =>
-                                      syncMediaLayerVideo(layer, event.currentTarget, { controlPlayback: false })
-                                    }
                                   />
-                                ) : (
-                                  <img
-                                    className="video-media-layer"
-                                    style={{ ...sourceCropStyle, objectFit: "cover" }}
-                                    src={src}
-                                    alt={layer.label ?? "media layer"}
-                                    onLoad={(event) =>
-                                      updateVideoMediaLayerNaturalSize(
-                                        layer,
-                                        event.currentTarget.naturalWidth,
-                                        event.currentTarget.naturalHeight
-                                      )
-                                    }
-                                  />
-                                )}
+                                ) : null}
                               </div>
                               {isActive
                                 ? (
@@ -9572,6 +11190,7 @@ export function GenerationPage() {
                                         "video-media-layer-outline",
                                         croppingVideoMediaLayerId === layer.id ? "is-cropping" : ""
                                       ].filter(Boolean).join(" ")}
+                                      data-video-media-layer-id={layer.id}
                                       style={outlineStyle}
                                       onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
                                     >
@@ -9624,11 +11243,26 @@ export function GenerationPage() {
                           if (!isVisible) {
                             return null;
                           }
+                          const displayOverlay = getVideoTextOverlayDisplay(
+                            selectedScene.sceneNo,
+                            overlay,
+                            overlayIndex
+                          );
                           const isEditing =
                             editingVideoText?.sceneNo === selectedScene.sceneNo &&
                             editingVideoText.overlayIndex === overlayIndex;
                           const isActive =
                             selectedTimelineTarget === "text" && overlayIndex === selectedVideoTextIndex;
+                          const overlayStartSec = Math.max(0, Number(overlay.startSec ?? 0) || 0);
+                          const overlayDurationSec = Math.max(
+                            0.5,
+                            Number(overlay.durationSec ?? totalDurationSec) || totalDurationSec
+                          );
+                          const transitionPreview = buildElementTransitionPreviewStyle(
+                            overlay.transition,
+                            overlayStartSec,
+                            overlayDurationSec
+                          );
                           return (
                             <div
                               key={`video-text-${selectedScene.sceneNo}-${overlayIndex}-${isEditing ? "edit" : "view"}`}
@@ -9646,6 +11280,8 @@ export function GenerationPage() {
                               autoCapitalize="off"
                               data-gramm="false"
                               data-gramm_editor="false"
+                              data-video-text-scene-no={selectedScene.sceneNo}
+                              data-video-text-overlay-index={overlayIndex}
                               onDoubleClick={(event) => {
                                 event.stopPropagation();
                                 setSelectedVideoTextIndex(overlayIndex);
@@ -9679,16 +11315,18 @@ export function GenerationPage() {
                                 }
                               }}
                               style={{
-                                left: `${overlay.xPct}%`,
-                                top: `${overlay.yPct}%`,
-                                width: `${overlay.widthPct}%`,
-                                height: `${overlay.heightPct}%`,
+                                left: `${displayOverlay.xPct}%`,
+                                top: `${displayOverlay.yPct}%`,
+                                width: `${displayOverlay.widthPct}%`,
+                                height: `${displayOverlay.heightPct}%`,
                                 color: overlay.textColor,
                                 fontSize: overlay.fontSize,
                                 fontWeight: overlay.fontWeight,
                                 WebkitTextStroke: `${overlay.outlineThickness}px ${overlay.outlineColor}`,
                                 textShadow: `0 4px 18px ${overlay.outlineColor}`,
-                                background: overlay.backgroundColor ?? "transparent"
+                                background: overlay.backgroundColor ?? "transparent",
+                                opacity: transitionPreview.opacityMultiplier,
+                                transform: transitionPreview.transform
                               }}
                             >
                               {overlay.text}
@@ -9722,12 +11360,20 @@ export function GenerationPage() {
                         }
                       }}
                     >
+                      {renderMobileSafeAreaGuides()}
                       {activeVideoMediaLayers.map((layer) => {
                         const src = getVideoMediaLayerSrc(layer);
                         if (!src) {
                           return null;
                         }
-                        const box = getVideoMediaLayerBox(layer);
+                        const box = getVideoMediaLayerDisplayBox(layer);
+                        const layerStartSec = Math.max(0, Number(layer.startSec || 0));
+                        const layerDurationSec = Math.max(0.5, Number(layer.durationSec || 0.5));
+                        const transitionPreview = buildElementTransitionPreviewStyle(
+                          layer.transition,
+                          layerStartSec,
+                          layerDurationSec
+                        );
                         const style: CSSProperties = {
                           position: "absolute",
                           left: `${box.xPct}%`,
@@ -9735,14 +11381,22 @@ export function GenerationPage() {
                           zIndex: 2,
                           width: `${box.widthPct}%`,
                           height: `${box.heightPct}%`,
-                          transform: "translate(-50%, -50%)",
+                          transform: `translate(-50%, -50%)${transitionPreview.transform ? ` ${transitionPreview.transform}` : ""}`,
                           objectFit: "cover",
-                          opacity: layer.opacity ?? 1,
+                          opacity: (layer.opacity ?? 1) * transitionPreview.opacityMultiplier,
                           pointerEvents: "auto",
                           cursor: timelinePlaying ? "default" : "grab"
                         };
                         const frameClipStyle = buildVideoMediaLayerFrameClipStyle(layer);
                         const sourceCropStyle = buildVideoMediaLayerSourceStyle(layer);
+                        const mediaMotionStyle =
+                          pickingMotionFocusLayerId === layer.id || pausedMotionPreviewLayerId === layer.id
+                            ? {}
+                            : buildMediaMotionPreviewStyle(
+                                layer.motion,
+                                layerStartSec,
+                                layerDurationSec
+                              );
                         const isActive = selectedTimelineTarget === "media" && layer.id === selectedVideoMediaLayerId;
                         const outlineStyle: CSSProperties = {
                           position: "absolute",
@@ -9757,53 +11411,68 @@ export function GenerationPage() {
                           <>
                             <div
                               key={layer.id}
-                              className="video-media-layer-shell"
+                              className={[
+                                "video-media-layer-shell",
+                                pickingMotionFocusLayerId === layer.id ? "is-picking-motion-focus" : ""
+                              ].filter(Boolean).join(" ")}
+                              data-video-media-layer-id={layer.id}
                               onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
                               style={{ ...style, ...frameClipStyle, overflow: "hidden" }}
                             >
-                              {layer.mediaType === "video" ? (
-                                <video
-                                  ref={(element) => {
-                                    mediaLayerVideoRefs.current[layer.id] = element;
+                              <div className="video-media-motion-frame" style={mediaMotionStyle}>
+                                {layer.mediaType === "video" ? (
+                                  <video
+                                    ref={(element) => {
+                                      mediaLayerVideoRefs.current[layer.id] = element;
+                                    }}
+                                    className="video-media-layer"
+                                    style={{ ...sourceCropStyle, objectFit: "cover" }}
+                                    src={src}
+                                    playsInline
+                                    loop
+                                    preload="metadata"
+                                    onLoadedMetadata={(event) => {
+                                      updateVideoMediaLayerNaturalSize(
+                                        layer,
+                                        event.currentTarget.videoWidth,
+                                        event.currentTarget.videoHeight,
+                                        {
+                                          durationSec: Number.isFinite(event.currentTarget.duration)
+                                            ? event.currentTarget.duration
+                                            : undefined
+                                        }
+                                      );
+                                      syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true });
+                                    }}
+                                    onCanPlay={(event) =>
+                                      syncMediaLayerVideo(layer, event.currentTarget, { controlPlayback: false })
+                                    }
+                                  />
+                                ) : (
+                                  <img
+                                    className="video-media-layer"
+                                    style={{ ...sourceCropStyle, objectFit: "cover" }}
+                                    src={src}
+                                    alt={layer.label ?? "media layer"}
+                                    onLoad={(event) =>
+                                      updateVideoMediaLayerNaturalSize(
+                                        layer,
+                                        event.currentTarget.naturalWidth,
+                                        event.currentTarget.naturalHeight
+                                      )
+                                    }
+                                  />
+                                )}
+                              </div>
+                              {isActive && normalizeMediaMotion(layer.motion).style !== "none" ? (
+                                <span
+                                  className="video-motion-focus-marker"
+                                  style={{
+                                    left: `${normalizeMediaMotion(layer.motion).focusXPct}%`,
+                                    top: `${normalizeMediaMotion(layer.motion).focusYPct}%`
                                   }}
-                                  className="video-media-layer"
-                                  style={{ ...sourceCropStyle, objectFit: "cover" }}
-                                  src={src}
-                                  playsInline
-                                  loop
-                                  preload="metadata"
-                                  onLoadedMetadata={(event) => {
-                                    updateVideoMediaLayerNaturalSize(
-                                      layer,
-                                      event.currentTarget.videoWidth,
-                                      event.currentTarget.videoHeight,
-                                      {
-                                        durationSec: Number.isFinite(event.currentTarget.duration)
-                                          ? event.currentTarget.duration
-                                          : undefined
-                                      }
-                                    );
-                                    syncMediaLayerVideo(layer, event.currentTarget, { forceSeek: true });
-                                  }}
-                                  onCanPlay={(event) =>
-                                    syncMediaLayerVideo(layer, event.currentTarget, { controlPlayback: false })
-                                  }
                                 />
-                              ) : (
-                                <img
-                                  className="video-media-layer"
-                                  style={{ ...sourceCropStyle, objectFit: "cover" }}
-                                  src={src}
-                                  alt={layer.label ?? "media layer"}
-                                  onLoad={(event) =>
-                                    updateVideoMediaLayerNaturalSize(
-                                      layer,
-                                      event.currentTarget.naturalWidth,
-                                      event.currentTarget.naturalHeight
-                                    )
-                                  }
-                                />
-                              )}
+                              ) : null}
                             </div>
                             {isActive
                               ? (
@@ -9812,6 +11481,7 @@ export function GenerationPage() {
                                       "video-media-layer-outline",
                                       croppingVideoMediaLayerId === layer.id ? "is-cropping" : ""
                                     ].filter(Boolean).join(" ")}
+                                    data-video-media-layer-id={layer.id}
                                     style={outlineStyle}
                                     onMouseDown={(event) => beginVideoMediaDrag(event, layer)}
                                   >
@@ -9864,11 +11534,26 @@ export function GenerationPage() {
                         if (!isVisible) {
                           return null;
                         }
+                        const displayOverlay = getVideoTextOverlayDisplay(
+                          selectedScene.sceneNo,
+                          overlay,
+                          overlayIndex
+                        );
                         const isEditing =
                           editingVideoText?.sceneNo === selectedScene.sceneNo &&
                           editingVideoText.overlayIndex === overlayIndex;
                         const isActive =
                           selectedTimelineTarget === "text" && overlayIndex === selectedVideoTextIndex;
+                        const overlayStartSec = Math.max(0, Number(overlay.startSec ?? 0) || 0);
+                        const overlayDurationSec = Math.max(
+                          0.5,
+                          Number(overlay.durationSec ?? totalDurationSec) || totalDurationSec
+                        );
+                        const transitionPreview = buildElementTransitionPreviewStyle(
+                          overlay.transition,
+                          overlayStartSec,
+                          overlayDurationSec
+                        );
                         return (
                           <div
                             key={`video-text-${selectedScene.sceneNo}-${overlayIndex}-${isEditing ? "edit" : "view"}`}
@@ -9886,6 +11571,8 @@ export function GenerationPage() {
                             autoCapitalize="off"
                             data-gramm="false"
                             data-gramm_editor="false"
+                            data-video-text-scene-no={selectedScene.sceneNo}
+                            data-video-text-overlay-index={overlayIndex}
                               onDoubleClick={(event) => {
                                 event.stopPropagation();
                                 setSelectedVideoTextIndex(overlayIndex);
@@ -9919,16 +11606,18 @@ export function GenerationPage() {
                               }
                             }}
                             style={{
-                              left: `${overlay.xPct}%`,
-                              top: `${overlay.yPct}%`,
-                              width: `${overlay.widthPct}%`,
-                              height: `${overlay.heightPct}%`,
+                              left: `${displayOverlay.xPct}%`,
+                              top: `${displayOverlay.yPct}%`,
+                              width: `${displayOverlay.widthPct}%`,
+                              height: `${displayOverlay.heightPct}%`,
                               color: overlay.textColor,
                               fontSize: overlay.fontSize,
                               fontWeight: overlay.fontWeight,
                               WebkitTextStroke: `${overlay.outlineThickness}px ${overlay.outlineColor}`,
                               textShadow: `0 4px 18px ${overlay.outlineColor}`,
-                              background: overlay.backgroundColor ?? "transparent"
+                              background: overlay.backgroundColor ?? "transparent",
+                              opacity: transitionPreview.opacityMultiplier,
+                              transform: transitionPreview.transform
                             }}
                           >
                             {overlay.text}
@@ -10223,6 +11912,7 @@ export function GenerationPage() {
                                     .join(" ")}
                                   data-timeline-kind="media"
                                   data-timeline-id={layer.id}
+                                  data-timeline-key={`media:${layer.id}`}
                                   style={{
                                     left: `${(startSec / timelineDisplayDurationSec) * 100}%`,
                                     width: `${(durationSec / timelineDisplayDurationSec) * 100}%`,
@@ -10287,6 +11977,7 @@ export function GenerationPage() {
                                     .join(" ")}
                                   data-timeline-kind="audio"
                                   data-timeline-id={layer.id}
+                                  data-timeline-key={`audio:${layer.id}`}
                                   style={{
                                     left: `${(startSec / timelineDisplayDurationSec) * 100}%`,
                                     width: `${(durationSec / timelineDisplayDurationSec) * 100}%`,
@@ -10349,6 +12040,7 @@ export function GenerationPage() {
                                     .join(" ")}
                                   data-timeline-kind="text"
                                   data-timeline-index={overlayIndex}
+                                  data-timeline-key={`text:${overlayIndex}`}
                                   style={{
                                     left: `${(startSec / timelineDisplayDurationSec) * 100}%`,
                                     width: `${(durationSec / timelineDisplayDurationSec) * 100}%`,

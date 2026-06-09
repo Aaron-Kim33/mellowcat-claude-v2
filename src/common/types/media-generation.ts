@@ -57,6 +57,7 @@ export interface SceneScriptVideoTextOverlay {
   outlineColor: string;
   outlineThickness: number;
   backgroundColor?: string;
+  transition?: SceneScriptElementTransition;
 }
 
 export interface SceneScriptPercentCrop {
@@ -64,6 +65,31 @@ export interface SceneScriptPercentCrop {
   rightPct?: number;
   bottomPct?: number;
   leftPct?: number;
+}
+
+export type SceneScriptElementTransitionStyle =
+  | "none"
+  | "fade"
+  | "slide-left"
+  | "slide-right"
+  | "slide-up"
+  | "slide-down";
+
+export type SceneScriptElementTransitionPlacement = "in" | "out" | "both";
+
+export interface SceneScriptElementTransition {
+  style: SceneScriptElementTransitionStyle;
+  placement: SceneScriptElementTransitionPlacement;
+  durationSec: number;
+}
+
+export type SceneScriptVideoMediaMotionStyle = "none" | "slow-zoom-in" | "slow-zoom-out";
+
+export interface SceneScriptVideoMediaMotion {
+  style: SceneScriptVideoMediaMotionStyle;
+  amountPct: number;
+  focusXPct?: number;
+  focusYPct?: number;
 }
 
 export interface SceneScriptVideoMediaMetadata {
@@ -87,6 +113,7 @@ export interface SceneScriptVideoMediaLayer {
   startSec: number;
   durationSec: number;
   sourceOffsetSec?: number;
+  sourceDurationSec?: number;
   trackIndex?: number;
   fit?: "cover" | "contain";
   opacity?: number;
@@ -98,9 +125,12 @@ export interface SceneScriptVideoMediaLayer {
   sourceCrop?: SceneScriptPercentCrop;
   frameCrop?: SceneScriptPercentCrop;
   volume?: number;
+  playbackRate?: number;
   naturalWidth?: number;
   naturalHeight?: number;
   mediaMetadata?: SceneScriptVideoMediaMetadata;
+  transition?: SceneScriptElementTransition;
+  motion?: SceneScriptVideoMediaMotion;
 }
 
 export interface SceneScriptAudioLayer {
@@ -491,7 +521,7 @@ export interface VoiceLayerGenerationResult {
   localPath: string;
   relativePath: string;
   durationSec?: number;
-  source: "azure" | "openai";
+  source: "azure" | "openai" | "elevenlabs";
 }
 
 export interface VideoEditorExportRequest {
@@ -502,6 +532,81 @@ export interface VideoEditorExportRequest {
 export interface VideoEditorExportResult {
   outputPath: string;
   durationSec: number;
+}
+
+export interface LongformTextTimingUnit {
+  id: string;
+  source: "subtitle" | "voiceover" | "overlay" | "scene";
+  startSec: number;
+  endSec: number;
+  text: string;
+  sceneNo?: number;
+}
+
+export interface LongformToShortformSegment {
+  id: string;
+  sourceStartSec: number;
+  sourceEndSec: number;
+  outputStartSec: number;
+  outputEndSec: number;
+  headline: string;
+  summary: string;
+  editedText?: string;
+  sourceExcerpt?: string;
+  sourceUnitIds: string[];
+  reason?: string;
+}
+
+export interface LongformToShortformPlan {
+  schemaVersion: 1;
+  generatedAt: string;
+  sourcePackagePath: string;
+  sourceVideoPath: string;
+  title: string;
+  summary: string;
+  scriptText?: string;
+  maxDurationSec: number;
+  targetDurationSec: number;
+  units: LongformTextTimingUnit[];
+  segments: LongformToShortformSegment[];
+  flowReview?: {
+    verdict: "pass" | "revised" | "fallback";
+    notes: string[];
+  };
+  provider: "openrouter" | "openai" | "local";
+  model?: string;
+  rawText?: string;
+}
+
+export interface LongformToShortformRequest {
+  packagePath: string;
+  document: SceneScriptDocument;
+  sourceVideoPath?: string;
+  maxDurationSec?: number;
+  title?: string;
+}
+
+export interface LongformToShortformResult {
+  packagePath: string;
+  sceneScriptPath: string;
+  planPath: string;
+  sourceVideoPath: string;
+  document: SceneScriptDocument;
+  plan: LongformToShortformPlan;
+}
+
+export interface DerivedShortformPackageSummary {
+  packagePath: string;
+  sourcePackagePath: string;
+  title: string;
+  createdAt?: string;
+  updatedAt?: string;
+  targetDurationSec?: number;
+  segmentCount?: number;
+  provider?: LongformToShortformPlan["provider"];
+  model?: string;
+  sourceVideoPath?: string;
+  hasEditorDraft: boolean;
 }
 
 export interface ScenePlanScene {

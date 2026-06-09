@@ -9,7 +9,7 @@ import { PathService } from "../system/path-service";
 import { ShortformWorkflowConfigService } from "./shortform-workflow-config-service";
 
 export interface VoiceoverGenerationResult {
-  source: "azure" | "openai" | "none";
+  source: "azure" | "openai" | "elevenlabs" | "none";
   relativePath?: string;
   durationSec?: number;
   error?: string;
@@ -38,6 +38,7 @@ export class VoiceoverService {
 
     const apiKey = this.resolveOpenAiApiKey();
     const settings = this.settingsRepository.refreshSecrets();
+    const elevenLabsApiKey = settings.elevenLabsApiKey?.trim();
     const azureSpeechKey = settings.azureSpeechKey?.trim();
     const azureSpeechRegion = settings.azureSpeechRegion?.trim();
     const azureSpeechVoice =
@@ -49,8 +50,34 @@ export class VoiceoverService {
     const preferredProvider = voiceProfile?.provider;
     const openAiVoice = voiceProfile?.voiceId?.trim() || "alloy";
     const openAiModel = voiceProfile?.modelId?.trim() || "gpt-4o-mini-tts";
+    const elevenLabsVoiceId = voiceProfile?.voiceId?.trim();
+    const elevenLabsModel = voiceProfile?.modelId?.trim() || "eleven_multilingual_v2";
     const canUseAzure = Boolean(azureSpeechKey && azureSpeechRegion);
     const canUseOpenAi = Boolean(apiKey);
+    const canUseElevenLabs = Boolean(elevenLabsApiKey);
+
+    if (preferredProvider === "elevenlabs") {
+      if (!canUseElevenLabs) {
+        return {
+          source: "none",
+          error: "ElevenLabs API key is not configured. Add it in Settings first."
+        };
+      }
+      if (!elevenLabsVoiceId) {
+        return {
+          source: "none",
+          error: "ElevenLabs Voice ID is required for voice generation."
+        };
+      }
+      return this.generateWithElevenLabs(
+        input,
+        packagePath,
+        elevenLabsApiKey!,
+        elevenLabsVoiceId,
+        elevenLabsModel,
+        voiceProfile
+      );
+    }
 
     if (preferredProvider === "azure" && canUseAzure) {
       return this.generateWithAzure(
@@ -63,7 +90,7 @@ export class VoiceoverService {
       );
     }
 
-    if ((preferredProvider === "openai" || preferredProvider === "elevenlabs") && canUseOpenAi) {
+    if (preferredProvider === "openai" && canUseOpenAi) {
       return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice);
     }
 
@@ -103,6 +130,7 @@ export class VoiceoverService {
     };
     const apiKey = this.resolveOpenAiApiKey();
     const settings = this.settingsRepository.refreshSecrets();
+    const elevenLabsApiKey = settings.elevenLabsApiKey?.trim();
     const azureSpeechKey = settings.azureSpeechKey?.trim();
     const azureSpeechRegion = settings.azureSpeechRegion?.trim();
     const azureSpeechVoice =
@@ -114,8 +142,35 @@ export class VoiceoverService {
     const preferredProvider = voiceProfile?.provider;
     const openAiVoice = voiceProfile?.voiceId?.trim() || "alloy";
     const openAiModel = voiceProfile?.modelId?.trim() || "gpt-4o-mini-tts";
+    const elevenLabsVoiceId = voiceProfile?.voiceId?.trim();
+    const elevenLabsModel = voiceProfile?.modelId?.trim() || "eleven_multilingual_v2";
     const canUseAzure = Boolean(azureSpeechKey && azureSpeechRegion);
     const canUseOpenAi = Boolean(apiKey);
+    const canUseElevenLabs = Boolean(elevenLabsApiKey);
+
+    if (preferredProvider === "elevenlabs") {
+      if (!canUseElevenLabs) {
+        return {
+          source: "none",
+          error: "ElevenLabs API key is not configured. Add it in Settings first."
+        };
+      }
+      if (!elevenLabsVoiceId) {
+        return {
+          source: "none",
+          error: "ElevenLabs Voice ID is required for voice generation."
+        };
+      }
+      return this.generateWithElevenLabs(
+        input,
+        packagePath,
+        elevenLabsApiKey!,
+        elevenLabsVoiceId,
+        elevenLabsModel,
+        voiceProfile,
+        relativePath
+      );
+    }
 
     if (preferredProvider === "azure" && canUseAzure) {
       return this.generateWithAzure(
@@ -129,7 +184,7 @@ export class VoiceoverService {
       );
     }
 
-    if ((preferredProvider === "openai" || preferredProvider === "elevenlabs") && canUseOpenAi) {
+    if (preferredProvider === "openai" && canUseOpenAi) {
       return this.generateWithOpenAi(input, packagePath, apiKey!, openAiModel, openAiVoice, relativePath);
     }
 
@@ -194,6 +249,58 @@ export class VoiceoverService {
     const durationSec = await this.probeDurationSec(outputPath);
     return {
       source: "openai",
+      relativePath,
+      durationSec
+    };
+  }
+
+  private async generateWithElevenLabs(
+    input: string,
+    packagePath: string,
+    apiKey: string,
+    voiceId: string,
+    modelId: string,
+    voiceProfile?: SceneScriptVoiceProfile,
+    relativePath = "voiceover.mp3"
+  ): Promise<VoiceoverGenerationResult> {
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg"
+        },
+        body: JSON.stringify({
+          text: input,
+          model_id: modelId,
+          language_code: "ko",
+          voice_settings: {
+            stability: this.clampVoiceSetting(voiceProfile?.stability, 0.45),
+            similarity_boost: this.clampVoiceSetting(voiceProfile?.similarityBoost, 0.75),
+            style: this.clampVoiceSetting(voiceProfile?.style, 0),
+            use_speaker_boost: Boolean(voiceProfile?.useSpeakerBoost)
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      return {
+        source: "none",
+        error: `ElevenLabs TTS HTTP ${response.status}: ${await response.text()}`
+      };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const outputPath = path.join(packagePath, relativePath);
+    this.fileService.ensureDir(path.dirname(outputPath));
+    this.fileService.writeBinaryFile(outputPath, Buffer.from(arrayBuffer));
+
+    const durationSec = await this.probeDurationSec(outputPath);
+    return {
+      source: "elevenlabs",
       relativePath,
       durationSec
     };
@@ -328,6 +435,11 @@ export class VoiceoverService {
       .replace(/[:;]/g, ", ")
       .replace(/[()]/g, " ")
       .trim();
+  }
+
+  private clampVoiceSetting(value: number | undefined, fallback: number): number {
+    const normalized = Number(value ?? fallback);
+    return Math.max(0, Math.min(1, Number.isFinite(normalized) ? normalized : fallback));
   }
 
   private escapeXml(value: string): string {

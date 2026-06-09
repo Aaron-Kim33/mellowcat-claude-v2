@@ -174,6 +174,10 @@ const automationBridge: MellowCatAPI["automation"] = {
     ipcRenderer.invoke("automation:create:generateVoiceLayer", request),
   exportVideoEditorProject: (request) =>
     ipcRenderer.invoke("automation:create:exportVideoEditorProject", request),
+  deriveShortformFromLongform: (request) =>
+    ipcRenderer.invoke("automation:create:deriveShortformFromLongform", request),
+  listDerivedShortformPackages: (packagePath: string) =>
+    ipcRenderer.invoke("automation:create:listDerivedShortformPackages", packagePath),
   updateSceneScript: (
     packagePath: string,
     document: SceneScriptDocument

@@ -22,14 +22,23 @@ import type {
   FreesoundAudioImportResult,
   FreesoundAudioResult,
   FreesoundAudioSearchRequest,
+  GeneratedMediaPackageManifest,
   LocalAssetImportRequest,
+  DerivedShortformPackageSummary,
+  LongformTextTimingUnit,
+  LongformToShortformPlan,
+  LongformToShortformRequest,
+  LongformToShortformResult,
   UploadedAssetRecord,
   PixabayAssetImportRequest,
   PixabayAssetResult,
   PixabayAssetSearchRequest,
   SceneScriptDocument,
   SceneScriptEditorDraft,
+  SceneScriptElementTransition,
+  SceneScriptItem,
   SceneScriptVideoMediaLayer,
+  SceneScriptVideoMediaMotion,
   SceneScriptAudioLayer,
   SceneScriptVideoTextOverlay,
   VideoEditorExportRequest,
@@ -696,6 +705,23 @@ export function registerAutomationIpc(
         provider: "openrouter",
         model: fallbackModel
       };
+    }
+  };
+  const parseAiJsonObject = <TValue>(rawText: string, label: string): TValue => {
+    const trimmed = rawText.replace(/^\uFEFF/, "").trim();
+    const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    const unfenced = (fencedMatch?.[1] ?? trimmed).trim();
+    const firstBrace = unfenced.indexOf("{");
+    const lastBrace = unfenced.lastIndexOf("}");
+    const candidate =
+      firstBrace >= 0 && lastBrace > firstBrace
+        ? unfenced.slice(firstBrace, lastBrace + 1)
+        : unfenced;
+    try {
+      return JSON.parse(candidate) as TValue;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${label} JSON 파싱에 실패했습니다: ${message}`);
     }
   };
   const getCardNewsTemplateStorePath = () => pathService.getUserCardNewsTemplatesPath();
@@ -2655,6 +2681,623 @@ export function registerAutomationIpc(
     }
     return "";
   };
+  const readAssetManifest = (packagePath: string): GeneratedMediaPackageManifest | undefined => {
+    const manifestPath = path.join(packagePath, "asset-manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as GeneratedMediaPackageManifest;
+    } catch {
+      return undefined;
+    }
+  };
+  const resolveLongformSourceVideoPath = async (
+    ownerWindow: BrowserWindow | null,
+    packagePath: string,
+    requestedPath?: string
+  ) => {
+    const requested = requestedPath?.trim();
+    if (requested && fs.existsSync(requested)) {
+      return requested;
+    }
+    const manifest = readAssetManifest(packagePath);
+    const candidates = [
+      path.join(packagePath, "video-editor-export.mp4"),
+      manifest?.artifacts?.finalVideoPath
+        ? resolvePackageFilePath(packagePath, undefined, manifest.artifacts.finalVideoPath)
+        : "",
+      path.join(packagePath, "final-video.mp4")
+    ].filter(Boolean);
+    const existing = candidates.find((candidate) => fs.existsSync(candidate));
+    if (existing) {
+      return existing;
+    }
+    const openResult = ownerWindow
+      ? await dialog.showOpenDialog(ownerWindow, {
+          title: "Select Longform MP4",
+          properties: ["openFile"],
+          filters: [{ name: "MP4 Video", extensions: ["mp4"] }]
+        })
+      : await dialog.showOpenDialog({
+          title: "Select Longform MP4",
+          properties: ["openFile"],
+          filters: [{ name: "MP4 Video", extensions: ["mp4"] }]
+        });
+    if (openResult.canceled || !openResult.filePaths[0]) {
+      throw new Error("숏폼 추출에 사용할 롱폼 MP4를 찾지 못했습니다.");
+    }
+    return openResult.filePaths[0];
+  };
+  const buildLongformTimingUnits = (
+    packagePath: string,
+    document: SceneScriptDocument
+  ): LongformTextTimingUnit[] => {
+    const overlayUnits = (document.videoTextOverlays ?? [])
+      .map((overlay, index) => {
+        const startSec = Math.max(0, Number(overlay.startSec ?? 0) || 0);
+        const durationSec = Math.max(0.1, Number(overlay.durationSec ?? 0) || 0);
+        return {
+          id: `overlay-${index + 1}`,
+          source: "overlay" as const,
+          startSec,
+          endSec: startSec + durationSec,
+          text: overlay.text?.trim() ?? ""
+        };
+      })
+      .filter((unit) => unit.text && unit.endSec > unit.startSec);
+    if (overlayUnits.length >= 4) {
+      return overlayUnits;
+    }
+
+    const manifest = readAssetManifest(packagePath);
+    const subtitles = manifest?.subtitles ?? [];
+    if (subtitles.length > 0) {
+      return subtitles
+        .map((cue) => ({
+          id: `subtitle-${cue.index}`,
+          source: "subtitle" as const,
+          startSec: Math.max(0, Number(cue.startSec) || 0),
+          endSec: Math.max(0, Number(cue.endSec) || 0),
+          text: cue.text?.trim() ?? ""
+        }))
+        .filter((unit) => unit.text && unit.endSec > unit.startSec);
+    }
+
+    const voiceoverCues = manifest?.voiceoverCues ?? [];
+    if (voiceoverCues.length > 0) {
+      return voiceoverCues
+        .map((cue, index) => ({
+          id: `voiceover-${index + 1}`,
+          source: "voiceover" as const,
+          startSec: Math.max(0, Number(cue.startSec) || 0),
+          endSec: Math.max(0, Number(cue.endSec) || 0),
+          text: cue.text?.trim() ?? "",
+          sceneNo: cue.sceneIndex
+        }))
+        .filter((unit) => unit.text && unit.endSec > unit.startSec);
+    }
+
+    if (overlayUnits.length > 0) {
+      return overlayUnits;
+    }
+
+    let cursorSec = 0;
+    return [...document.scenes]
+      .sort((a, b) => (Number(a.startSec ?? cursorSec) || 0) - (Number(b.startSec ?? cursorSec) || 0) || a.sceneNo - b.sceneNo)
+      .map((scene) => {
+        const startSec = Math.max(0, Number(scene.startSec ?? cursorSec) || 0);
+        const durationSec = Math.max(0.1, Number(scene.durationSec) || 0.1);
+        cursorSec = Math.max(cursorSec, startSec + durationSec);
+        return {
+          id: `scene-${scene.sceneNo}`,
+          source: "scene" as const,
+          startSec,
+          endSec: startSec + durationSec,
+          text: scene.text?.trim() ?? "",
+          sceneNo: scene.sceneNo
+        };
+      })
+      .filter((unit) => unit.text && unit.endSec > unit.startSec);
+  };
+  const buildFallbackShortformPlan = (
+    packagePath: string,
+    sourceVideoPath: string,
+    units: LongformTextTimingUnit[],
+    maxDurationSec: number,
+    rawText?: string,
+    provider: LongformToShortformPlan["provider"] = "local",
+    model?: string,
+    aiPlan?: {
+      title?: string;
+      summary?: string;
+      scriptText?: string;
+      segments?: Array<Record<string, unknown>>;
+      flowReview?: LongformToShortformPlan["flowReview"];
+    }
+  ): LongformToShortformPlan => {
+    const byId = new Map(units.map((unit) => [unit.id, unit] as const));
+    const clampSegmentTime = (value: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+    const selectedRanges =
+      aiPlan?.segments
+        ?.map((segment, index) => {
+          const sourceUnitIds = Array.isArray(segment.sourceUnitIds)
+            ? segment.sourceUnitIds.filter((id): id is string => typeof id === "string" && byId.has(id))
+            : [];
+          const segmentUnits = sourceUnitIds.map((id) => byId.get(id)).filter(Boolean) as LongformTextTimingUnit[];
+          const unitStartSec =
+            segmentUnits.length > 0
+              ? Math.min(...segmentUnits.map((unit) => unit.startSec))
+              : Math.max(0, Number(segment.sourceStartSec) || 0);
+          const unitEndSec =
+            segmentUnits.length > 0
+              ? Math.max(...segmentUnits.map((unit) => unit.endSec))
+              : Math.max(unitStartSec, Number(segment.sourceEndSec) || unitStartSec);
+          const requestedStartSec = Number(segment.sourceStartSec);
+          const requestedEndSec = Number(segment.sourceEndSec);
+          const startSec =
+            Number.isFinite(requestedStartSec) && requestedStartSec >= unitStartSec && requestedStartSec < unitEndSec
+              ? clampSegmentTime(requestedStartSec, unitStartSec, Math.max(unitStartSec, unitEndSec - 0.2))
+              : unitStartSec;
+          const endSec =
+            Number.isFinite(requestedEndSec) && requestedEndSec > startSec && requestedEndSec <= unitEndSec
+              ? clampSegmentTime(requestedEndSec, startSec + 0.2, unitEndSec)
+              : unitEndSec;
+          return {
+            sourceStartSec: startSec,
+            sourceEndSec: endSec,
+            headline: String(segment.headline ?? segment.summary ?? `Short ${index + 1}`).trim(),
+            summary: String(segment.summary ?? segment.headline ?? "").trim(),
+            editedText: String(segment.editedText ?? segment.summary ?? segment.headline ?? "").trim() || undefined,
+            sourceExcerpt: String(segment.sourceExcerpt ?? "").trim() || undefined,
+            reason: String(segment.reason ?? "").trim() || undefined,
+            sourceUnitIds
+          };
+        })
+        .filter((segment) => segment.sourceEndSec > segment.sourceStartSec) ?? [];
+    const fallbackRanges: typeof selectedRanges = [];
+    if (selectedRanges.length === 0) {
+      const scoreUnit = (unit: LongformTextTimingUnit, index: number) => {
+        const text = unit.text;
+        const keywordScore = [
+          "하지만",
+          "그러나",
+          "결국",
+          "왜",
+          "진실",
+          "이유",
+          "반전",
+          "문제",
+          "위기",
+          "충격",
+          "핵심",
+          "결론"
+        ].reduce((score, keyword) => score + (text.includes(keyword) ? 8 : 0), 0);
+        const questionScore = /[?？]/.test(text) ? 10 : 0;
+        const lengthScore = Math.min(24, Math.max(0, text.length - 12) * 0.4);
+        const earlyHookScore = index < 2 ? 18 : 0;
+        return keywordScore + questionScore + lengthScore + earlyHookScore;
+      };
+      let usedSec = 0;
+      const candidates = units
+        .map((unit, index) => ({ unit, index, score: scoreUnit(unit, index) }))
+        .sort((a, b) => b.score - a.score || a.unit.startSec - b.unit.startSec);
+      for (const { unit } of candidates) {
+        const durationSec = Math.max(0.1, unit.endSec - unit.startSec);
+        if (usedSec + durationSec > maxDurationSec && fallbackRanges.length > 0) {
+          continue;
+        }
+        fallbackRanges.push({
+          sourceStartSec: unit.startSec,
+          sourceEndSec: Math.min(unit.endSec, unit.startSec + Math.max(0.1, maxDurationSec - usedSec)),
+          headline: unit.text,
+          summary: unit.text,
+          editedText: unit.text,
+          sourceExcerpt: unit.text,
+          sourceUnitIds: [unit.id],
+          reason: undefined
+        });
+        usedSec += durationSec;
+        if (usedSec >= maxDurationSec) {
+          break;
+        }
+      }
+    }
+
+    let outputCursorSec = 0;
+    const orderedRanges =
+      selectedRanges.length > 0
+        ? selectedRanges
+        : fallbackRanges.sort((a, b) => a.sourceStartSec - b.sourceStartSec);
+    const segments = orderedRanges
+      .reduce<LongformToShortformPlan["segments"]>((items, segment, index) => {
+        if (outputCursorSec >= maxDurationSec) {
+          return items;
+        }
+        const sourceDurationSec = Math.max(0.1, segment.sourceEndSec - segment.sourceStartSec);
+        const durationSec = Math.min(sourceDurationSec, maxDurationSec - outputCursorSec);
+        const outputStartSec = outputCursorSec;
+        const outputEndSec = outputStartSec + durationSec;
+        outputCursorSec = outputEndSec;
+        items.push({
+          id: `short-segment-${index + 1}`,
+          sourceStartSec: Number(segment.sourceStartSec.toFixed(3)),
+          sourceEndSec: Number((segment.sourceStartSec + durationSec).toFixed(3)),
+          outputStartSec: Number(outputStartSec.toFixed(3)),
+          outputEndSec: Number(outputEndSec.toFixed(3)),
+          headline: segment.headline || segment.summary || `Short ${index + 1}`,
+          summary: segment.summary || segment.headline || "",
+          editedText: segment.editedText,
+          sourceExcerpt: segment.sourceExcerpt,
+          sourceUnitIds: segment.sourceUnitIds,
+          reason: segment.reason
+        });
+        return items;
+      }, []);
+
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      sourcePackagePath: packagePath,
+      sourceVideoPath,
+      title: aiPlan?.title?.trim() || "Longform Short",
+      summary: aiPlan?.summary?.trim() || segments.map((segment) => segment.summary).join(" "),
+      scriptText: aiPlan?.scriptText?.trim() || segments.map((segment) => segment.editedText || segment.summary).join("\n"),
+      maxDurationSec,
+      targetDurationSec: Number(outputCursorSec.toFixed(3)),
+      units,
+      segments,
+      flowReview: aiPlan?.flowReview ?? {
+        verdict: provider === "local" ? "fallback" : "pass",
+        notes: []
+      },
+      provider,
+      model,
+      rawText
+    };
+  };
+  const createShortformDocumentFromPlan = (
+    sourceDocument: SceneScriptDocument,
+    plan: LongformToShortformPlan
+  ): SceneScriptDocument => {
+    const scenes: SceneScriptItem[] = plan.segments.map((segment, index) => ({
+      sceneNo: index + 1,
+      text: segment.editedText || segment.summary || segment.headline,
+      fluxPrompt: `Shortform highlight from ${segment.sourceStartSec.toFixed(2)}s to ${segment.sourceEndSec.toFixed(2)}s`,
+      motion: "none",
+      startSec: segment.outputStartSec,
+      durationSec: Math.max(0.1, segment.outputEndSec - segment.outputStartSec),
+      backgroundColor: "#000000"
+    }));
+    return {
+      ...sourceDocument,
+      jobId: `${sourceDocument.jobId || "longform"}-shortform-${Date.now()}`,
+      targetDurationSec: Math.max(1, Math.ceil(plan.targetDurationSec)),
+      videoCanvas: {
+        preset: "shorts_9_16",
+        width: 1080,
+        height: 1920
+      },
+      scenes,
+      videoMediaLayers: plan.segments.map((segment, index) => ({
+        id: `short-source-${index + 1}`,
+        mediaType: "video",
+        source: "local",
+        label: `Longform clip ${index + 1}`,
+        localPath: plan.sourceVideoPath,
+        startSec: segment.outputStartSec,
+        durationSec: Math.max(0.1, segment.outputEndSec - segment.outputStartSec),
+        sourceOffsetSec: segment.sourceStartSec,
+        sourceDurationSec: Math.max(0.1, segment.sourceEndSec - segment.sourceStartSec),
+        trackIndex: 0,
+        fit: "cover",
+        opacity: 1,
+        xPct: 50,
+        yPct: 50,
+        widthPct: 100,
+        heightPct: 100,
+        volume: 1,
+        playbackRate: 1,
+        mediaMetadata: {
+          durationSec: Math.max(...plan.segments.map((item) => item.sourceEndSec), 0),
+          hasAudio: true
+        },
+        transition: {
+          style: "fade",
+          placement: "both",
+          durationSec: 0.18
+        },
+        motion: {
+          style: "none",
+          amountPct: 6,
+          focusXPct: 50,
+          focusYPct: 50
+        }
+      })),
+      videoTextOverlays: [],
+      audioLayers: [],
+      cardNews: undefined,
+      aiWorkspace: {
+        targetKind: "video",
+        outputFormat: "shortform",
+        prompt: "Derived from longform timeline text.",
+        materials: [
+          {
+            id: "longform-shortform-plan",
+            kind: "text",
+            label: "Longform to shortform extraction plan",
+            text: plan.summary,
+            order: 0
+          }
+        ]
+      }
+    };
+  };
+  const deriveShortformFromLongform = async (
+    ownerWindow: BrowserWindow | null,
+    request: LongformToShortformRequest
+  ): Promise<LongformToShortformResult> => {
+    const packagePath = request.packagePath?.trim();
+    if (!packagePath || !fs.existsSync(packagePath)) {
+      throw new Error("패키지 경로를 찾지 못했습니다.");
+    }
+    const sourceDocument = productionPackageService.updateSceneScript(packagePath, request.document);
+    const sourceVideoPath = await resolveLongformSourceVideoPath(ownerWindow, packagePath, request.sourceVideoPath);
+    const maxDurationSec = Math.min(89.9, Math.max(5, Number(request.maxDurationSec ?? 89) || 89));
+    const units = buildLongformTimingUnits(packagePath, sourceDocument);
+    if (units.length === 0) {
+      throw new Error("숏폼 추출에 사용할 텍스트 타임라인을 찾지 못했습니다.");
+    }
+    const fallbackPlan = buildFallbackShortformPlan(packagePath, sourceVideoPath, units, maxDurationSec);
+    const timingUnitsPayload = units.map((unit) => ({
+      id: unit.id,
+      startSec: unit.startSec,
+      endSec: unit.endSec,
+      text: unit.text
+    }));
+    const prompt = [
+      "긴 한국어 롱폼 영상에서 90초 미만 숏폼 하이라이트를 뽑는다.",
+      "아래 timingUnits 중 중요한 내용만 골라 JSON만 반환한다.",
+      "반드시 sourceUnitIds를 사용하고, 없는 id를 만들지 않는다.",
+      `전체 길이는 ${maxDurationSec}초 이하여야 한다.`,
+      "먼저 timingUnits의 내용만 사용해서 90초 미만으로 읽을 수 있는 자연스러운 한국어 숏폼 대본 scriptText를 완성한다.",
+      "그 다음 scriptText의 문장 순서에 맞춰 segments를 만든다. segments 순서는 반드시 scriptText의 흐름 순서다.",
+      "원본 순서를 그대로 요약하지 말고, 숏폼 시청 흐름에 맞게 훅 -> 핵심 근거 -> 반전/결론 순서로 재구성한다.",
+      "원본 시간순을 따를 필요는 없다. 뒤쪽 결론을 앞으로 가져오거나, 초반 훅 뒤에 중후반 핵심 근거를 붙여도 된다.",
+      "각 segment는 가능하면 1~3개의 서로 가까운 sourceUnitIds만 사용한다. 멀리 떨어진 unit을 한 segment에 섞지 않는다.",
+      "텍스트 박스 전체가 길거나 군더더기가 있으면, 해당 unit의 startSec/endSec 안에서 sourceStartSec/sourceEndSec를 더 좁혀서 일부만 사용한다.",
+      "sourceStartSec/sourceEndSec는 반드시 선택한 sourceUnitIds 범위 안에 있어야 한다.",
+      "가능하면 5~12개 구간을 고르고, 각 구간 editedText는 scriptText의 해당 문장 또는 문단이어야 한다.",
+      'Schema: {"title":"string","summary":"string","scriptText":"string","segments":[{"sourceUnitIds":["unit-id"],"sourceStartSec":0,"sourceEndSec":1.2,"headline":"string","summary":"string","editedText":"string","sourceExcerpt":"string","reason":"string"}]}',
+      `timingUnits=${JSON.stringify(timingUnitsPayload)}`
+    ].join("\n");
+
+    let plan = fallbackPlan;
+    try {
+      const aiResult = await generateAiWorkspacePlan({
+        prompt,
+        targetKind: "video",
+        fallbackRawText: JSON.stringify({
+          title: request.title || fallbackPlan.title,
+          summary: fallbackPlan.summary,
+          scriptText: fallbackPlan.scriptText,
+          segments: fallbackPlan.segments.map((segment) => ({
+            sourceUnitIds: segment.sourceUnitIds,
+            sourceStartSec: segment.sourceStartSec,
+            sourceEndSec: segment.sourceEndSec,
+            headline: segment.headline,
+            summary: segment.summary,
+            editedText: segment.editedText ?? segment.summary,
+            sourceExcerpt: segment.sourceExcerpt,
+            reason: segment.reason ?? "fallback"
+          })),
+          flowReview: {
+            verdict: "fallback",
+            notes: ["AI planning was not available; used scored fallback units."]
+          }
+        })
+      });
+      if (aiResult.provider === "local") {
+        throw new Error(
+          "AI 설정이 없어 숏폼 재구성을 실행하지 못했습니다. OpenRouter 또는 OpenAI API 키/모델을 설정한 뒤 다시 시도해 주세요."
+        );
+      }
+      const parsed = parseAiJsonObject<{
+        title?: string;
+        summary?: string;
+        scriptText?: string;
+        segments?: Array<Record<string, unknown>>;
+        flowReview?: LongformToShortformPlan["flowReview"];
+      }>(aiResult.rawText, "AI 숏폼 1차 재구성");
+      let finalParsed = parsed;
+      let rawText = aiResult.rawText;
+      try {
+        const reviewPrompt = [
+          "아래는 롱폼에서 추출한 숏폼 초안이다.",
+          "scriptText를 먼저 읽고, 한국어 숏폼 대본으로 자연스러운지 검수한다.",
+          "segments의 editedText 순서가 scriptText와 같은 흐름인지 확인한다.",
+          "어색한 점프, 반복, 앞뒤 설명 부족, 너무 긴 구간을 고친다.",
+          "필요하면 segment를 삭제/재정렬/분할하고, sourceStartSec/sourceEndSec를 sourceUnitIds 범위 안에서 더 좁혀라.",
+          "새 내용을 지어내지 말고 timingUnits에 있는 정보만 사용한다.",
+          `전체 길이는 ${maxDurationSec}초 이하여야 한다.`,
+          'Return schema: {"title":"string","summary":"string","scriptText":"string","flowReview":{"verdict":"pass|revised","notes":["string"]},"segments":[{"sourceUnitIds":["unit-id"],"sourceStartSec":0,"sourceEndSec":1.2,"headline":"string","summary":"string","editedText":"string","sourceExcerpt":"string","reason":"string"}]}',
+          `draft=${JSON.stringify(parsed)}`,
+          `timingUnits=${JSON.stringify(timingUnitsPayload)}`
+        ].join("\n");
+        const reviewResult = await generateAiWorkspacePlan({
+          prompt: reviewPrompt,
+          targetKind: "video",
+          fallbackRawText: JSON.stringify({
+            ...parsed,
+            flowReview: parsed.flowReview ?? {
+              verdict: "pass",
+              notes: ["Flow review fallback used the first-pass plan."]
+            }
+          })
+        });
+        finalParsed = parseAiJsonObject<typeof parsed>(
+          reviewResult.rawText,
+          "AI 숏폼 흐름 검수"
+        );
+        rawText = `${aiResult.rawText}\n\n---FLOW_REVIEW---\n${reviewResult.rawText}`;
+      } catch {
+        finalParsed = {
+          ...parsed,
+          flowReview: parsed.flowReview ?? {
+            verdict: "pass",
+            notes: ["Flow review failed; using first-pass plan."]
+          }
+        };
+      }
+      plan = buildFallbackShortformPlan(
+        packagePath,
+        sourceVideoPath,
+        units,
+        maxDurationSec,
+        rawText,
+        aiResult.provider,
+        aiResult.model,
+        {
+          ...finalParsed,
+          title: request.title || finalParsed.title
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        message.includes("AI 설정이 없어")
+          ? message
+          : `AI 숏폼 재구성에 실패했습니다. OpenRouter/OpenAI 설정과 모델을 확인한 뒤 다시 시도해 주세요. (${message})`
+      );
+    }
+    if (plan.segments.length === 0) {
+      throw new Error("숏폼으로 만들 구간을 선택하지 못했습니다.");
+    }
+
+    const safeStamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const shortformPackagePath = path.join(packagePath, "derived-shorts", `shortform-${safeStamp}`);
+    fs.mkdirSync(shortformPackagePath, { recursive: true });
+    const shortformDocument = createShortformDocumentFromPlan(sourceDocument, plan);
+    const sceneScriptPath = path.join(shortformPackagePath, "scene-script.json");
+    const planPath = path.join(shortformPackagePath, "longform-shortform-plan.json");
+    fs.writeFileSync(sceneScriptPath, JSON.stringify(shortformDocument, null, 2), "utf-8");
+    fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), "utf-8");
+    fs.writeFileSync(
+      path.join(shortformPackagePath, "package.json"),
+      JSON.stringify(
+        {
+          jobId: shortformDocument.jobId,
+          title: plan.title,
+          createdAt: plan.generatedAt,
+          sourcePackagePath: packagePath,
+          sourceVideoPath,
+          outputs: ["scene-script.json", "longform-shortform-plan.json"]
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+
+    return {
+      packagePath: shortformPackagePath,
+      sceneScriptPath,
+      planPath,
+      sourceVideoPath,
+      document: shortformDocument,
+      plan
+    };
+  };
+  const resolveShortformSourcePackagePath = (packagePath: string) => {
+    const normalizedPackagePath = packagePath.trim();
+    const packageJsonPath = path.join(normalizedPackagePath, "package.json");
+    if (!fs.existsSync(packageJsonPath)) {
+      return normalizedPackagePath;
+    }
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+        sourcePackagePath?: string;
+      };
+      const sourcePackagePath = packageJson.sourcePackagePath?.trim();
+      if (sourcePackagePath && fs.existsSync(sourcePackagePath)) {
+        return sourcePackagePath;
+      }
+    } catch {
+      return normalizedPackagePath;
+    }
+    return normalizedPackagePath;
+  };
+  const listDerivedShortformPackages = (packagePath: string): DerivedShortformPackageSummary[] => {
+    const sourcePackagePath = resolveShortformSourcePackagePath(packagePath);
+    const derivedRoot = path.join(sourcePackagePath, "derived-shorts");
+    if (!fs.existsSync(derivedRoot)) {
+      return [];
+    }
+    return fs
+      .readdirSync(derivedRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry): DerivedShortformPackageSummary | undefined => {
+        const shortformPackagePath = path.join(derivedRoot, entry.name);
+        const planPath = path.join(shortformPackagePath, "longform-shortform-plan.json");
+        const packageJsonPath = path.join(shortformPackagePath, "package.json");
+        const draftPath = path.join(shortformPackagePath, "editor-draft.json");
+        const sceneScriptPath = path.join(shortformPackagePath, "scene-script.json");
+        if (!fs.existsSync(sceneScriptPath)) {
+          return undefined;
+        }
+        const plan = fs.existsSync(planPath)
+          ? (() => {
+              try {
+                return JSON.parse(fs.readFileSync(planPath, "utf-8")) as Partial<LongformToShortformPlan>;
+              } catch {
+                return undefined;
+              }
+            })()
+          : undefined;
+        const packageJson = fs.existsSync(packageJsonPath)
+          ? (() => {
+              try {
+                return JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+                  title?: string;
+                  createdAt?: string;
+                  sourceVideoPath?: string;
+                };
+              } catch {
+                return undefined;
+              }
+            })()
+          : undefined;
+        const sceneScript = (() => {
+          try {
+            return JSON.parse(fs.readFileSync(sceneScriptPath, "utf-8")) as Partial<SceneScriptDocument>;
+          } catch {
+            return undefined;
+          }
+        })();
+        const stats = fs.statSync(shortformPackagePath);
+        const draftStats = fs.existsSync(draftPath) ? fs.statSync(draftPath) : undefined;
+        return {
+          packagePath: shortformPackagePath,
+          sourcePackagePath,
+          title: plan?.title ?? packageJson?.title ?? "Shortform draft",
+          createdAt: plan?.generatedAt ?? packageJson?.createdAt ?? stats.birthtime.toISOString(),
+          updatedAt: (draftStats ?? stats).mtime.toISOString(),
+          targetDurationSec: plan?.targetDurationSec ?? sceneScript?.targetDurationSec,
+          segmentCount: plan?.segments?.length ?? sceneScript?.scenes?.length,
+          provider: plan?.provider,
+          model: plan?.model,
+          sourceVideoPath: plan?.sourceVideoPath ?? packageJson?.sourceVideoPath,
+          hasEditorDraft: Boolean(draftStats)
+        };
+      })
+      .filter((item): item is DerivedShortformPackageSummary => Boolean(item))
+      .sort((a, b) => {
+        const aTime = Date.parse(a.updatedAt ?? a.createdAt ?? "") || 0;
+        const bTime = Date.parse(b.updatedAt ?? b.createdAt ?? "") || 0;
+        return bTime - aTime;
+      });
+  };
   const normalizeFfmpegPath = (value: string) => value.replace(/\\/g, "/").replace(/:/, "\\:");
   const escapeFfmpegFilterPath = (value: string) =>
     normalizeFfmpegPath(value).replace(/'/g, "\\'");
@@ -2671,8 +3314,173 @@ export function registerAutomationIpc(
   };
   const buildEnableBetween = (startSec: number, endSec: number) =>
     `between(t\\,${startSec.toFixed(3)}\\,${endSec.toFixed(3)})`;
+  const normalizeElementTransition = (transition?: SceneScriptElementTransition): SceneScriptElementTransition => ({
+    style: transition?.style ?? "none",
+    placement: transition?.placement ?? "both",
+    durationSec: clampNumber(Number(transition?.durationSec ?? 0.55), 0.05, 3)
+  });
+  const normalizeMediaMotion = (motion?: SceneScriptVideoMediaMotion): SceneScriptVideoMediaMotion => ({
+    style: motion?.style ?? "none",
+    amountPct: clampNumber(Number(motion?.amountPct ?? 6), 1, 20),
+    focusXPct: clampNumber(Number(motion?.focusXPct ?? 50), 0, 100),
+    focusYPct: clampNumber(Number(motion?.focusYPct ?? 50), 0, 100)
+  });
+  const normalizeMediaPlaybackRate = (value?: number) =>
+    clampNumber(Number(value ?? 1), 1, 2);
+  const shouldRunTransitionPhase = (
+    transition: SceneScriptElementTransition,
+    phase: "in" | "out"
+  ) => transition.style !== "none" && (transition.placement === phase || transition.placement === "both");
+  const buildTransitionExpr = (
+    startSec: number,
+    durationSec: number,
+    transitionDurationSec: number,
+    inValue: string,
+    outValue: string
+  ) => {
+    const endSec = startSec + durationSec;
+    return {
+      inExpr: `if(${buildEnableBetween(startSec, startSec + transitionDurationSec)}\\,${inValue}\\,0)`,
+      outExpr: `if(${buildEnableBetween(endSec - transitionDurationSec, endSec)}\\,${outValue}\\,0)`
+    };
+  };
+  const buildMediaTransitionFilters = (
+    transition: SceneScriptElementTransition | undefined,
+    startSec: number,
+    durationSec: number
+  ) => {
+    const normalized = normalizeElementTransition(transition);
+    if (normalized.style === "none") {
+      return "";
+    }
+    const transitionDurationSec = Math.min(normalized.durationSec, Math.max(0.05, durationSec / 2));
+    const fadeDurationSec = Math.min(transitionDurationSec, 0.45);
+    const filters: string[] = [];
+    if (shouldRunTransitionPhase(normalized, "in")) {
+      filters.push(`fade=t=in:st=${startSec.toFixed(3)}:d=${fadeDurationSec.toFixed(3)}:alpha=1`);
+    }
+    if (shouldRunTransitionPhase(normalized, "out")) {
+      filters.push(
+        `fade=t=out:st=${(startSec + durationSec - fadeDurationSec).toFixed(3)}:d=${fadeDurationSec.toFixed(3)}:alpha=1`
+      );
+    }
+    return filters.length > 0 ? `,${filters.join(",")}` : "";
+  };
+  const buildMediaMotionFilter = (
+    motion: SceneScriptVideoMediaMotion | undefined,
+    layerWidth: number,
+    layerHeight: number,
+    durationSec: number
+  ) => {
+    const normalized = normalizeMediaMotion(motion);
+    if (normalized.style === "none") {
+      return "";
+    }
+    const amount = (normalized.amountPct / 100).toFixed(6);
+    const duration = Math.max(0.1, durationSec).toFixed(6);
+    const progress = `min(1\\,max(0\\,t/${duration}))`;
+    const zoom =
+      normalized.style === "slow-zoom-out"
+        ? `(1+${amount}*(1-${progress}))`
+        : `(1+${amount}*${progress})`;
+    const focusX = ((normalized.focusXPct ?? 50) / 100).toFixed(6);
+    const focusY = ((normalized.focusYPct ?? 50) / 100).toFixed(6);
+    return `scale=w='${layerWidth}*${zoom}':h='${layerHeight}*${zoom}':eval=frame,crop=${layerWidth}:${layerHeight}:'${layerWidth}*(${zoom}-1)*${focusX}':'${layerHeight}*(${zoom}-1)*${focusY}'`;
+  };
+  const buildOverlayTransitionPosition = (
+    baseX: number,
+    baseY: number,
+    layerWidth: number,
+    layerHeight: number,
+    transition: SceneScriptElementTransition | undefined,
+    startSec: number,
+    durationSec: number
+  ) => {
+    const normalized = normalizeElementTransition(transition);
+    if (!normalized.style.startsWith("slide-")) {
+      return { x: String(baseX), y: String(baseY) };
+    }
+    const transitionDurationSec = Math.min(normalized.durationSec, Math.max(0.05, durationSec / 2));
+    const offsetX =
+      normalized.style === "slide-left"
+        ? Math.max(18, Math.min(44, Math.round(layerWidth * 0.08)))
+        : normalized.style === "slide-right"
+          ? -Math.max(18, Math.min(44, Math.round(layerWidth * 0.08)))
+          : 0;
+    const offsetY =
+      normalized.style === "slide-up"
+        ? Math.max(18, Math.min(44, Math.round(layerHeight * 0.08)))
+        : normalized.style === "slide-down"
+          ? -Math.max(18, Math.min(44, Math.round(layerHeight * 0.08)))
+          : 0;
+    const expr = buildTransitionExpr(
+      startSec,
+      durationSec,
+      transitionDurationSec,
+      `pow(max(0\\,1-(t-${startSec.toFixed(3)})/${transitionDurationSec.toFixed(3)})\\,3)`,
+      `pow(max(0\\,(t-${(startSec + durationSec - transitionDurationSec).toFixed(3)})/${transitionDurationSec.toFixed(3)})\\,3)`
+    );
+    const xParts = [String(baseX)];
+    const yParts = [String(baseY)];
+    if (offsetX && shouldRunTransitionPhase(normalized, "in")) {
+      xParts.push(`${offsetX}*${expr.inExpr}`);
+    }
+    if (offsetX && shouldRunTransitionPhase(normalized, "out")) {
+      xParts.push(`${-offsetX}*${expr.outExpr}`);
+    }
+    if (offsetY && shouldRunTransitionPhase(normalized, "in")) {
+      yParts.push(`${offsetY}*${expr.inExpr}`);
+    }
+    if (offsetY && shouldRunTransitionPhase(normalized, "out")) {
+      yParts.push(`${-offsetY}*${expr.outExpr}`);
+    }
+    return { x: xParts.join("+"), y: yParts.join("+") };
+  };
+  const buildAssTransitionTags = (
+    overlay: { startSec: number; durationSec: number; centerX: number; centerY: number; transition?: SceneScriptElementTransition }
+  ) => {
+    const transition = normalizeElementTransition(overlay.transition);
+    if (transition.style === "none") {
+      return "";
+    }
+    const transitionDurationMs = Math.round(Math.min(transition.durationSec, Math.max(0.05, overlay.durationSec / 2)) * 1000);
+    if (transition.style === "fade") {
+      return `\\fad(${shouldRunTransitionPhase(transition, "in") ? transitionDurationMs : 0},${shouldRunTransitionPhase(transition, "out") ? transitionDurationMs : 0})`;
+    }
+    const offsetX =
+      transition.style === "slide-left"
+        ? 34
+        : transition.style === "slide-right"
+          ? -34
+          : 0;
+    const offsetY =
+      transition.style === "slide-up"
+        ? 34
+        : transition.style === "slide-down"
+          ? -34
+          : 0;
+    if (shouldRunTransitionPhase(transition, "in") && !shouldRunTransitionPhase(transition, "out")) {
+      return `\\move(${overlay.centerX + offsetX},${overlay.centerY + offsetY},${overlay.centerX},${overlay.centerY},0,${transitionDurationMs})`;
+    }
+    if (shouldRunTransitionPhase(transition, "out") && !shouldRunTransitionPhase(transition, "in")) {
+      const startMs = Math.max(0, Math.round((overlay.durationSec * 1000) - transitionDurationMs));
+      return `\\move(${overlay.centerX},${overlay.centerY},${overlay.centerX - offsetX},${overlay.centerY - offsetY},${startMs},${Math.round(overlay.durationSec * 1000)})`;
+    }
+    return `\\fad(${transitionDurationMs},${transitionDurationMs})`;
+  };
   const getExportFontScale = (canvasWidth: number, canvasHeight: number) =>
-    Math.max(1, Math.min(5, Math.min(canvasWidth, canvasHeight) / 360));
+    Math.max(1, Math.min(4.5, Math.min(canvasWidth, canvasHeight) / 420));
+  const getExportOutlineWidth = (outlineThickness: number, fontScale: number, fontSize: number) =>
+    Math.max(
+      0,
+      Math.round(
+        Math.min(
+          8,
+          fontSize * 0.12,
+          Math.max(0, outlineThickness) * fontScale * 0.45
+        )
+      )
+    );
   const normalizeExportText = (value?: string) =>
     (value ?? "")
       .replace(/\r\n?/g, "\n")
@@ -2733,9 +3541,9 @@ export function registerAutomationIpc(
     }
     return lines;
   };
-  const wrapAssTextToBox = (value: string, boxWidth: number, fontSize: number, outlineWidth: number) => {
+  const wrapAssTextToBox = (value: string, boxWidth: number, fontSize: number) => {
     const normalized = normalizeExportText(value);
-    const maxUnits = Math.max(2, (boxWidth - outlineWidth * 2) / Math.max(1, fontSize));
+    const maxUnits = Math.max(2, boxWidth / Math.max(1, fontSize));
     return normalized
       .split("\n")
       .map((paragraph) => {
@@ -2790,6 +3598,7 @@ export function registerAutomationIpc(
       textColor?: string;
       outlineColor?: string;
       text: string;
+      transition?: SceneScriptElementTransition;
     }>;
   }) => {
     const lines = [
@@ -2810,16 +3619,19 @@ export function registerAutomationIpc(
     options.overlays.forEach((overlay) => {
       const start = secondsToAssTime(overlay.startSec);
       const end = secondsToAssTime(overlay.startSec + overlay.durationSec);
-      const text = escapeAssText(wrapAssTextToBox(overlay.text, overlay.boxWidth, overlay.fontSize, overlay.outlineWidth));
+      const text = escapeAssText(wrapAssTextToBox(overlay.text, overlay.boxWidth, overlay.fontSize));
       if (!text.trim()) {
         return;
       }
+      const transitionTags = buildAssTransitionTags(overlay);
       const tags = [
         "\\an5",
         "\\q2",
-        `\\pos(${overlay.centerX},${overlay.centerY})`,
+        transitionTags,
+        transitionTags.startsWith("\\move") ? "" : `\\pos(${overlay.centerX},${overlay.centerY})`,
         `\\fs${overlay.fontSize}`,
         `\\bord${overlay.outlineWidth}`,
+        overlay.outlineWidth > 0 ? "\\blur0.45" : "",
         "\\shad0",
         `\\c${hexToAssColor(overlay.textColor)}`,
         `\\3c${hexToAssColor(overlay.outlineColor, "000000")}`
@@ -2988,6 +3800,7 @@ export function registerAutomationIpc(
       sourceDurationSec: number | null;
       requestedOffsetSec: number;
       effectiveOffsetSec: number;
+      playbackRate: number;
       sourceBrightness: number | null;
     }> = [];
     const audioInputs: Array<{ layer: SceneScriptAudioLayer; inputIndex: number; filePath: string }> = [];
@@ -2999,6 +3812,11 @@ export function registerAutomationIpc(
       }
       const inputIndex = args.filter((item) => item === "-i").length;
       const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      const playbackRate = layer.mediaType === "video" ? normalizeMediaPlaybackRate(layer.playbackRate) : 1;
+      const sourceReadDurationSec = Math.max(
+        0.1,
+        Number(layer.sourceDurationSec ?? durationSec * playbackRate) || durationSec * playbackRate
+      );
       let sourceDurationSec: number | null = null;
       let requestedOffsetSec = 0;
       let effectiveOffsetSec = 0;
@@ -3016,7 +3834,7 @@ export function registerAutomationIpc(
           "-ss",
           effectiveOffsetSec.toFixed(3),
           "-t",
-          durationSec.toFixed(3),
+          sourceReadDurationSec.toFixed(3),
           "-i",
           filePath
         );
@@ -3029,6 +3847,7 @@ export function registerAutomationIpc(
         sourceDurationSec,
         requestedOffsetSec,
         effectiveOffsetSec,
+        playbackRate,
         sourceBrightness
       });
     }
@@ -3068,10 +3887,14 @@ export function registerAutomationIpc(
     });
     currentVideo = sceneVideo;
 
-    mediaInputs.forEach(({ layer, inputIndex, sourceDurationSec, requestedOffsetSec, effectiveOffsetSec, sourceBrightness }, index) => {
+    mediaInputs.forEach(({ layer, inputIndex, sourceDurationSec, requestedOffsetSec, effectiveOffsetSec, playbackRate, sourceBrightness }, index) => {
       const layout = buildVideoMediaLayerExportLayout(layer, canvasWidth, canvasHeight);
       const startSec = Math.max(0, Number(layer.startSec) || 0);
       const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      const sourceReadDurationSec = Math.max(
+        0.1,
+        Number(layer.sourceDurationSec ?? durationSec * playbackRate) || durationSec * playbackRate
+      );
       const sourceCrop = resolveLayerSourceCrop(layer);
       const hasSourceCrop = hasPercentCrop(sourceCrop);
       const sourceCropFilter = hasSourceCrop
@@ -3094,8 +3917,24 @@ export function registerAutomationIpc(
       const fittedMediaOut = `mediafit${index}`;
       const mediaOut = `media${index}`;
       const overlayOut = `vover${index}`;
+      const motionFilter = buildMediaMotionFilter(
+        layer.motion,
+        layout.layerWidth,
+        layout.layerHeight,
+        durationSec
+      );
+      const transitionFilters = buildMediaTransitionFilters(layer.transition, startSec, durationSec);
+      const overlayPosition = buildOverlayTransitionPosition(
+        layout.visibleX,
+        layout.visibleY,
+        layout.visibleLayerWidth,
+        layout.visibleLayerHeight,
+        layer.transition,
+        startSec,
+        durationSec
+      );
       filterParts.push(
-        `[${inputIndex}:v]trim=start=0:duration=${durationSec.toFixed(3)},fps=30,${hasSourceCrop ? `${sourceCropFilter},` : ""}${fitFilter},format=rgba,colorchannelmixer=aa=${clampNumber(Number(layer.opacity ?? 1), 0, 1).toFixed(3)},setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB[${fittedMediaOut}]`
+        `[${inputIndex}:v]trim=start=0:duration=${sourceReadDurationSec.toFixed(3)},fps=30,${hasSourceCrop ? `${sourceCropFilter},` : ""}${fitFilter}${motionFilter ? `,${motionFilter}` : ""},format=rgba,colorchannelmixer=aa=${clampNumber(Number(layer.opacity ?? 1), 0, 1).toFixed(3)},setpts=(PTS-STARTPTS)/${playbackRate.toFixed(3)}+${startSec.toFixed(3)}/TB${transitionFilters}[${fittedMediaOut}]`
       );
       if (hasLayerCrop) {
         filterParts.push(
@@ -3103,7 +3942,7 @@ export function registerAutomationIpc(
         );
       }
       filterParts.push(
-        `[${currentVideo}][${hasLayerCrop ? mediaOut : fittedMediaOut}]overlay=x=${layout.visibleX}:y=${layout.visibleY}:eof_action=pass:repeatlast=0:enable='${buildEnableBetween(startSec, startSec + durationSec)}'[${overlayOut}]`
+        `[${currentVideo}][${hasLayerCrop ? mediaOut : fittedMediaOut}]overlay=x='${overlayPosition.x}':y='${overlayPosition.y}':eof_action=pass:repeatlast=0:enable='${buildEnableBetween(startSec, startSec + durationSec)}'[${overlayOut}]`
       );
       exportDebugEntries.push({
         kind: "media",
@@ -3115,6 +3954,7 @@ export function registerAutomationIpc(
         durationSec,
         requestedOffsetSec,
         effectiveOffsetSec,
+        playbackRate,
         sourceDurationSec,
         sourceBrightness,
         blackFrameWarning: layer.mediaType === "video" && sourceBrightness !== null && sourceBrightness < 12,
@@ -3129,6 +3969,8 @@ export function registerAutomationIpc(
           pct: layout.frameCrop,
           px: layout.frameCropPx
         },
+        transition: normalizeElementTransition(layer.transition),
+        motion: normalizeMediaMotion(layer.motion),
         pct: { xPct: layer.xPct, yPct: layer.yPct, widthPct: layer.widthPct, heightPct: layer.heightPct }
       });
       currentVideo = overlayOut;
@@ -3146,7 +3988,11 @@ export function registerAutomationIpc(
       const centerX = Math.round(boxX + boxWidth / 2);
       const centerY = Math.round(boxY + boxHeight / 2);
       const fontSize = Math.max(8, Math.round((Number(overlay.fontSize) || 21) * fontScale));
-      const outlineWidth = Math.max(0, Math.round((Number(overlay.outlineThickness ?? 0) || 0) * fontScale));
+      const outlineWidth = getExportOutlineWidth(
+        Number(overlay.outlineThickness ?? 0) || 0,
+        fontScale,
+        fontSize
+      );
       assOverlays.push({
         startSec,
         durationSec,
@@ -3157,7 +4003,8 @@ export function registerAutomationIpc(
         outlineWidth,
         textColor: overlay.textColor,
         outlineColor: overlay.outlineColor,
-        text: overlay.text ?? ""
+        text: overlay.text ?? "",
+        transition: overlay.transition
       });
       exportDebugEntries.push({
         kind: "text",
@@ -3168,6 +4015,7 @@ export function registerAutomationIpc(
         fontSize,
         fontScale,
         outlineWidth,
+        transition: normalizeElementTransition(overlay.transition),
         renderer: "ass-subtitles"
       });
     });
@@ -3195,19 +4043,23 @@ export function registerAutomationIpc(
       );
       audioLabels.push(label);
     }
-    for (const { layer, inputIndex, hasAudio } of mediaInputs) {
+    for (const { layer, inputIndex, hasAudio, playbackRate } of mediaInputs) {
       if (!hasAudio) {
         continue;
       }
       const label = `maud${audioIndex++}`;
       const startMs = Math.max(0, Math.round((Number(layer.startSec) || 0) * 1000));
       const durationSec = Math.max(0.1, Number(layer.durationSec) || 0.1);
+      const sourceReadDurationSec = Math.max(
+        0.1,
+        Number(layer.sourceDurationSec ?? durationSec * playbackRate) || durationSec * playbackRate
+      );
       filterParts.push(
-        `[${inputIndex}:a]atrim=start=0:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume=${clampNumber(Number(layer.volume ?? 1), 0, 4).toFixed(3)},adelay=${startMs}:all=1[${label}]`
+        `[${inputIndex}:a]atrim=start=0:duration=${sourceReadDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,atempo=${playbackRate.toFixed(3)},volume=${clampNumber(Number(layer.volume ?? 1), 0, 4).toFixed(3)},adelay=${startMs}:all=1[${label}]`
       );
       audioLabels.push(label);
     }
-    filterParts.push(`${audioLabels.map((label) => `[${label}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0[aout]`);
+    filterParts.push(`${audioLabels.map((label) => `[${label}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0:normalize=0[aout]`);
 
     const filterComplex = filterParts.join(";");
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -3301,6 +4153,18 @@ export function registerAutomationIpc(
       }
       return buildVideoEditorExport(request, saveResult.filePath);
     }
+  );
+  ipcMain.handle(
+    "automation:create:deriveShortformFromLongform",
+    async (event, request: LongformToShortformRequest): Promise<LongformToShortformResult> => {
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      return deriveShortformFromLongform(ownerWindow, request);
+    }
+  );
+  ipcMain.handle(
+    "automation:create:listDerivedShortformPackages",
+    (_event, packagePath: string): DerivedShortformPackageSummary[] =>
+      listDerivedShortformPackages(packagePath)
   );
   ipcMain.handle(
     "automation:create:updateSceneScript",

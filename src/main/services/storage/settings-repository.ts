@@ -13,6 +13,7 @@ const SECRET_KEYS = [
   "pexelsApiKey",
   "freesoundApiKey",
   "azureSpeechKey",
+  "elevenLabsApiKey",
   "manusApiKey",
   "youtubeOAuthClientSecret",
   "instagramAccessToken"

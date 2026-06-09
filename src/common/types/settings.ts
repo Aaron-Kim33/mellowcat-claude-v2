@@ -29,6 +29,7 @@ export interface AppSettings {
   azureSpeechKey?: string;
   azureSpeechRegion?: string;
   azureSpeechVoice?: string;
+  elevenLabsApiKey?: string;
   manusApiKey?: string;
   mediaAnalysisPolicy?: "text_only" | "vision_on_demand";
   youtubeChannelLabel?: string;

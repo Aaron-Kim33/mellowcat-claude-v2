@@ -48,6 +48,7 @@ export function SettingsPage() {
   const [azureSpeechKey, setAzureSpeechKey] = useState("");
   const [azureSpeechRegion, setAzureSpeechRegion] = useState("");
   const [azureSpeechVoice, setAzureSpeechVoice] = useState("ko-KR-SunHiNeural");
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState("");
   const [manusApiKey, setManusApiKey] = useState("");
 
   const [showOpenRouterApiKey, setShowOpenRouterApiKey] = useState(false);
@@ -56,6 +57,7 @@ export function SettingsPage() {
     useState(false);
   const [showSecondaryOpenAiApiKey, setShowSecondaryOpenAiApiKey] = useState(false);
   const [showAzureSpeechKey, setShowAzureSpeechKey] = useState(false);
+  const [showElevenLabsApiKey, setShowElevenLabsApiKey] = useState(false);
   const [showManusApiKey, setShowManusApiKey] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -90,6 +92,7 @@ export function SettingsPage() {
     setAzureSpeechKey(settings?.azureSpeechKey ?? "");
     setAzureSpeechRegion(settings?.azureSpeechRegion ?? "");
     setAzureSpeechVoice(settings?.azureSpeechVoice ?? "ko-KR-SunHiNeural");
+    setElevenLabsApiKey(settings?.elevenLabsApiKey ?? "");
     setManusApiKey(settings?.manusApiKey ?? "");
   }, [settings]);
 
@@ -115,6 +118,7 @@ export function SettingsPage() {
       azureSpeechKey: azureSpeechKey.trim() || undefined,
       azureSpeechRegion: azureSpeechRegion.trim() || undefined,
       azureSpeechVoice: azureSpeechVoice.trim() || undefined,
+      elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
       manusApiKey: manusApiKey.trim() || undefined
     });
     await saveWorkflowConfig({
@@ -545,6 +549,36 @@ export function SettingsPage() {
                 onChange={(event) => setAzureSpeechVoice(event.target.value)}
                 placeholder="ko-KR-SunHiNeural"
               />
+            </label>
+          </div>
+        </div>
+
+        <div className="manual-install-box">
+          <strong>{isKorean ? "ElevenLabs 더빙" : "ElevenLabs dubbing"}</strong>
+          <p className="subtle">
+            {isKorean
+              ? "영상 편집 보이스 제공자를 elevenlabs로 선택하면 이 API 키와 Voice ID로 실제 ElevenLabs TTS를 호출합니다."
+              : "When the video editor voice provider is elevenlabs, this API key and the Voice ID are used for real ElevenLabs TTS."}
+          </p>
+          <div className="form-grid">
+            <label className="field field-span-2">
+              <span>ElevenLabs API Key</span>
+              <div className="secret-input-row">
+                <input
+                  className="text-input"
+                  type={showElevenLabsApiKey ? "text" : "password"}
+                  value={elevenLabsApiKey}
+                  onChange={(event) => setElevenLabsApiKey(event.target.value)}
+                  placeholder="sk_..."
+                />
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setShowElevenLabsApiKey((value) => !value)}
+                >
+                  {showElevenLabsApiKey ? (isKorean ? "숨기기" : "Hide") : isKorean ? "보기" : "Show"}
+                </button>
+              </div>
             </label>
           </div>
         </div>
